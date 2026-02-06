@@ -1,0 +1,168 @@
+#version 450
+
+layout(local_size_x = 256) in;
+
+// Must match engine::particles::GpuParticle (32 bytes, std430)
+struct Particle {
+    vec2 pos;           // world pixel position
+    vec2 vel;           // pixels/sec
+    uint material;      // CA material ID
+    float lifetime;     // seconds remaining
+    uint flags;         // 0=dead, 1=alive, 2=reintegrate
+    float _pad;
+};
+
+layout(std430, binding = 3) buffer ParticleBuffer {
+    Particle particles[];
+};
+
+layout(std430, binding = 4) buffer DeadListBuffer {
+    uint dead_count;
+    uint dead_indices[];
+};
+
+// Pixel data SSBO (readonly)
+layout(std430, binding = 0) readonly buffer PixelBufferRead {
+    uint pixels_read[];
+};
+
+uniform float u_dt;
+uniform float u_gravity_x;
+uniform float u_gravity_y;
+uniform int   u_grid_width;
+uniform int   u_grid_height;
+uniform uint  u_max_particles;
+uniform uint  u_pixel_size;  // bytes per pixel
+
+// Collision parameters
+const float BOUNCE_FACTOR    = 0.3;
+const float SETTLE_SPEED     = 10.0;  // pixels/sec — below this, particle settles
+const float MAX_SPEED        = 800.0; // pixels/sec clamp
+
+// Load pixel from SSBO and extract material ID (byte 0)
+uint loadMaterial(int wx, int wy) {
+    uint idx = uint(wy) * uint(u_grid_width) + uint(wx);
+    uint byte_offset = idx * u_pixel_size;
+    uint word_offset = byte_offset / 4u;
+    uint byte_in_word = byte_offset % 4u;
+
+    uint packed = pixels_read[word_offset];
+    if (byte_in_word != 0u) {
+        uint next_word = pixels_read[word_offset + 1u];
+        uint shift_bits = byte_in_word * 8u;
+        packed = (packed >> shift_bits) | (next_word << (32u - shift_bits));
+    }
+
+    // Material is in the first byte (byte 0)
+    return packed & 0xFFu;
+}
+
+bool is_solid(int wx, int wy) {
+    if (wx < 0 || wx >= u_grid_width) return true;
+    if (wy < 0 || wy >= u_grid_height) return true;
+    return loadMaterial(wx, wy) != 0u;
+}
+
+void kill_particle(uint idx, inout Particle p) {
+    p.flags = 0u;
+    uint slot = atomicAdd(dead_count, 1u);
+    if (slot < u_max_particles) {
+        dead_indices[slot] = idx;
+    }
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= u_max_particles) return;
+
+    Particle p = particles[idx];
+    if (p.flags == 0u) return; // dead
+
+    // Decrement lifetime
+    p.lifetime -= u_dt;
+    if (p.lifetime <= 0.0) {
+        kill_particle(idx, p);
+        particles[idx] = p;
+        return;
+    }
+
+    // Symplectic Euler: update velocity, then position
+    p.vel.x += u_gravity_x * u_dt;
+    p.vel.y += u_gravity_y * u_dt;
+
+    // Clamp speed
+    float speed = length(p.vel);
+    if (speed > MAX_SPEED) {
+        p.vel = (p.vel / speed) * MAX_SPEED;
+    }
+
+    // DDA ray march along velocity to detect grid collision
+    vec2 displacement = p.vel * u_dt;
+    float dist = length(displacement);
+
+    if (dist < 0.01) {
+        // Barely moving — just check current cell
+        int cx = int(floor(p.pos.x));
+        int cy = int(floor(p.pos.y));
+        if (is_solid(cx, cy)) {
+            // Embedded in terrain — flag for reintegration
+            p.flags = 2u;
+        }
+        particles[idx] = p;
+        return;
+    }
+
+    vec2 dir = displacement / dist;
+    int steps = int(ceil(dist));
+    steps = min(steps, 128); // safety cap
+    float step_len = dist / float(steps);
+
+    bool hit = false;
+    vec2 pre_hit_pos = p.pos;
+
+    for (int i = 1; i <= steps; i++) {
+        vec2 sample_pos = p.pos + dir * (step_len * float(i));
+        int sx = int(floor(sample_pos.x));
+        int sy = int(floor(sample_pos.y));
+
+        if (is_solid(sx, sy)) {
+            hit = true;
+            pre_hit_pos = p.pos + dir * (step_len * float(i - 1));
+
+            // Determine collision normal from neighboring cells
+            int px_i = int(floor(pre_hit_pos.x));
+            int py_i = int(floor(pre_hit_pos.y));
+
+            vec2 normal = vec2(0.0);
+            bool nx_free = !is_solid(px_i, sy);
+            bool ny_free = !is_solid(sx, py_i);
+
+            if (nx_free && !ny_free) {
+                // Horizontal collision
+                normal = vec2(dir.x > 0.0 ? -1.0 : 1.0, 0.0);
+            } else if (ny_free && !nx_free) {
+                // Vertical collision
+                normal = vec2(0.0, dir.y > 0.0 ? -1.0 : 1.0);
+            } else {
+                // Corner or ambiguous — reflect back
+                normal = -dir;
+            }
+
+            // Bounce
+            p.pos = pre_hit_pos;
+            p.vel = reflect(p.vel, normalize(normal)) * BOUNCE_FACTOR;
+
+            // If speed is low enough, settle (reintegrate into grid)
+            if (length(p.vel) < SETTLE_SPEED) {
+                p.flags = 2u; // mark for reintegration
+            }
+            break;
+        }
+    }
+
+    if (!hit) {
+        p.pos += displacement;
+    }
+
+    particles[idx] = p;
+}

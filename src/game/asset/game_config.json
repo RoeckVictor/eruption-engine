@@ -1,0 +1,16 @@
+{
+    "scene": {
+        "grid_width": 2048,
+        "grid_height": 1024,
+        "floor_thickness": 16
+    },
+    "player": {
+        "body_width": 6,
+        "body_height": 12,
+        "spawn_offset_y": 6
+    },
+    "camera": {
+        "initial_zoom": 3.0,
+        "smoothing": 8.0
+    }
+}

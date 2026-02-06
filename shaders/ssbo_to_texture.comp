@@ -1,0 +1,54 @@
+#version 450 core
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Pixel data SSBO (read)
+// Layout: contiguous array of pixel structs, each pixel_size bytes
+// Byte 0 = material, Byte 1 = category, Byte 2 = temperature, Byte 3 = flags
+layout(std430, binding = 0) readonly buffer PixelBuffer {
+    uint pixel_data[];
+};
+
+// Render texture (write)
+layout(rgba8ui, binding = 0) writeonly uniform uimage2D u_render_texture;
+
+uniform int u_grid_width;
+uniform int u_grid_height;
+uniform uint u_pixel_size;  // bytes per pixel (minimum 4)
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+
+    // Bounds check
+    if (pos.x >= u_grid_width || pos.y >= u_grid_height) return;
+
+    // Calculate byte offset into SSBO
+    uint pixel_idx = uint(pos.y) * uint(u_grid_width) + uint(pos.x);
+
+    // Read the first 4 bytes of the pixel (core engine data)
+    // SSBO is indexed by uint32, so we need to handle byte access
+    uint byte_offset = pixel_idx * u_pixel_size;
+    uint word_offset = byte_offset / 4u;
+    uint byte_in_word = byte_offset % 4u;
+
+    // Read the uint32 containing our pixel's first 4 bytes
+    uint packed = pixel_data[word_offset];
+
+    // Handle misaligned access (when pixel_size is not multiple of 4)
+    if (byte_in_word != 0u) {
+        // Pixel straddles two uint32s - need to combine
+        uint next_word = pixel_data[word_offset + 1u];
+        uint shift_bits = byte_in_word * 8u;
+        packed = (packed >> shift_bits) | (next_word << (32u - shift_bits));
+    }
+
+    // Extract individual bytes
+    uint material    = (packed >>  0) & 0xFFu;
+    uint category    = (packed >>  8) & 0xFFu;
+    uint temperature = (packed >> 16) & 0xFFu;
+    uint flags       = (packed >> 24) & 0xFFu;
+
+    // Write to render texture
+    // The render shader only uses the R channel (material) for palette lookup
+    imageStore(u_render_texture, pos, uvec4(material, category, temperature, flags));
+}

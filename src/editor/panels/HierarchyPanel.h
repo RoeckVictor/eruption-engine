@@ -1,0 +1,29 @@
+#pragma once
+
+#include "Panel.h"
+#include <entt/entt.hpp>
+
+namespace editor {
+
+class EditorContext;
+
+/// Hierarchy panel showing the scene entity tree.
+class HierarchyPanel : public Panel {
+public:
+    explicit HierarchyPanel(EditorContext& context);
+
+    void on_gui() override;
+
+private:
+    void render_toolbar();
+    void render_entity_tree();
+    void render_entity_node(entt::entity entity, int depth = 0);
+
+    EditorContext& m_context;
+    char m_filter[128] = "";
+    entt::entity m_renaming_entity = entt::null;
+    char m_rename_buffer[128] = "";
+    bool m_focus_rename = false;  // Flag to set focus on next frame
+};
+
+} // namespace editor

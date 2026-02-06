@@ -1,0 +1,24 @@
+{
+  "physics": {
+    "max_fixed_steps": 8,
+    "gravity_x": 0.0,
+    "gravity_y": -9.81,
+    "pixels_per_meter": 32.0,
+    "terrain_chunk_size": 64
+  },
+  "timing": {
+    "max_delta_time": 0.1,
+    "fixed_timestep": 0.016666666
+  },
+  "simulation": {
+    "max_material_slots": 256,
+    "workgroup_size": 8
+  },
+  "graphics": {
+    "clear_color": [0.1, 0.1, 0.15]
+  },
+  "assets": {
+    "base_path": "Assets",
+    "hot_reload_poll_interval": 1.0
+  }
+}

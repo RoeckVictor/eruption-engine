@@ -1,0 +1,113 @@
+#version 450
+
+layout(local_size_x = 256) in;
+
+struct Particle {
+    vec2 pos;
+    vec2 vel;
+    uint material;
+    float lifetime;
+    uint flags;         // 0=dead, 1=alive, 2=reintegrate
+    float _pad;
+};
+
+layout(std430, binding = 3) buffer ParticleBuffer {
+    Particle particles[];
+};
+
+layout(std430, binding = 4) buffer DeadListBuffer {
+    uint dead_count;
+    uint dead_indices[];
+};
+
+// Material properties SSBO for category lookup
+layout(std430, binding = 2) readonly buffer MaterialTable {
+    uint mat_props[512];
+};
+
+// Both pixel SSBOs (write to both to keep ping-pong in sync)
+layout(std430, binding = 0) buffer PixelBufferA {
+    uint pixels_a[];
+};
+
+layout(std430, binding = 1) buffer PixelBufferB {
+    uint pixels_b[];
+};
+
+uniform int  u_grid_width;
+uniform int  u_grid_height;
+uniform uint u_max_particles;
+uniform uint u_pixel_size;  // bytes per pixel
+
+// Get category from material SSBO (same packing as sim_step.comp)
+uint getCategory(uint id) { return (mat_props[id * 2u] >> 8) & 0x0Fu; }
+uint getDefaultTemp(uint id) { return (mat_props[id * 2u + 1u] >> 16) & 0xFFu; }
+
+// Pack pixel data (material, category, temperature, flags) into uint
+uint packPixel(uint material, uint category, uint temperature, uint flags) {
+    return (material & 0xFFu) | ((category & 0xFFu) << 8) | ((temperature & 0xFFu) << 16) | ((flags & 0xFFu) << 24);
+}
+
+// Load pixel from SSBO and extract material ID (byte 0)
+uint loadMaterial(uint wx, uint wy) {
+    uint idx = wy * uint(u_grid_width) + wx;
+    uint byte_offset = idx * u_pixel_size;
+    uint word_offset = byte_offset / 4u;
+    uint byte_in_word = byte_offset % 4u;
+
+    uint packed = pixels_a[word_offset];
+    if (byte_in_word != 0u) {
+        uint next_word = pixels_a[word_offset + 1u];
+        uint shift_bits = byte_in_word * 8u;
+        packed = (packed >> shift_bits) | (next_word << (32u - shift_bits));
+    }
+
+    return packed & 0xFFu;
+}
+
+// Store pixel to both SSBOs (for aligned 4-byte pixels)
+void storePixelBoth(uint wx, uint wy, uint material, uint category, uint temperature, uint flags) {
+    uint idx = wy * uint(u_grid_width) + wx;
+    uint byte_offset = idx * u_pixel_size;
+    uint word_offset = byte_offset / 4u;
+
+    uint packed = packPixel(material, category, temperature, flags);
+
+    // For now, assume aligned 4-byte pixels (common case)
+    // TODO: Handle misaligned/larger pixels if needed
+    pixels_a[word_offset] = packed;
+    pixels_b[word_offset] = packed;
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= u_max_particles) return;
+
+    Particle p = particles[idx];
+    if (p.flags != 2u) return; // only process reintegration-flagged particles
+
+    int wx = int(floor(p.pos.x));
+    int wy = int(floor(p.pos.y));
+
+    // Bounds check
+    if (wx >= 0 && wx < u_grid_width && wy >= 0 && wy < u_grid_height) {
+        // Only write if the target cell is currently empty
+        uint existing_mat = loadMaterial(uint(wx), uint(wy));
+        if (existing_mat == 0u) {
+            // Write material to both ping-pong SSBOs
+            // Byte layout: 0=material, 1=category, 2=temperature, 3=flags
+            uint cat = getCategory(p.material);
+            uint temp = getDefaultTemp(p.material);
+            storePixelBoth(uint(wx), uint(wy), p.material, cat, temp, 0u);
+        }
+    }
+
+    // Kill the particle
+    p.flags = 0u;
+    uint slot = atomicAdd(dead_count, 1u);
+    if (slot < u_max_particles) {
+        dead_indices[slot] = idx;
+    }
+
+    particles[idx] = p;
+}
