@@ -1,4 +1,5 @@
 #include "ConsolePanel.h"
+#include "editor/icons/IconsFontAwesome6.h"
 #include "engine/core/Logger.h"
 
 #include <imgui.h>
@@ -101,8 +102,14 @@ void ConsolePanel::unhook_logger() {
 }
 
 void ConsolePanel::render_toolbar() {
-    if (ImGui::Button("Clear")) {
+    if (ImGui::Button(ICON_FA_TRASH " Clear")) {
         clear();
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button(ICON_FA_COPY " Copy All")) {
+        std::lock_guard<std::mutex> lock(m_entries_mutex);
+        copy_selected_to_clipboard(m_entries);
     }
 
     ImGui::SameLine();
@@ -135,15 +142,21 @@ void ConsolePanel::render_messages() {
         entries_copy = m_entries;
     }
 
+    // Build visible (filtered) entries list
+    struct VisibleEntry {
+        size_t original_index;
+        const LogEntry* entry;
+    };
+    std::vector<VisibleEntry> visible;
+    visible.reserve(entries_copy.size());
+
     for (size_t i = 0; i < entries_copy.size(); ++i) {
         const auto& entry = entries_copy[i];
 
-        // Filter by level
         if (entry.level == LogEntry::Level::Info && !m_show_info) continue;
         if (entry.level == LogEntry::Level::Warning && !m_show_warnings) continue;
         if (entry.level == LogEntry::Level::Error && !m_show_errors) continue;
 
-        // Filter by text
         if (!filter_str.empty()) {
             std::string message_lower = entry.message;
             std::transform(message_lower.begin(), message_lower.end(), message_lower.begin(), ::tolower);
@@ -152,9 +165,41 @@ void ConsolePanel::render_messages() {
             }
         }
 
-        ImGui::PushID(static_cast<int>(i));
+        visible.push_back({i, &entry});
+    }
 
-        // Icon and color based on level
+    // Resize selection vector to match visible entries
+    m_selected.resize(visible.size(), false);
+    if (m_selected.size() > visible.size()) {
+        m_selected.resize(visible.size());
+    }
+
+    // Handle Ctrl+A (select all) and Ctrl+C (copy) when console child is focused
+    if (ImGui::IsWindowFocused()) {
+        ImGuiIO& io = ImGui::GetIO();
+        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A)) {
+            for (size_t i = 0; i < m_selected.size(); ++i) m_selected[i] = true;
+        }
+        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C)) {
+            // Collect selected visible entries
+            std::vector<LogEntry> selected_entries;
+            for (size_t vi = 0; vi < visible.size(); ++vi) {
+                if (vi < m_selected.size() && m_selected[vi]) {
+                    selected_entries.push_back(*visible[vi].entry);
+                }
+            }
+            if (!selected_entries.empty()) {
+                copy_selected_to_clipboard(selected_entries);
+            }
+        }
+    }
+
+    for (size_t vi = 0; vi < visible.size(); ++vi) {
+        const auto& entry = *visible[vi].entry;
+
+        ImGui::PushID(static_cast<int>(vi));
+
+        // Determine row color
         ImVec4 color;
         const char* icon;
         switch (entry.level) {
@@ -172,27 +217,58 @@ void ConsolePanel::render_messages() {
                 break;
         }
 
-        ImGui::TextColored(color, "%s", icon);
-        ImGui::SameLine();
+        // Selection highlight
+        bool is_selected = (vi < m_selected.size()) && m_selected[vi];
 
-        // Show source tag
-        if (!entry.source.empty()) {
-            ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "[%s]", entry.source.c_str());
-            ImGui::SameLine();
+        // Build the display string for the selectable
+        char display[1024];
+        if (!entry.source.empty() && entry.count > 1) {
+            snprintf(display, sizeof(display), "%s [%s] (%d) %s", icon, entry.source.c_str(), entry.count, entry.message.c_str());
+        } else if (!entry.source.empty()) {
+            snprintf(display, sizeof(display), "%s [%s] %s", icon, entry.source.c_str(), entry.message.c_str());
+        } else if (entry.count > 1) {
+            snprintf(display, sizeof(display), "%s (%d) %s", icon, entry.count, entry.message.c_str());
+        } else {
+            snprintf(display, sizeof(display), "%s %s", icon, entry.message.c_str());
         }
 
-        // Show count if collapsed
-        if (entry.count > 1) {
-            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "(%d)", entry.count);
-            ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Text, color);
+        if (ImGui::Selectable(display, is_selected, ImGuiSelectableFlags_AllowOverlap)) {
+            ImGuiIO& io = ImGui::GetIO();
+            if (io.KeyCtrl) {
+                // Toggle selection
+                if (vi < m_selected.size()) m_selected[vi] = !m_selected[vi];
+            } else if (io.KeyShift && m_last_clicked >= 0) {
+                // Range selection
+                int start = std::min(m_last_clicked, static_cast<int>(vi));
+                int end = std::max(m_last_clicked, static_cast<int>(vi));
+                for (int j = start; j <= end && j < static_cast<int>(m_selected.size()); ++j) {
+                    m_selected[j] = true;
+                }
+            } else {
+                // Single selection - clear others
+                std::fill(m_selected.begin(), m_selected.end(), false);
+                if (vi < m_selected.size()) m_selected[vi] = true;
+            }
+            m_last_clicked = static_cast<int>(vi);
         }
+        ImGui::PopStyleColor();
 
-        ImGui::TextWrapped("%s", entry.message.c_str());
-
-        // Right-click to copy
+        // Right-click context menu
         if (ImGui::BeginPopupContextItem("LogContextMenu")) {
             if (ImGui::MenuItem("Copy")) {
                 ImGui::SetClipboardText(entry.message.c_str());
+            }
+            if (ImGui::MenuItem("Copy Selected")) {
+                std::vector<LogEntry> selected_entries;
+                for (size_t si = 0; si < visible.size(); ++si) {
+                    if (si < m_selected.size() && m_selected[si]) {
+                        selected_entries.push_back(*visible[si].entry);
+                    }
+                }
+                if (!selected_entries.empty()) {
+                    copy_selected_to_clipboard(selected_entries);
+                }
             }
             ImGui::EndPopup();
         }
@@ -206,6 +282,32 @@ void ConsolePanel::render_messages() {
     }
 
     ImGui::EndChild();
+}
+
+void ConsolePanel::copy_selected_to_clipboard(const std::vector<LogEntry>& entries) {
+    std::string text;
+    for (const auto& entry : entries) {
+        const char* level_str = "";
+        switch (entry.level) {
+            case LogEntry::Level::Info:    level_str = "[INFO]"; break;
+            case LogEntry::Level::Warning: level_str = "[WARN]"; break;
+            case LogEntry::Level::Error:   level_str = "[ERR]"; break;
+        }
+        if (!entry.source.empty()) {
+            text += level_str;
+            text += " [";
+            text += entry.source;
+            text += "] ";
+        } else {
+            text += level_str;
+            text += " ";
+        }
+        text += entry.message;
+        text += "\n";
+    }
+    if (!text.empty()) {
+        ImGui::SetClipboardText(text.c_str());
+    }
 }
 
 } // namespace editor

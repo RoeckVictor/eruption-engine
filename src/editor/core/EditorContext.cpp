@@ -13,45 +13,51 @@ EditorContext::EditorContext() = default;
 EditorContext::~EditorContext() = default;
 
 bool EditorContext::is_selected(entt::entity entity) const {
-    return std::find(m_selection.begin(), m_selection.end(), entity) != m_selection.end();
+    const auto& sel = m_editing_override.selection ? *m_editing_override.selection : m_selection;
+    return std::find(sel.begin(), sel.end(), entity) != sel.end();
 }
 
 void EditorContext::select(entt::entity entity) {
-    m_selection.clear();
+    auto& sel = m_editing_override.selection ? *m_editing_override.selection : m_selection;
+    sel.clear();
     if (entity != entt::null) {
-        m_selection.push_back(entity);
+        sel.push_back(entity);
     }
     notify_selection_changed();
 }
 
 void EditorContext::add_to_selection(entt::entity entity) {
+    auto& sel = m_editing_override.selection ? *m_editing_override.selection : m_selection;
     if (entity != entt::null && !is_selected(entity)) {
-        m_selection.push_back(entity);
+        sel.push_back(entity);
         notify_selection_changed();
     }
 }
 
 void EditorContext::remove_from_selection(entt::entity entity) {
-    auto it = std::find(m_selection.begin(), m_selection.end(), entity);
-    if (it != m_selection.end()) {
-        m_selection.erase(it);
+    auto& sel = m_editing_override.selection ? *m_editing_override.selection : m_selection;
+    auto it = std::find(sel.begin(), sel.end(), entity);
+    if (it != sel.end()) {
+        sel.erase(it);
         notify_selection_changed();
     }
 }
 
 void EditorContext::clear_selection() {
-    if (!m_selection.empty()) {
-        m_selection.clear();
+    auto& sel = m_editing_override.selection ? *m_editing_override.selection : m_selection;
+    if (!sel.empty()) {
+        sel.clear();
         notify_selection_changed();
     }
 }
 
 void EditorContext::select_multiple(const std::vector<entt::entity>& entities) {
-    m_selection = entities;
+    auto& sel = m_editing_override.selection ? *m_editing_override.selection : m_selection;
+    sel = entities;
     // Remove any null entities
-    m_selection.erase(
-        std::remove(m_selection.begin(), m_selection.end(), entt::null),
-        m_selection.end()
+    sel.erase(
+        std::remove(sel.begin(), sel.end(), entt::null),
+        sel.end()
     );
     notify_selection_changed();
 }
@@ -67,7 +73,23 @@ void EditorContext::set_registry(entt::registry* registry) {
 }
 
 void EditorContext::mark_dirty() {
-    m_dirty = true;
+    if (m_editing_override.mark_dirty) {
+        m_editing_override.mark_dirty();
+    } else {
+        m_dirty = true;
+    }
+}
+
+void EditorContext::set_editing_override(const EditingOverride& override) {
+    m_editing_override = override;
+    notify_selection_changed();
+}
+
+void EditorContext::clear_editing_override() {
+    if (m_editing_override.registry) {
+        m_editing_override = {};
+        notify_selection_changed();
+    }
 }
 
 void EditorContext::clear_dirty() {
@@ -106,39 +128,42 @@ void EditorContext::redo() {
 }
 
 void EditorContext::copy_selection() {
-    if (!m_registry || m_selection.empty()) {
+    auto* reg = registry();
+    const auto& sel = selection();
+    if (!reg || sel.empty()) {
         return;
     }
 
-    SceneSerializer serializer(*m_registry);
-    nlohmann::json json = serializer.serialize_entities(m_selection);
+    SceneSerializer serializer(*reg);
+    nlohmann::json json = serializer.serialize_entities(sel);
     m_clipboard = json.dump();
 
-    engine::Logger::instance().info("Editor", "Copied %zu entities to clipboard", m_selection.size());
+    engine::Logger::instance().info("Editor", "Copied %zu entities to clipboard", sel.size());
 }
 
 void EditorContext::paste() {
-    if (!m_registry || m_clipboard.empty()) {
+    auto* reg = registry();
+    if (!reg || m_clipboard.empty()) {
         return;
     }
 
     try {
         nlohmann::json json = nlohmann::json::parse(m_clipboard);
-        SceneSerializer serializer(*m_registry);
+        SceneSerializer serializer(*reg);
         auto new_entities = serializer.deserialize_entities(json);
 
         if (!new_entities.empty()) {
             // Offset pasted entities slightly so they don't overlap with originals
             for (auto entity : new_entities) {
-                if (m_registry->all_of<Transform>(entity)) {
-                    auto& transform = m_registry->get<Transform>(entity);
+                if (reg->all_of<engine::Transform>(entity)) {
+                    auto& transform = reg->get<engine::Transform>(entity);
                     transform.x += 20.0f;
                     transform.y += 20.0f;
                 }
 
                 // Generate new GUIDs for pasted entities
-                if (m_registry->all_of<EntityInfo>(entity)) {
-                    auto& info = m_registry->get<EntityInfo>(entity);
+                if (reg->all_of<EntityInfo>(entity)) {
+                    auto& info = reg->get<EntityInfo>(entity);
                     // Simple GUID: timestamp + random
                     info.guid = "pasted_" + std::to_string(reinterpret_cast<uintptr_t>(&entity));
                 }
@@ -155,8 +180,16 @@ void EditorContext::paste() {
     }
 }
 
+void EditorContext::set_component_clipboard(const std::string& data, std::type_index type) {
+    m_component_clipboard = data;
+    m_component_clipboard_type = type;
+    engine::Logger::instance().info("Editor", "Copied component to clipboard");
+}
+
 void EditorContext::duplicate_selection() {
-    if (!m_registry || m_selection.empty()) {
+    auto* reg = registry();
+    const auto& sel = selection();
+    if (!reg || sel.empty()) {
         return;
     }
 
@@ -168,7 +201,9 @@ void EditorContext::duplicate_selection() {
 }
 
 void EditorContext::focus_on_selection() {
-    if (!m_registry || m_selection.empty()) {
+    auto* reg = registry();
+    const auto& sel = selection();
+    if (!reg || sel.empty()) {
         return;
     }
 
@@ -179,9 +214,9 @@ void EditorContext::focus_on_selection() {
     float max_y = std::numeric_limits<float>::lowest();
     bool has_transform = false;
 
-    for (auto entity : m_selection) {
-        if (m_registry->valid(entity) && m_registry->all_of<Transform>(entity)) {
-            const auto& transform = m_registry->get<Transform>(entity);
+    for (auto entity : sel) {
+        if (reg->valid(entity) && reg->all_of<engine::Transform>(entity)) {
+            const auto& transform = reg->get<engine::Transform>(entity);
             min_x = std::min(min_x, transform.x);
             min_y = std::min(min_y, transform.y);
             max_x = std::max(max_x, transform.x);

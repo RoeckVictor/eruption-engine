@@ -32,20 +32,6 @@ target_link_libraries(eruption_engine PUBLIC
 )
 
 # =============================================================================
-# Game Executable
-# =============================================================================
-file(GLOB_RECURSE GAME_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/*.h"
-)
-
-add_executable(eruption ${GAME_SOURCES})
-
-target_link_libraries(eruption PRIVATE
-    eruption_engine
-)
-
-# =============================================================================
 # PixArt Tool
 # =============================================================================
 file(GLOB PIXART_SOURCES
@@ -59,6 +45,7 @@ list(APPEND PIXART_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/asset/PixelGridFile.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/asset/VFS.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/core/Logger.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/platform/PlatformUtils.cpp"
 )
 
 # ImGui library for PixArt
@@ -77,7 +64,7 @@ target_include_directories(imgui PUBLIC
 )
 target_link_libraries(imgui PUBLIC glfw glad)
 
-add_executable(pixart ${PIXART_SOURCES})
+add_executable(pixart WIN32 ${PIXART_SOURCES})
 
 target_include_directories(pixart PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -92,6 +79,16 @@ target_link_libraries(pixart PRIVATE
     nlohmann_json::nlohmann_json
 )
 
+# Link Windows Shell API for file/folder dialogs
+if(WIN32)
+    target_link_libraries(pixart PRIVATE ole32 uuid shell32)
+endif()
+
+# Use main() as entry point despite WIN32 subsystem
+if(MSVC)
+    set_target_properties(pixart PROPERTIES LINK_FLAGS "/ENTRY:mainCRTStartup")
+endif()
+
 # =============================================================================
 # Editor Executable
 # =============================================================================
@@ -100,7 +97,7 @@ file(GLOB_RECURSE EDITOR_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/*.h"
 )
 
-add_executable(eruption_editor ${EDITOR_SOURCES})
+add_executable(eruption_editor WIN32 ${EDITOR_SOURCES})
 
 target_include_directories(eruption_editor PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -113,42 +110,34 @@ target_link_libraries(eruption_editor PRIVATE
 
 # Link Windows Shell API for folder dialogs
 if(WIN32)
-    target_link_libraries(eruption_editor PRIVATE ole32 uuid)
+    target_link_libraries(eruption_editor PRIVATE ole32 uuid shell32)
+endif()
+
+# Use main() as entry point despite WIN32 subsystem
+if(MSVC)
+    set_target_properties(eruption_editor PROPERTIES LINK_FLAGS "/ENTRY:mainCRTStartup")
 endif()
 
 # =============================================================================
-# Copy Shaders (for game)
-# =============================================================================
-add_custom_target(copy_shaders ALL
-    COMMAND ${CMAKE_COMMAND} -E echo "Copying shaders to build directory"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
-        "$<TARGET_FILE_DIR:eruption>/shaders"
-    DEPENDS eruption
-)
-
-# =============================================================================
-# Copy Game Assets
-# =============================================================================
-add_custom_target(copy_game_assets ALL
-    COMMAND ${CMAKE_COMMAND} -E echo "Copying game assets to build directory"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/asset"
-        "$<TARGET_FILE_DIR:eruption>/game"
-    COMMAND ${CMAKE_COMMAND} -E copy
-        "${CMAKE_CURRENT_SOURCE_DIR}/engine_config.json"
-        "$<TARGET_FILE_DIR:eruption>/engine_config.json"
-    DEPENDS eruption
-)
-
-# =============================================================================
-# Copy Shaders and Config (for editor)
+# Copy Shaders, Materials, Default Assets, and Config (for editor)
 # =============================================================================
 add_custom_target(copy_editor_assets ALL
     COMMAND ${CMAKE_COMMAND} -E echo "Copying shaders to editor build directory"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
         "$<TARGET_FILE_DIR:eruption_editor>/shaders"
+    COMMAND ${CMAKE_COMMAND} -E echo "Copying materials to editor build directory"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/materials"
+        "$<TARGET_FILE_DIR:eruption_editor>/assets/materials"
+    COMMAND ${CMAKE_COMMAND} -E echo "Copying default assets to editor build directory"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/defaults"
+        "$<TARGET_FILE_DIR:eruption_editor>/assets/defaults"
+    COMMAND ${CMAKE_COMMAND} -E echo "Copying fonts to editor build directory"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts"
+        "$<TARGET_FILE_DIR:eruption_editor>/assets/fonts"
     COMMAND ${CMAKE_COMMAND} -E copy
         "${CMAKE_CURRENT_SOURCE_DIR}/engine_config.json"
         "$<TARGET_FILE_DIR:eruption_editor>/engine_config.json"

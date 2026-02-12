@@ -9,6 +9,8 @@ namespace engine::animation {
 /// Component that tracks animation playback state.
 /// Attach to any entity that has a sprite sheet texture.
 struct Animator {
+    bool enabled = true;  // Component enabled flag (affects animation system)
+
     std::unordered_map<std::string, AnimationClip> clips;
 
     std::string current_clip;

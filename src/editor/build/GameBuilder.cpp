@@ -121,7 +121,6 @@ bool GameBuilder::prepare_output_directory(const BuildConfig& config) {
 
         // Create subdirectories
         fs::create_directories(output_dir / "Assets");
-        fs::create_directories(output_dir / "Assets" / "Scenes");
         fs::create_directories(output_dir / "shaders");
 
         return true;

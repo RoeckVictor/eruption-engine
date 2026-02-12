@@ -3,6 +3,9 @@
 #include "Panel.h"
 #include "editor/gizmos/GizmoRenderer.h"
 #include <glad/gl.h>
+#include <entt/entt.hpp>
+#include <string>
+#include <unordered_map>
 
 namespace editor {
 
@@ -27,8 +30,17 @@ private:
     void destroy_framebuffer();
     void render_scene();
     void render_grid();
+    void render_entities();
     void render_overlay();
+    void render_debug_overlays(ImDrawList* draw_list, ImVec2 viewport_pos, ImVec2 viewport_size);
     void handle_input();
+
+    /// Get or create a cached RGBA texture for a pixel grid entity.
+    /// Returns the GL texture ID, or 0 if the grid couldn't be loaded.
+    GLuint get_pixel_grid_texture(entt::entity entity, const std::string& path);
+
+    /// Remove stale entries from the texture cache.
+    void cleanup_texture_cache();
 
     EditorContext& m_context;
     GizmoRenderer m_gizmo_renderer;
@@ -43,6 +55,15 @@ private:
     bool m_is_panning = false;
     float m_pan_start_x = 0.0f;
     float m_pan_start_y = 0.0f;
+
+    /// Cached pixel grid textures for viewport rendering.
+    struct CachedGridTexture {
+        GLuint texture_id = 0;
+        std::string source_path;
+        int width = 0;
+        int height = 0;
+    };
+    std::unordered_map<entt::entity, CachedGridTexture> m_grid_textures;
 };
 
 } // namespace editor

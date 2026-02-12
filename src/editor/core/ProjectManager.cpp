@@ -58,7 +58,7 @@ bool ProjectManager::create_project(const std::string& path, const std::string& 
     m_project_info.version = "1.0.0";
     m_project_info.engine_version = "0.1.0";
     m_project_info.guid = ""; // TODO: Generate GUID
-    m_project_info.default_scene = "Assets/Scenes/Main.scene";
+    m_project_info.default_scene = "Assets/Main.scene";
     m_project_info.script_assembly_name = "GameScripts";
     m_project_info.asset_paths = {"Assets"};
 
@@ -218,11 +218,7 @@ bool ProjectManager::save_project_file() {
 
 void ProjectManager::create_project_directories(const std::string& path) {
     try {
-        fs::create_directories(fs::path(path) / "Assets" / "Scenes");
-        fs::create_directories(fs::path(path) / "Assets" / "Prefabs");
-        fs::create_directories(fs::path(path) / "Assets" / "Textures");
-        fs::create_directories(fs::path(path) / "Assets" / "Materials");
-        fs::create_directories(fs::path(path) / "Assets" / "Animations");
+        fs::create_directories(fs::path(path) / "Assets");
         fs::create_directories(fs::path(path) / "Scripts" / "Components");
         fs::create_directories(fs::path(path) / "Scripts" / "Systems");
         fs::create_directories(fs::path(path) / "Scripts" / "Utils");

@@ -6,8 +6,10 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 #include <cstdio>
+#include <filesystem>
+#include <string>
 
-int main() {
+int main(int argc, char* argv[]) {
     // --- GLFW init ---
     if (!glfwInit()) {
         fprintf(stderr, "Failed to init GLFW\n");
@@ -50,7 +52,15 @@ int main() {
 
     // --- App init ---
     pixart::PixArtApp app;
-    app.init();
+    if (argc > 1) {
+        app.init(argv[1]);
+        // Update window title with filename
+        std::string filename = std::filesystem::path(argv[1]).filename().string();
+        std::string title = "PixArt - " + filename;
+        glfwSetWindowTitle(window, title.c_str());
+    } else {
+        app.init();
+    }
 
     // Set up window close callback to handle unsaved changes
     glfwSetWindowUserPointer(window, &app);

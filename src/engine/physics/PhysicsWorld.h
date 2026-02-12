@@ -40,8 +40,8 @@ public:
     // --- Body management ---
 
     b2BodyId create_dynamic_body(float pixel_x, float pixel_y, float angle_rad = 0.0f);
-    b2BodyId create_static_body(float pixel_x, float pixel_y);
-    b2BodyId create_kinematic_body(float pixel_x, float pixel_y);
+    b2BodyId create_static_body(float pixel_x, float pixel_y, float angle_rad = 0.0f);
+    b2BodyId create_kinematic_body(float pixel_x, float pixel_y, float angle_rad = 0.0f);
     void destroy_body(b2BodyId body);
 
     // --- Shape management ---

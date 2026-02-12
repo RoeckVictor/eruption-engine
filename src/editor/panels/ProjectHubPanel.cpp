@@ -5,10 +5,7 @@
 #include <imgui.h>
 #include <filesystem>
 
-#ifdef _WIN32
-#include <windows.h>
-#include <shobjidl.h>
-#endif
+#include "engine/platform/PlatformUtils.h"
 
 namespace fs = std::filesystem;
 
@@ -105,11 +102,8 @@ void ProjectHubPanel::render_recent_projects() {
             if (ImGui::MenuItem("Remove from Recent")) {
                 m_project_manager.remove_from_recent(path);
             }
-            if (ImGui::MenuItem("Show in Explorer")) {
-#ifdef _WIN32
-                std::string cmd = "explorer \"" + path + "\"";
-                system(cmd.c_str());
-#endif
+            if (ImGui::MenuItem("Show in File Manager")) {
+                engine::platform::open_folder_in_file_manager(path);
             }
             ImGui::EndPopup();
         }
@@ -155,7 +149,7 @@ void ProjectHubPanel::render_actions() {
 
     // Open Project button
     if (ImGui::Button("Open Project", ImVec2(button_width, button_height))) {
-        std::string path = open_folder_dialog();
+        std::string path = engine::platform::folder_dialog("Select Project Folder");
         if (!path.empty()) {
             if (ProjectManager::is_valid_project(path)) {
                 if (m_project_manager.open_project(path)) {
@@ -191,7 +185,7 @@ void ProjectHubPanel::render_new_project_dialog() {
         ImGui::InputText("##ProjectPath", m_new_project_path, sizeof(m_new_project_path));
         ImGui::SameLine();
         if (ImGui::Button("Browse...")) {
-            std::string path = open_folder_dialog();
+            std::string path = engine::platform::folder_dialog("Select Project Folder");
             if (!path.empty()) {
                 strncpy(m_new_project_path, path.c_str(), sizeof(m_new_project_path) - 1);
             }
@@ -228,52 +222,6 @@ void ProjectHubPanel::render_new_project_dialog() {
 
         ImGui::EndPopup();
     }
-}
-
-std::string ProjectHubPanel::open_folder_dialog() {
-#ifdef _WIN32
-    std::string result;
-
-    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    if (SUCCEEDED(hr)) {
-        IFileDialog* pFileDialog = nullptr;
-        hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL,
-                              IID_IFileDialog, reinterpret_cast<void**>(&pFileDialog));
-
-        if (SUCCEEDED(hr)) {
-            DWORD options;
-            pFileDialog->GetOptions(&options);
-            pFileDialog->SetOptions(options | FOS_PICKFOLDERS);
-
-            hr = pFileDialog->Show(nullptr);
-            if (SUCCEEDED(hr)) {
-                IShellItem* pItem = nullptr;
-                hr = pFileDialog->GetResult(&pItem);
-                if (SUCCEEDED(hr)) {
-                    PWSTR pszPath = nullptr;
-                    hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszPath);
-                    if (SUCCEEDED(hr)) {
-                        // Convert wide string to narrow string
-                        int size = WideCharToMultiByte(CP_UTF8, 0, pszPath, -1, nullptr, 0, nullptr, nullptr);
-                        if (size > 0) {
-                            result.resize(size - 1);
-                            WideCharToMultiByte(CP_UTF8, 0, pszPath, -1, result.data(), size, nullptr, nullptr);
-                        }
-                        CoTaskMemFree(pszPath);
-                    }
-                    pItem->Release();
-                }
-            }
-            pFileDialog->Release();
-        }
-        CoUninitialize();
-    }
-
-    return result;
-#else
-    // TODO: Implement for other platforms
-    return "";
-#endif
 }
 
 } // namespace editor

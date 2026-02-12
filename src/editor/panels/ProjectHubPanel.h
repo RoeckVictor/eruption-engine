@@ -22,8 +22,6 @@ private:
     void render_actions();
     void render_new_project_dialog();
 
-    std::string open_folder_dialog();
-
     ProjectManager& m_project_manager;
     EditorApplication& m_app;
 

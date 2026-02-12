@@ -44,7 +44,9 @@ void PanelManager::render() {
         ImGui::End();
 
         if (!open) {
-            panel->set_visible(false);
+            if (panel->on_close_requested()) {
+                panel->set_visible(false);
+            }
         }
     }
 
@@ -54,48 +56,49 @@ void PanelManager::render() {
 void PanelManager::render_menu_bar() {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("New Project...", "Ctrl+Shift+N")) {
-                // TODO: Implement
+            if (ImGui::MenuItem("New Scene")) {
+                if (menu_callbacks.new_scene) menu_callbacks.new_scene();
             }
+            ImGui::Separator();
             if (ImGui::MenuItem("Open Project...", "Ctrl+Shift+O")) {
-                // TODO: Implement
+                if (menu_callbacks.show_project_hub) menu_callbacks.show_project_hub();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Save Scene", "Ctrl+S")) {
-                // TODO: Implement
+                if (menu_callbacks.save_scene) menu_callbacks.save_scene();
             }
             if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S")) {
-                // TODO: Implement
+                if (menu_callbacks.save_scene_as) menu_callbacks.save_scene_as();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Exit", "Alt+F4")) {
-                // TODO: Signal exit
+                if (menu_callbacks.exit) menu_callbacks.exit();
             }
             ImGui::EndMenu();
         }
 
         if (ImGui::BeginMenu("Edit")) {
             if (ImGui::MenuItem("Undo", "Ctrl+Z")) {
-                // TODO: Implement
+                if (menu_callbacks.undo) menu_callbacks.undo();
             }
             if (ImGui::MenuItem("Redo", "Ctrl+Y")) {
-                // TODO: Implement
+                if (menu_callbacks.redo) menu_callbacks.redo();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Cut", "Ctrl+X")) {
-                // TODO: Implement
+                if (menu_callbacks.cut) menu_callbacks.cut();
             }
             if (ImGui::MenuItem("Copy", "Ctrl+C")) {
-                // TODO: Implement
+                if (menu_callbacks.copy) menu_callbacks.copy();
             }
             if (ImGui::MenuItem("Paste", "Ctrl+V")) {
-                // TODO: Implement
+                if (menu_callbacks.paste) menu_callbacks.paste();
             }
             if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
-                // TODO: Implement
+                if (menu_callbacks.duplicate) menu_callbacks.duplicate();
             }
             if (ImGui::MenuItem("Delete", "Delete")) {
-                // TODO: Implement
+                if (menu_callbacks.delete_selected) menu_callbacks.delete_selected();
             }
             ImGui::EndMenu();
         }
@@ -231,7 +234,10 @@ void PanelManager::setup_default_layout() {
     // Dock the panels
     ImGui::DockBuilderDockWindow("Hierarchy", dock_left);
     ImGui::DockBuilderDockWindow("Scene Manager", dock_left);
+    ImGui::DockBuilderDockWindow("Game", dock_center);
     ImGui::DockBuilderDockWindow("Viewport", dock_center);
+    ImGui::DockBuilderDockWindow("Prefab Editor", dock_center);
+    ImGui::DockBuilderDockWindow("Project Hub", dock_center);
     ImGui::DockBuilderDockWindow("Inspector", dock_right);
     ImGui::DockBuilderDockWindow("Asset Preview", dock_right);  // Tabbed with Inspector
     ImGui::DockBuilderDockWindow("File Browser", dock_bottom_left);

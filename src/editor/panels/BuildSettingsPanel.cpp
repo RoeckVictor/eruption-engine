@@ -5,10 +5,7 @@
 #include <filesystem>
 #include <cstring>
 
-#ifdef _WIN32
-#include <windows.h>
-#include <shlobj.h>
-#endif
+#include "engine/platform/PlatformUtils.h"
 
 namespace fs = std::filesystem;
 
@@ -87,21 +84,10 @@ void BuildSettingsPanel::render_build_settings() {
     ImGui::InputText("##OutputPath", m_output_path_buffer, sizeof(m_output_path_buffer));
     ImGui::SameLine();
     if (ImGui::Button("Browse")) {
-#ifdef _WIN32
-        // Use Windows folder picker
-        BROWSEINFOA bi = {};
-        bi.lpszTitle = "Select Output Directory";
-        bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
-
-        LPITEMIDLIST pidl = SHBrowseForFolderA(&bi);
-        if (pidl != nullptr) {
-            char path[MAX_PATH];
-            if (SHGetPathFromIDListA(pidl, path)) {
-                std::strncpy(m_output_path_buffer, path, sizeof(m_output_path_buffer) - 1);
-            }
-            CoTaskMemFree(pidl);
+        std::string path = engine::platform::folder_dialog("Select Output Directory");
+        if (!path.empty()) {
+            std::strncpy(m_output_path_buffer, path.c_str(), sizeof(m_output_path_buffer) - 1);
         }
-#endif
     }
     ImGui::Spacing();
 
@@ -125,11 +111,11 @@ void BuildSettingsPanel::render_build_settings() {
     ImGui::Text("Default Scene:");
     ImGui::TextDisabled("(First scene loaded when game starts)");
 
-    // List available scenes
-    fs::path scenes_dir = fs::path(m_project_path) / "Assets" / "Scenes";
-    if (fs::exists(scenes_dir)) {
+    // List available scenes (recursive scan of Assets/)
+    fs::path assets_dir = fs::path(m_project_path) / "Assets";
+    if (fs::exists(assets_dir)) {
         if (ImGui::BeginCombo("##DefaultScene", m_config.default_scene.empty() ? "(None)" : m_config.default_scene.c_str())) {
-            for (const auto& entry : fs::directory_iterator(scenes_dir)) {
+            for (const auto& entry : fs::recursive_directory_iterator(assets_dir)) {
                 if (entry.path().extension() == ".scene") {
                     std::string scene_name = entry.path().stem().string();
                     bool is_selected = (m_config.default_scene == scene_name);
@@ -144,7 +130,7 @@ void BuildSettingsPanel::render_build_settings() {
             ImGui::EndCombo();
         }
     } else {
-        ImGui::TextDisabled("No scenes found in Assets/Scenes/");
+        ImGui::TextDisabled("No scenes found in Assets/");
     }
 
     ImGui::Spacing();
@@ -226,12 +212,9 @@ void BuildSettingsPanel::render_build_complete() {
 
     // Buttons
     if (success) {
-#ifdef _WIN32
         if (ImGui::Button("Open Output Folder", ImVec2(-1, 30))) {
-            std::string cmd = "explorer \"" + std::string(m_output_path_buffer) + "\"";
-            system(cmd.c_str());
+            engine::platform::open_folder_in_file_manager(m_output_path_buffer);
         }
-#endif
     }
 
     ImGui::Spacing();

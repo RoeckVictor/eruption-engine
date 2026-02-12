@@ -13,6 +13,7 @@ namespace pixart {
 class PixArtApp {
 public:
     void init();
+    void init(const std::string& file_path);
     void update();
     void shutdown();
 
@@ -49,12 +50,11 @@ private:
     void update_canvas_texture();
     void build_composite();
 
-    // --- File dialogs (OS native) ---
-    std::string open_file_dialog();
-    std::string save_file_dialog();
-
     // --- Keyboard shortcuts ---
     void handle_shortcuts();
+
+    // --- Layout ---
+    void setup_default_layout(unsigned int dockspace_id);
 
     // --- Core components ---
     Document m_doc;
@@ -105,6 +105,12 @@ private:
     // Hover pixel (for status bar)
     int m_hover_px = -1;
     int m_hover_py = -1;
+
+    // Origin placement mode
+    bool m_setting_origin = false;
+
+    // Layout
+    bool m_first_frame = true;
 };
 
 } // namespace pixart

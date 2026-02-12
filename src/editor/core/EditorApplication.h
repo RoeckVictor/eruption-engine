@@ -6,6 +6,7 @@
 #include "editor/core/RuntimeContext.h"
 #include "editor/scripting/ScriptManager.h"
 #include <string>
+#include <functional>
 
 namespace engine {
 class Engine;
@@ -73,6 +74,9 @@ public:
     /// Save the current scene.
     void save_scene();
 
+    /// Save the current scene with a file dialog.
+    void save_scene_as();
+
     /// Load a scene from file.
     bool load_scene(const std::string& path);
 
@@ -83,7 +87,23 @@ private:
     void end_frame();
 
     void render_toolbar();
+    void render_unsaved_changes_dialog();
     void handle_shortcuts(engine::Engine& engine);
+
+    /// Try to perform an action that requires the scene to be clean.
+    /// If the scene is dirty, shows a confirmation dialog first.
+    /// If the scene is clean, executes the action immediately.
+    void confirm_discard_or_save(std::function<void()> action);
+
+    /// Check both prefab editor and scene for unsaved changes before executing action.
+    /// Chains: prefab dirty check → scene dirty check → action.
+    void confirm_all_unsaved(std::function<void()> action);
+
+    /// Handle opening a file from the file browser.
+    void on_file_opened(const std::string& path);
+
+    /// Launch PixArt to edit a .pxg file.
+    void launch_pixart(const std::string& file_path);
 
     PanelManager m_panel_manager;
     std::unique_ptr<ProjectManager> m_project_manager;
@@ -99,6 +119,10 @@ private:
 
     bool m_should_exit = false;
     bool m_imgui_initialized = false;
+
+    // Pending action for unsaved changes dialog
+    std::function<void()> m_pending_action;
+    bool m_show_unsaved_dialog = false;
 };
 
 } // namespace editor

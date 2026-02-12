@@ -15,10 +15,11 @@ public:
         ImVec2 viewport_pos,
         ImVec2 viewport_size,
         entt::entity entity,
-        Transform& transform,
+        engine::Transform& transform,
         float camera_x,
         float camera_y,
-        float zoom
+        float zoom,
+        GizmoSpace space = GizmoSpace::World
     ) override;
 
 private:

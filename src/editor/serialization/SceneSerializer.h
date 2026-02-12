@@ -5,14 +5,21 @@
 #include <string>
 #include <filesystem>
 
+namespace engine::reflection {
+    class TypeInfo;
+}
+
 namespace editor {
 
 struct SceneSettings {
-    int grid_width = 512;
-    int grid_height = 512;
-    float gravity_x = 0.0f;
-    float gravity_y = -9.81f;
+    // Background
     float bg_color[4] = {0.1f, 0.1f, 0.15f, 1.0f};
+
+    // Physics settings (scene-wide, applies to Box2D world)
+    float gravity_x = 0.0f;
+    float gravity_y = 980.0f;  // Pixels per second squared (default for pixel-perfect physics)
+    float pixels_per_meter = 16.0f;
+    int physics_substeps = 4;
 };
 
 /// Serializes and deserializes scenes to/from JSON files.
@@ -44,6 +51,20 @@ public:
     /// Deserialize entities from JSON without clearing registry (for paste).
     /// Returns the newly created root entities.
     std::vector<entt::entity> deserialize_entities(const nlohmann::json& json);
+
+    /// Serialize a single component to JSON (for component clipboard).
+    nlohmann::json serialize_component(entt::entity entity, const engine::reflection::TypeInfo& type_info, void* component_ptr) const;
+
+    /// Deserialize a single component from JSON onto an entity (for component paste).
+    /// Creates the component if it doesn't exist, updates values if it does.
+    bool deserialize_component(entt::entity entity, const nlohmann::json& json);
+
+    /// Load a single prefab entity from a .prefab file into the registry.
+    /// Returns the created entity, or entt::null on failure.
+    entt::entity load_prefab(const std::filesystem::path& path);
+
+    /// Save a single entity as a .prefab file.
+    bool save_prefab(const std::filesystem::path& path, entt::entity entity);
 
     /// Get/set scene settings.
     SceneSettings& settings() { return m_settings; }

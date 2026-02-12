@@ -121,13 +121,13 @@ void ProjectSettingsPanel::render_general_settings() {
     ImGui::Separator();
     ImGui::Spacing();
 
-    // List available scenes
-    fs::path scenes_dir = fs::path(m_project_manager.project_path()) / "Assets" / "Scenes";
+    // List available scenes (recursive scan of Assets/)
+    fs::path assets_dir = fs::path(m_project_manager.project_path()) / "Assets";
 
     ImGui::Text("Scene loaded at startup:");
     ImGui::SetNextItemWidth(-1);
 
-    if (fs::exists(scenes_dir)) {
+    if (fs::exists(assets_dir)) {
         std::string current_scene = m_default_scene;
         if (ImGui::BeginCombo("##DefaultScene", current_scene.empty() ? "(None)" : current_scene.c_str())) {
             // Option for no default scene
@@ -136,7 +136,7 @@ void ProjectSettingsPanel::render_general_settings() {
                 m_settings_changed = true;
             }
 
-            for (const auto& entry : fs::directory_iterator(scenes_dir)) {
+            for (const auto& entry : fs::recursive_directory_iterator(assets_dir)) {
                 if (entry.path().extension() == ".scene") {
                     std::string scene_name = entry.path().stem().string();
                     bool is_selected = (current_scene == scene_name);

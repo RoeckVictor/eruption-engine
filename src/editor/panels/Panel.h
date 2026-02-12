@@ -24,6 +24,10 @@ public:
     /// Implementation should NOT call ImGui::Begin/End - that's handled by PanelManager.
     virtual void on_gui() = 0;
 
+    /// Called when the user attempts to close the panel (e.g., clicking X).
+    /// Return true to allow closing, false to prevent it (e.g., to show an unsaved changes dialog).
+    virtual bool on_close_requested() { return true; }
+
     /// Get the panel's display name (used as window title).
     const char* name() const { return m_name.c_str(); }
 

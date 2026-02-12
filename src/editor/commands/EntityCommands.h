@@ -62,7 +62,7 @@ private:
         entt::entity entity;
         std::string name;
         bool enabled;
-        Transform transform;
+        engine::Transform transform;
         entt::entity parent;
         std::vector<entt::entity> children;
     };

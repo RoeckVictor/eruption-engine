@@ -1,0 +1,55 @@
+#version 450 core
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Pixel data SSBO (read)
+layout(std430, binding = 0) readonly buffer PixelBuffer {
+    uint pixel_data[];
+};
+
+// Color palette SSBO (read) - 256 entries, each a packed uint32 (0xRRGGBBAA)
+layout(std430, binding = 1) readonly buffer PaletteBuffer {
+    uint palette[];
+};
+
+// Output color texture (write) - RGBA8 normalized for ImGui display
+layout(rgba8, binding = 0) writeonly uniform image2D u_color_texture;
+
+uniform int u_grid_width;
+uniform int u_grid_height;
+uniform uint u_pixel_size;
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (pos.x >= u_grid_width || pos.y >= u_grid_height) return;
+
+    // Calculate byte offset into SSBO
+    uint pixel_idx = uint(pos.y) * uint(u_grid_width) + uint(pos.x);
+    uint byte_offset = pixel_idx * u_pixel_size;
+    uint word_offset = byte_offset / 4u;
+    uint byte_in_word = byte_offset % 4u;
+
+    // Read the uint32 containing this pixel's first 4 bytes
+    uint packed = pixel_data[word_offset];
+
+    // Handle misaligned access
+    if (byte_in_word != 0u) {
+        uint next_word = pixel_data[word_offset + 1u];
+        uint shift_bits = byte_in_word * 8u;
+        packed = (packed >> shift_bits) | (next_word << (32u - shift_bits));
+    }
+
+    // Extract material ID (byte 0)
+    uint material = packed & 0xFFu;
+
+    // Look up color from palette
+    uint color_packed = palette[material];
+
+    // Unpack RGBA from uint32 (0xRRGGBBAA format)
+    float r = float((color_packed >> 24) & 0xFFu) / 255.0;
+    float g = float((color_packed >> 16) & 0xFFu) / 255.0;
+    float b = float((color_packed >> 8)  & 0xFFu) / 255.0;
+    float a = float((color_packed >> 0)  & 0xFFu) / 255.0;
+
+    imageStore(u_color_texture, pos, vec4(r, g, b, a));
+}

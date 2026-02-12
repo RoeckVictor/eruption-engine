@@ -10,7 +10,7 @@ namespace editor {
 class TransformCommand : public Command {
 public:
     TransformCommand(entt::registry* registry, entt::entity entity,
-                     const Transform& old_transform, const Transform& new_transform)
+                     const engine::Transform& old_transform, const engine::Transform& new_transform)
         : m_registry(registry)
         , m_entity(entity)
         , m_old_transform(old_transform)
@@ -18,19 +18,19 @@ public:
     {}
 
     void execute() override {
-        if (m_registry && m_registry->valid(m_entity) && m_registry->all_of<Transform>(m_entity)) {
-            m_registry->get<Transform>(m_entity) = m_new_transform;
+        if (m_registry && m_registry->valid(m_entity) && m_registry->all_of<engine::Transform>(m_entity)) {
+            m_registry->get<engine::Transform>(m_entity) = m_new_transform;
         }
     }
 
     void undo() override {
-        if (m_registry && m_registry->valid(m_entity) && m_registry->all_of<Transform>(m_entity)) {
-            m_registry->get<Transform>(m_entity) = m_old_transform;
+        if (m_registry && m_registry->valid(m_entity) && m_registry->all_of<engine::Transform>(m_entity)) {
+            m_registry->get<engine::Transform>(m_entity) = m_old_transform;
         }
     }
 
     std::string name() const override {
-        return "Transform Entity";
+        return "engine::Transform Entity";
     }
 
     bool is_mergeable() const override { return true; }
@@ -52,8 +52,8 @@ public:
 private:
     entt::registry* m_registry;
     entt::entity m_entity;
-    Transform m_old_transform;
-    Transform m_new_transform;
+    engine::Transform m_old_transform;
+    engine::Transform m_new_transform;
 };
 
 } // namespace editor

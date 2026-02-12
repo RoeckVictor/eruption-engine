@@ -1,6 +1,7 @@
 #include "HierarchyPanel.h"
 #include "editor/core/EditorContext.h"
 #include "editor/core/EditorComponents.h"
+#include "editor/icons/IconsFontAwesome6.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -20,7 +21,7 @@ void HierarchyPanel::on_gui() {
 }
 
 void HierarchyPanel::render_toolbar() {
-    if (ImGui::Button("+")) {
+    if (ImGui::Button(ICON_FA_PLUS)) {
         ImGui::OpenPopup("CreateEntityPopup");
     }
 
@@ -111,7 +112,7 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth) {
     if (registry->all_of<EntityInfo>(entity)) {
         const auto& info = registry->get<EntityInfo>(entity);
         name = info.name;
-        enabled = info.enabled;
+        enabled = info.enabled_in_hierarchy;  // Use effective state (includes parent hierarchy)
     }
 
     // Apply filter

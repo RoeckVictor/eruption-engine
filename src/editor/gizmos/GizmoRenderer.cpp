@@ -55,14 +55,14 @@ void GizmoRenderer::render(ImDrawList* draw_list, ImVec2 viewport_pos, ImVec2 vi
     // TODO: Support multi-selection gizmo (average position, etc.)
     entt::entity entity = selection.front();
 
-    if (!registry->valid(entity) || !registry->all_of<Transform>(entity)) {
+    if (!registry->valid(entity) || !registry->all_of<engine::Transform>(entity)) {
         m_is_active = false;
         return;
     }
 
-    auto& transform = registry->get<Transform>(entity);
+    auto& transform = registry->get<engine::Transform>(entity);
 
-    // Render the gizmo
+    // Render the gizmo (pass coordinate space)
     GizmoResult result = active_gizmo->render(
         draw_list,
         viewport_pos,
@@ -71,7 +71,8 @@ void GizmoRenderer::render(ImDrawList* draw_list, ImVec2 viewport_pos, ImVec2 vi
         transform,
         camera.x,
         camera.y,
-        camera.zoom
+        camera.zoom,
+        m_space
     );
 
     m_is_active = result.is_active;
@@ -100,7 +101,7 @@ void GizmoRenderer::render(ImDrawList* draw_list, ImVec2 viewport_pos, ImVec2 vi
     }
 }
 
-void GizmoRenderer::generate_command(entt::entity entity, const Transform& old_transform, const Transform& new_transform) {
+void GizmoRenderer::generate_command(entt::entity entity, const engine::Transform& old_transform, const engine::Transform& new_transform) {
     auto* registry = m_context.registry();
     if (!registry) {
         return;

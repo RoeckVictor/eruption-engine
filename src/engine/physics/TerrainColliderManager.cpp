@@ -11,14 +11,15 @@
 
 namespace engine::physics {
 
-bool TerrainColliderManager::init(PhysicsWorld& world, int chunk_size) {
+bool TerrainColliderManager::init(PhysicsWorld& world, int chunk_size_x, int chunk_size_y) {
     if (!world.valid()) {
         ENGINE_ERR("TerrainColliderManager::init() - Invalid PhysicsWorld provided");
         return false;
     }
 
     m_world = &world;
-    m_chunk_size = chunk_size;
+    m_chunk_size_x = chunk_size_x;
+    m_chunk_size_y = chunk_size_y;
     return true;
 }
 
@@ -40,10 +41,10 @@ void TerrainColliderManager::shutdown() {
 
 void TerrainColliderManager::mark_dirty_region(int x, int y, int w, int h) {
     // Convert pixel rectangle to chunk coordinate range
-    int min_cx = static_cast<int>(std::floor(static_cast<float>(x) / m_chunk_size));
-    int min_cy = static_cast<int>(std::floor(static_cast<float>(y) / m_chunk_size));
-    int max_cx = static_cast<int>(std::floor(static_cast<float>(x + w - 1) / m_chunk_size));
-    int max_cy = static_cast<int>(std::floor(static_cast<float>(y + h - 1) / m_chunk_size));
+    int min_cx = static_cast<int>(std::floor(static_cast<float>(x) / m_chunk_size_x));
+    int min_cy = static_cast<int>(std::floor(static_cast<float>(y) / m_chunk_size_y));
+    int max_cx = static_cast<int>(std::floor(static_cast<float>(x + w - 1) / m_chunk_size_x));
+    int max_cy = static_cast<int>(std::floor(static_cast<float>(y + h - 1) / m_chunk_size_y));
 
     // Mark all chunks in the region (O(1) lookup per chunk)
     for (int cy = min_cy; cy <= max_cy; cy++) {
@@ -79,14 +80,14 @@ void TerrainColliderManager::mark_dirty_near_bodies(const std::vector<PixelBody*
 
 void TerrainColliderManager::update_terrain_colliders(simulation::PixelGrid& grid) {
     // Calculate the number of chunks covering the entire grid
-    int num_chunks_x = (grid.width() + m_chunk_size - 1) / m_chunk_size;
-    int num_chunks_y = (grid.height() + m_chunk_size - 1) / m_chunk_size;
+    int num_chunks_x = (grid.width() + m_chunk_size_x - 1) / m_chunk_size_x;
+    int num_chunks_y = (grid.height() + m_chunk_size_y - 1) / m_chunk_size_y;
 
     // Process all chunks in the grid
     for (int cy = 0; cy < num_chunks_y; cy++) {
         for (int cx = 0; cx < num_chunks_x; cx++) {
-            int world_x = cx * m_chunk_size;
-            int world_y = cy * m_chunk_size;
+            int world_x = cx * m_chunk_size_x;
+            int world_y = cy * m_chunk_size_y;
 
             // Find or create terrain chunk entry (O(1) hash map lookup)
             ChunkCoord coord{cx, cy};
@@ -115,8 +116,8 @@ void TerrainColliderManager::update_terrain_colliders(simulation::PixelGrid& gri
             }
 
             // Read back this chunk's pixels (exact chunk size, no padding)
-            int chunk_w = std::min(m_chunk_size, grid.width() - world_x);
-            int chunk_h = std::min(m_chunk_size, grid.height() - world_y);
+            int chunk_w = std::min(m_chunk_size_x, grid.width() - world_x);
+            int chunk_h = std::min(m_chunk_size_y, grid.height() - world_y);
 
             size_t pixel_size = grid.pixel_size();
             size_t buf_size = static_cast<size_t>(chunk_w) * chunk_h * pixel_size;

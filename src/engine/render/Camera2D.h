@@ -5,6 +5,8 @@ namespace engine::render {
 /// Pure data describing a 2D camera's position and zoom.
 /// Gameplay logic (follow, zoom control) belongs in game-side systems.
 struct Camera2D {
+    bool enabled = true;  // Component enabled flag (affects camera rendering)
+
     float x = 0.0f;
     float y = 0.0f;
     float zoom = 1.0f;

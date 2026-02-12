@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <functional>
 
 namespace editor {
 
@@ -69,6 +70,23 @@ public:
 
     /// Show the About dialog.
     void show_about_dialog() { m_show_about_dialog = true; }
+
+    /// Callbacks for menu bar actions (set by EditorApplication).
+    struct MenuCallbacks {
+        std::function<void()> new_scene;
+        std::function<void()> save_scene;
+        std::function<void()> save_scene_as;
+        std::function<void()> show_project_hub;
+        std::function<void()> exit;
+        std::function<void()> undo;
+        std::function<void()> redo;
+        std::function<void()> cut;
+        std::function<void()> copy;
+        std::function<void()> paste;
+        std::function<void()> duplicate;
+        std::function<void()> delete_selected;
+    };
+    MenuCallbacks menu_callbacks;
 
 private:
     void begin_dockspace();

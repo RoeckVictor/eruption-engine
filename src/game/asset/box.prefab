@@ -1,5 +1,0 @@
-{
-    "sprite": "game/box.pxg",
-    "type": "rigidbody",
-    "dynamic": true
-}

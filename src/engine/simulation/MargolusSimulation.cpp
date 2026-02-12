@@ -75,8 +75,11 @@ void MargolusSimulation::simulate(PixelGrid& grid, graphics::RenderContext& ctx)
     // Set pixel size uniform (needed by shader for SSBO access)
     m_sim_shader.set_uint("u_pixel_size", static_cast<uint32_t>(grid.pixel_size()));
 
-    int dispatch_x = grid.width()  / MARGOLUS_BLOCK_SIZE / SIM_WORKGROUP_SIZE;
-    int dispatch_y = grid.height() / MARGOLUS_BLOCK_SIZE / SIM_WORKGROUP_SIZE;
+    // Ceiling division so small grids (< 32x32) still get at least 1 workgroup
+    int blocks_x = (grid.width()  + MARGOLUS_BLOCK_SIZE - 1) / MARGOLUS_BLOCK_SIZE;
+    int blocks_y = (grid.height() + MARGOLUS_BLOCK_SIZE - 1) / MARGOLUS_BLOCK_SIZE;
+    int dispatch_x = (blocks_x + SIM_WORKGROUP_SIZE - 1) / SIM_WORKGROUP_SIZE;
+    int dispatch_y = (blocks_y + SIM_WORKGROUP_SIZE - 1) / SIM_WORKGROUP_SIZE;
 
     for (int phase = 0; phase < MARGOLUS_PHASES; phase++) {
         // Bind pixel SSBOs instead of textures

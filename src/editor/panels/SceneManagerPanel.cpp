@@ -1,4 +1,5 @@
 #include "SceneManagerPanel.h"
+#include "editor/icons/IconsFontAwesome6.h"
 
 #include <imgui.h>
 
@@ -11,13 +12,13 @@ SceneManagerPanel::SceneManagerPanel()
 
 void SceneManagerPanel::on_gui() {
     // Toolbar
-    if (ImGui::Button("New Scene")) {
+    if (ImGui::Button(ICON_FA_PLUS " New Scene")) {
         // TODO: Create new scene dialog
     }
 
     ImGui::SameLine();
 
-    if (ImGui::Button("Refresh")) {
+    if (ImGui::Button(ICON_FA_ARROWS_ROTATE)) {
         // TODO: Scan for scenes in project
     }
 
@@ -33,7 +34,7 @@ void SceneManagerPanel::render_scene_list() {
         ImGui::TextDisabled("No scenes in project");
         ImGui::TextDisabled("");
         ImGui::TextDisabled("Click 'New Scene' to create one,");
-        ImGui::TextDisabled("or add .scene files to Assets/Scenes/");
+        ImGui::TextDisabled("or add .scene files to Assets/");
     }
 
     for (const auto& scene : m_scenes) {

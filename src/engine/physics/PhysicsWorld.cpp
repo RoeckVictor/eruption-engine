@@ -63,17 +63,19 @@ b2BodyId PhysicsWorld::create_dynamic_body(float pixel_x, float pixel_y, float a
     return b2CreateBody(m_world_id, &body_def);
 }
 
-b2BodyId PhysicsWorld::create_static_body(float pixel_x, float pixel_y) {
+b2BodyId PhysicsWorld::create_static_body(float pixel_x, float pixel_y, float angle_rad) {
     b2BodyDef body_def = b2DefaultBodyDef();
     body_def.type = b2_staticBody;
     body_def.position = pixels_to_meters(pixel_x, pixel_y);
+    body_def.rotation = b2MakeRot(angle_rad);
     return b2CreateBody(m_world_id, &body_def);
 }
 
-b2BodyId PhysicsWorld::create_kinematic_body(float pixel_x, float pixel_y) {
+b2BodyId PhysicsWorld::create_kinematic_body(float pixel_x, float pixel_y, float angle_rad) {
     b2BodyDef body_def = b2DefaultBodyDef();
     body_def.type = b2_kinematicBody;
     body_def.position = pixels_to_meters(pixel_x, pixel_y);
+    body_def.rotation = b2MakeRot(angle_rad);
     return b2CreateBody(m_world_id, &body_def);
 }
 

@@ -1,9 +1,16 @@
 #include "FileBrowserPanel.h"
+#include "editor/icons/IconsFontAwesome6.h"
+#include "engine/core/Logger.h"
+#include "engine/asset/PixelGridFile.h"
+#include "engine/platform/PlatformUtils.h"
 
 #include <imgui.h>
+#include <nlohmann/json.hpp>
 #include <filesystem>
 #include <algorithm>
 #include <functional>
+#include <fstream>
+#include <cstring>
 
 namespace fs = std::filesystem;
 
@@ -30,6 +37,30 @@ void FileBrowserPanel::on_gui() {
     ImGui::BeginChild("FileList", ImVec2(0, 0), true);
     render_file_list();
     ImGui::EndChild();
+
+    // Delete confirmation modal (rendered outside children)
+    if (!m_pending_delete_path.empty()) {
+        ImGui::OpenPopup("ConfirmDeletePopup");
+    }
+
+    if (ImGui::BeginPopupModal("ConfirmDeletePopup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        std::string filename = fs::path(m_pending_delete_path).filename().string();
+        ImGui::Text("Are you sure you want to delete \"%s\"?", filename.c_str());
+        ImGui::Text("This cannot be undone.");
+        ImGui::Spacing();
+
+        if (ImGui::Button("Delete", ImVec2(120, 0))) {
+            perform_delete(m_pending_delete_path);
+            m_pending_delete_path.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+            m_pending_delete_path.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 }
 
 void FileBrowserPanel::set_root(const std::string& path) {
@@ -40,7 +71,7 @@ void FileBrowserPanel::set_root(const std::string& path) {
 
 void FileBrowserPanel::render_toolbar() {
     // Back button
-    if (ImGui::Button("<")) {
+    if (ImGui::Button(ICON_FA_ARROW_LEFT)) {
         if (m_current_path != m_root_path) {
             fs::path parent = fs::path(m_current_path).parent_path();
             if (parent.string().find(m_root_path) == 0) {
@@ -52,7 +83,7 @@ void FileBrowserPanel::render_toolbar() {
     ImGui::SameLine();
 
     // Refresh button
-    if (ImGui::Button("Refresh")) {
+    if (ImGui::Button(ICON_FA_ARROWS_ROTATE)) {
         refresh();
     }
 
@@ -81,6 +112,42 @@ void FileBrowserPanel::render_folder_tree() {
         return;
     }
 
+    // Helper lambda for tree node context menu
+    auto render_folder_context_menu = [&](const std::string& folder_path) {
+        if (ImGui::BeginPopupContextItem()) {
+            if (ImGui::MenuItem("Copy")) {
+                m_clipboard_path = folder_path;
+                m_clipboard_is_cut = false;
+            }
+            if (ImGui::MenuItem("Cut")) {
+                m_clipboard_path = folder_path;
+                m_clipboard_is_cut = true;
+            }
+            ImGui::Separator();
+
+            bool can_paste = !m_clipboard_path.empty() && fs::exists(m_clipboard_path);
+            if (ImGui::MenuItem("Paste", nullptr, false, can_paste)) {
+                perform_paste(folder_path);
+            }
+            ImGui::Separator();
+
+            // Don't allow rename/delete of root
+            bool is_root = (folder_path == m_root_path);
+
+            if (ImGui::MenuItem("Rename", nullptr, false, !is_root)) {
+                m_rename_target = folder_path;
+                std::string name = fs::path(folder_path).filename().string();
+                std::strncpy(m_rename_buffer, name.c_str(), sizeof(m_rename_buffer) - 1);
+                m_rename_buffer[sizeof(m_rename_buffer) - 1] = '\0';
+                m_rename_focus_set = false;
+            }
+            if (ImGui::MenuItem("Delete", nullptr, false, !is_root)) {
+                m_pending_delete_path = folder_path;
+            }
+            ImGui::EndPopup();
+        }
+    };
+
     // Render folder tree recursively
     std::function<void(const fs::path&)> render_directory = [&](const fs::path& dir) {
         try {
@@ -88,16 +155,11 @@ void FileBrowserPanel::render_folder_tree() {
                 if (!entry.is_directory()) continue;
 
                 std::string name = entry.path().filename().string();
-
-                // Skip hidden files/folders unless enabled
-                if (!m_show_hidden && name[0] == '.') continue;
-
-                // Skip Library folder
+                if (name.empty()) continue;
+                if (name[0] == '.' && !m_show_hidden) continue;
                 if (name == "Library") continue;
 
                 ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
-
-                // Check if this is the current path
                 if (entry.path().string() == m_current_path) {
                     flags |= ImGuiTreeNodeFlags_Selected;
                 }
@@ -108,13 +170,15 @@ void FileBrowserPanel::render_folder_tree() {
                     navigate_to(entry.path().string());
                 }
 
+                render_folder_context_menu(entry.path().string());
+
                 if (is_open) {
                     render_directory(entry.path());
                     ImGui::TreePop();
                 }
             }
         } catch (const std::exception&) {
-            // Ignore permission errors, etc.
+            // Ignore permission errors
         }
     };
 
@@ -132,6 +196,7 @@ void FileBrowserPanel::render_folder_tree() {
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
             navigate_to(m_root_path);
         }
+        render_folder_context_menu(m_root_path);
         render_directory(m_root_path);
         ImGui::TreePop();
     }
@@ -143,10 +208,18 @@ void FileBrowserPanel::render_file_list() {
         return;
     }
 
+    // Handle keyboard shortcuts
+    handle_keyboard_shortcuts();
+
     std::string filter_lower(m_filter);
     std::transform(filter_lower.begin(), filter_lower.end(), filter_lower.begin(), ::tolower);
 
-    for (const auto& entry : m_entries) {
+    // Deferred actions (don't modify state while iterating)
+    std::string deferred_navigate_path;
+
+    for (int i = 0; i < static_cast<int>(m_entries.size()); ++i) {
+        const auto& entry = m_entries[i];
+
         // Apply filter
         if (!filter_lower.empty()) {
             std::string name_lower = entry.name;
@@ -156,25 +229,61 @@ void FileBrowserPanel::render_file_list() {
             }
         }
 
-        // Icon based on type
-        const char* icon = entry.is_directory ? "[D]" : "[F]";
+        ImGui::PushID(i);
 
-        ImGui::Text("%s", icon);
+        // Icon based on type
+        const char* icon = entry.is_directory ? ICON_FA_FOLDER : ICON_FA_FILE;
+        ImGui::TextColored(entry.is_directory ? ImVec4(0.9f, 0.75f, 0.3f, 1.0f) : ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "%s", icon);
         ImGui::SameLine();
 
-        bool is_selected = (entry.path == m_selected_file);
-        if (ImGui::Selectable(entry.name.c_str(), is_selected, ImGuiSelectableFlags_AllowDoubleClick)) {
-            // Single click - select for preview
-            if (!entry.is_directory) {
-                select_file(entry.path);
+        // Inline rename mode
+        if (m_rename_target == entry.path) {
+            if (!m_rename_focus_set) {
+                ImGui::SetKeyboardFocusHere();
+                m_rename_focus_set = true;
             }
 
-            // Double click - open
-            if (ImGui::IsMouseDoubleClicked(0)) {
-                if (entry.is_directory) {
-                    navigate_to(entry.path);
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::InputText("##rename", m_rename_buffer, sizeof(m_rename_buffer),
+                                 ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+                // Enter pressed
+                std::string new_name(m_rename_buffer);
+                if (!new_name.empty()) {
+                    perform_rename(m_rename_target, new_name);
+                }
+                m_rename_target.clear();
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                m_rename_target.clear();
+            }
+            // Cancel on click elsewhere (lost focus, but not on the first frame)
+            if (m_rename_focus_set && !ImGui::IsItemActive() && !ImGui::IsItemFocused()) {
+                // Small delay: only cancel if we already had focus once
+                static int frames_active = 0;
+                frames_active++;
+                if (frames_active > 2) {
+                    m_rename_target.clear();
+                    frames_active = 0;
+                }
+            }
+        } else {
+            // Normal display
+            bool is_selected = (entry.path == m_selected_file);
+            if (ImGui::Selectable(entry.name.c_str(), is_selected, ImGuiSelectableFlags_AllowDoubleClick)) {
+                // Single click - select
+                if (!entry.is_directory) {
+                    select_file(entry.path);
                 } else {
-                    // TODO: Open file in appropriate editor
+                    m_selected_file = entry.path;
+                }
+
+                // Double click - open
+                if (ImGui::IsMouseDoubleClicked(0)) {
+                    if (entry.is_directory) {
+                        deferred_navigate_path = entry.path;
+                    } else if (m_file_opened_callback) {
+                        m_file_opened_callback(entry.path);
+                    }
                 }
             }
         }
@@ -183,23 +292,46 @@ void FileBrowserPanel::render_file_list() {
         if (ImGui::BeginPopupContextItem()) {
             if (ImGui::MenuItem("Open")) {
                 if (entry.is_directory) {
-                    navigate_to(entry.path);
-                } else {
-                    // TODO: Open file
+                    deferred_navigate_path = entry.path;
+                } else if (m_file_opened_callback) {
+                    m_file_opened_callback(entry.path);
                 }
             }
+            ImGui::Separator();
+
+            if (ImGui::MenuItem("Copy")) {
+                m_clipboard_path = entry.path;
+                m_clipboard_is_cut = false;
+            }
+            if (ImGui::MenuItem("Cut")) {
+                m_clipboard_path = entry.path;
+                m_clipboard_is_cut = true;
+            }
+
+            // Paste into folder (only for directories)
+            if (entry.is_directory) {
+                bool can_paste = !m_clipboard_path.empty() && fs::exists(m_clipboard_path);
+                if (ImGui::MenuItem("Paste", nullptr, false, can_paste)) {
+                    perform_paste(entry.path);
+                }
+            }
+
+            ImGui::Separator();
+
             if (ImGui::MenuItem("Rename")) {
-                // TODO: Rename dialog
+                m_rename_target = entry.path;
+                std::strncpy(m_rename_buffer, entry.name.c_str(), sizeof(m_rename_buffer) - 1);
+                m_rename_buffer[sizeof(m_rename_buffer) - 1] = '\0';
+                m_rename_focus_set = false;
             }
             if (ImGui::MenuItem("Delete")) {
-                // TODO: Delete confirmation
+                m_pending_delete_path = entry.path;
             }
+
             ImGui::Separator();
-            if (ImGui::MenuItem("Show in Explorer")) {
-#ifdef _WIN32
-                std::string cmd = "explorer /select,\"" + entry.path + "\"";
-                system(cmd.c_str());
-#endif
+
+            if (ImGui::MenuItem("Show in File Manager")) {
+                engine::platform::reveal_in_file_manager(entry.path);
             }
             ImGui::EndPopup();
         }
@@ -210,29 +342,250 @@ void FileBrowserPanel::render_file_list() {
             ImGui::Text("%s", entry.name.c_str());
             ImGui::EndDragDropSource();
         }
+
+        ImGui::PopID();
+    }
+
+    // Inline create folder
+    if (m_creating_folder) {
+        ImGui::TextColored(ImVec4(0.9f, 0.75f, 0.3f, 1.0f), "%s", ICON_FA_FOLDER);
+        ImGui::SameLine();
+
+        if (!m_create_focus_set) {
+            ImGui::SetKeyboardFocusHere();
+            m_create_focus_set = true;
+        }
+
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::InputText("##createfolder", m_create_buffer, sizeof(m_create_buffer),
+                             ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+            std::string name(m_create_buffer);
+            if (!name.empty()) {
+                try {
+                    fs::create_directories(fs::path(m_current_path) / name);
+                } catch (const std::exception& e) {
+                    engine::Logger::instance().error("FileBrowser", "Failed to create folder: %s", e.what());
+                }
+                refresh();
+            }
+            m_creating_folder = false;
+            std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            m_creating_folder = false;
+            std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+        }
+    }
+
+    // Inline create scene
+    if (m_creating_scene) {
+        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "%s", ICON_FA_FILE);
+        ImGui::SameLine();
+
+        if (!m_create_focus_set) {
+            ImGui::SetKeyboardFocusHere();
+            m_create_focus_set = true;
+        }
+
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::InputText("##createscene", m_create_buffer, sizeof(m_create_buffer),
+                             ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+            std::string name(m_create_buffer);
+            if (!name.empty()) {
+                // Ensure .scene extension
+                if (name.size() < 6 || name.substr(name.size() - 6) != ".scene") {
+                    name += ".scene";
+                }
+                try {
+                    fs::path scene_path = fs::path(m_current_path) / name;
+                    std::ofstream file(scene_path);
+                    if (file.is_open()) {
+                        std::string scene_name = fs::path(name).stem().string();
+                        file << "{\n";
+                        file << "  \"name\": \"" << scene_name << "\",\n";
+                        file << "  \"guid\": \"\",\n";
+                        file << "  \"settings\": {\n";
+                        file << "    \"gravity\": [0.0, -9.81],\n";
+                        file << "    \"pixelsPerMeter\": 16.0,\n";
+                        file << "    \"physicsSubsteps\": 4,\n";
+                        file << "    \"backgroundColor\": [0.1, 0.1, 0.15, 1.0]\n";
+                        file << "  },\n";
+                        file << "  \"entities\": []\n";
+                        file << "}\n";
+                    }
+                } catch (const std::exception& e) {
+                    engine::Logger::instance().error("FileBrowser", "Failed to create scene: %s", e.what());
+                }
+                refresh();
+            }
+            m_creating_scene = false;
+            std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            m_creating_scene = false;
+            std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+        }
+    }
+
+    // Inline create pixel grid
+    if (m_creating_pxg) {
+        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "%s", ICON_FA_FILE);
+        ImGui::SameLine();
+
+        if (!m_create_focus_set) {
+            ImGui::SetKeyboardFocusHere();
+            m_create_focus_set = true;
+        }
+
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::InputText("##createpxg", m_create_buffer, sizeof(m_create_buffer),
+                             ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+            std::string name(m_create_buffer);
+            if (!name.empty()) {
+                // Ensure .pxg extension
+                if (name.size() < 4 || name.substr(name.size() - 4) != ".pxg") {
+                    name += ".pxg";
+                }
+                try {
+                    fs::path pxg_path = fs::path(m_current_path) / name;
+                    // Create a default 16x16 .pxg with color + material layers
+                    const uint32_t w = 16, h = 16;
+                    const uint32_t num_channels = 5; // RGBA + material
+                    engine::asset::PxgChannelDesc descs[5];
+                    std::strncpy(descs[0].name, "color_r", sizeof(descs[0].name));
+                    std::strncpy(descs[1].name, "color_g", sizeof(descs[1].name));
+                    std::strncpy(descs[2].name, "color_b", sizeof(descs[2].name));
+                    std::strncpy(descs[3].name, "color_a", sizeof(descs[3].name));
+                    std::strncpy(descs[4].name, "material", sizeof(descs[4].name));
+
+                    // All zeros = transparent, material 0 (air)
+                    std::vector<uint8_t> pixels(w * h * num_channels, 0);
+
+                    // Metadata with layer definitions
+                    nlohmann::json meta;
+                    meta["origin"] = { {"x", 0}, {"y", 0} };
+                    meta["layers"] = nlohmann::json::array({
+                        { {"name", "color"}, {"opacity", 1.0}, {"visible", true}, {"type", "color"}, {"engine_required", true} },
+                        { {"name", "material"}, {"opacity", 1.0}, {"visible", true}, {"type", "enum"}, {"engine_required", true},
+                          {"values", {"air", "rock", "dirt", "sand", "water", "lava", "ice", "steam", "fire", "explosive"}} }
+                    });
+
+                    engine::asset::pxg_save(pxg_path.string(), w, h, descs, num_channels, pixels.data(), meta.dump());
+                } catch (const std::exception& e) {
+                    engine::Logger::instance().error("FileBrowser", "Failed to create pixel grid: %s", e.what());
+                }
+                refresh();
+            }
+            m_creating_pxg = false;
+            std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            m_creating_pxg = false;
+            std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+        }
+    }
+
+    // Inline create prefab
+    if (m_creating_prefab) {
+        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "%s", ICON_FA_FILE);
+        ImGui::SameLine();
+
+        if (!m_create_focus_set) {
+            ImGui::SetKeyboardFocusHere();
+            m_create_focus_set = true;
+        }
+
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::InputText("##createprefab", m_create_buffer, sizeof(m_create_buffer),
+                             ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+            std::string name(m_create_buffer);
+            if (!name.empty()) {
+                // Ensure .prefab extension
+                if (name.size() < 7 || name.substr(name.size() - 7) != ".prefab") {
+                    name += ".prefab";
+                }
+                try {
+                    fs::path prefab_path = fs::path(m_current_path) / name;
+                    std::string prefab_name = fs::path(name).stem().string();
+
+                    nlohmann::json json;
+                    json["name"] = prefab_name;
+                    json["components"] = nlohmann::json::array({
+                        { {"type", "engine::Transform"}, {"data", { {"x", 0.0}, {"y", 0.0}, {"rotation", 0.0}, {"scale_x", 1.0}, {"scale_y", 1.0} }} }
+                    });
+
+                    std::ofstream file(prefab_path);
+                    if (file.is_open()) {
+                        file << json.dump(2);
+                    }
+                } catch (const std::exception& e) {
+                    engine::Logger::instance().error("FileBrowser", "Failed to create prefab: %s", e.what());
+                }
+                refresh();
+            }
+            m_creating_prefab = false;
+            std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            m_creating_prefab = false;
+            std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+        }
     }
 
     // Right-click on empty space
     if (ImGui::BeginPopupContextWindow(nullptr, ImGuiPopupFlags_NoOpenOverItems | ImGuiPopupFlags_MouseButtonRight)) {
         if (ImGui::BeginMenu("Create")) {
             if (ImGui::MenuItem("Folder")) {
-                // TODO: Create folder dialog
+                m_creating_folder = true;
+                m_creating_scene = false;
+                m_creating_pxg = false;
+                m_creating_prefab = false;
+                std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+                m_create_focus_set = false;
             }
             if (ImGui::MenuItem("Scene")) {
-                // TODO: Create scene
+                m_creating_scene = true;
+                m_creating_folder = false;
+                m_creating_pxg = false;
+                m_creating_prefab = false;
+                std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+                m_create_focus_set = false;
             }
-            if (ImGui::MenuItem("Prefab")) {
-                // TODO: Create prefab
+            if (ImGui::MenuItem("Pixel Grid (.pxg)")) {
+                m_creating_pxg = true;
+                m_creating_folder = false;
+                m_creating_scene = false;
+                m_creating_prefab = false;
+                std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+                m_create_focus_set = false;
             }
-            if (ImGui::MenuItem("Script")) {
-                // TODO: Create script dialog
+            if (ImGui::MenuItem("Prefab (.prefab)")) {
+                m_creating_prefab = true;
+                m_creating_folder = false;
+                m_creating_scene = false;
+                m_creating_pxg = false;
+                std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+                m_create_focus_set = false;
             }
             ImGui::EndMenu();
         }
+
+        bool can_paste = !m_clipboard_path.empty() && fs::exists(m_clipboard_path);
+        if (ImGui::MenuItem("Paste", nullptr, false, can_paste)) {
+            perform_paste(m_current_path);
+        }
+
+        ImGui::Separator();
+
         if (ImGui::MenuItem("Refresh")) {
             refresh();
         }
         ImGui::EndPopup();
+    }
+
+    // Perform deferred navigation now that the loop is done
+    if (!deferred_navigate_path.empty()) {
+        navigate_to(deferred_navigate_path);
     }
 }
 
@@ -246,11 +599,8 @@ void FileBrowserPanel::refresh() {
     try {
         for (const auto& entry : fs::directory_iterator(m_current_path)) {
             std::string name = entry.path().filename().string();
-
-            // Skip hidden files unless enabled
-            if (!m_show_hidden && name[0] == '.') continue;
-
-            // Skip Library folder
+            if (name.empty()) continue;
+            if (name[0] == '.' && !m_show_hidden) continue;
             if (name == "Library") continue;
 
             FileEntry fe;
@@ -274,6 +624,11 @@ void FileBrowserPanel::refresh() {
 
 void FileBrowserPanel::navigate_to(const std::string& path) {
     m_current_path = path;
+    m_rename_target.clear();
+    m_creating_folder = false;
+    m_creating_scene = false;
+    m_creating_pxg = false;
+    m_creating_prefab = false;
     refresh();
 }
 
@@ -281,6 +636,156 @@ void FileBrowserPanel::select_file(const std::string& path) {
     m_selected_file = path;
     if (m_file_selected_callback) {
         m_file_selected_callback(path);
+    }
+}
+
+void FileBrowserPanel::perform_delete(const std::string& path) {
+    try {
+        if (fs::is_directory(path)) {
+            fs::remove_all(path);
+        } else {
+            fs::remove(path);
+        }
+
+        // Clear selection if we deleted the selected item
+        if (m_selected_file == path) {
+            m_selected_file.clear();
+        }
+
+        // Clear clipboard if we deleted the clipboard item
+        if (m_clipboard_path == path) {
+            m_clipboard_path.clear();
+        }
+
+        refresh();
+    } catch (const std::exception& e) {
+        engine::Logger::instance().error("FileBrowser", "Failed to delete: %s", e.what());
+    }
+}
+
+void FileBrowserPanel::perform_rename(const std::string& old_path, const std::string& new_name) {
+    try {
+        fs::path parent = fs::path(old_path).parent_path();
+        fs::path new_path = parent / new_name;
+
+        if (fs::exists(new_path)) {
+            engine::Logger::instance().warning("FileBrowser", "Cannot rename: '%s' already exists", new_name.c_str());
+            return;
+        }
+
+        fs::rename(old_path, new_path);
+
+        // Update selection if renamed item was selected
+        if (m_selected_file == old_path) {
+            m_selected_file = new_path.string();
+        }
+
+        // Update clipboard if renamed item was in clipboard
+        if (m_clipboard_path == old_path) {
+            m_clipboard_path = new_path.string();
+        }
+
+        // Update current path if we renamed the current directory
+        if (m_current_path == old_path) {
+            m_current_path = new_path.string();
+        }
+
+        refresh();
+    } catch (const std::exception& e) {
+        engine::Logger::instance().error("FileBrowser", "Failed to rename: %s", e.what());
+    }
+}
+
+void FileBrowserPanel::perform_paste(const std::string& dest_dir) {
+    if (m_clipboard_path.empty() || !fs::exists(m_clipboard_path)) {
+        return;
+    }
+
+    try {
+        fs::path src(m_clipboard_path);
+        fs::path dest = fs::path(dest_dir) / src.filename();
+
+        // Don't paste into self
+        if (src == dest) {
+            return;
+        }
+
+        // For copy: don't allow pasting a folder into itself or a subdirectory of itself
+        if (fs::is_directory(src)) {
+            std::string dest_str = fs::path(dest_dir).string();
+            std::string src_str = src.string();
+            if (dest_str.find(src_str) == 0) {
+                engine::Logger::instance().warning("FileBrowser", "Cannot paste folder into itself");
+                return;
+            }
+        }
+
+        if (m_clipboard_is_cut) {
+            // Move
+            fs::rename(src, dest);
+            m_clipboard_path.clear();
+        } else {
+            // Copy
+            if (fs::is_directory(src)) {
+                fs::copy(src, dest, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+            } else {
+                fs::copy_file(src, dest, fs::copy_options::overwrite_existing);
+            }
+        }
+
+        refresh();
+    } catch (const std::exception& e) {
+        engine::Logger::instance().error("FileBrowser", "Failed to paste: %s", e.what());
+    }
+}
+
+void FileBrowserPanel::handle_keyboard_shortcuts() {
+    if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) return;
+
+    // Don't process shortcuts if rename or create is active
+    if (!m_rename_target.empty() || m_creating_folder || m_creating_scene || m_creating_pxg || m_creating_prefab) return;
+
+    ImGuiIO& io = ImGui::GetIO();
+
+    // Ctrl+C - Copy
+    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C)) {
+        if (!m_selected_file.empty()) {
+            m_clipboard_path = m_selected_file;
+            m_clipboard_is_cut = false;
+        }
+    }
+
+    // Ctrl+X - Cut
+    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_X)) {
+        if (!m_selected_file.empty()) {
+            m_clipboard_path = m_selected_file;
+            m_clipboard_is_cut = true;
+        }
+    }
+
+    // Ctrl+V - Paste
+    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V)) {
+        if (!m_clipboard_path.empty()) {
+            perform_paste(m_current_path);
+        }
+    }
+
+    // Delete key
+    if (ImGui::IsKeyPressed(ImGuiKey_Delete)) {
+        if (!m_selected_file.empty() && fs::exists(m_selected_file)) {
+            m_pending_delete_path = m_selected_file;
+        }
+    }
+
+    // F2 - Rename
+    if (ImGui::IsKeyPressed(ImGuiKey_F2)) {
+        if (!m_selected_file.empty() && fs::exists(m_selected_file)) {
+            m_rename_target = m_selected_file;
+            std::string name = fs::path(m_selected_file).filename().string();
+            std::strncpy(m_rename_buffer, name.c_str(), sizeof(m_rename_buffer) - 1);
+            m_rename_buffer[sizeof(m_rename_buffer) - 1] = '\0';
+            m_rename_focus_set = false;
+        }
     }
 }
 

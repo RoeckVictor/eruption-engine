@@ -45,7 +45,7 @@ public:
 
 private:
     /// Generate a transform command when manipulation ends.
-    void generate_command(entt::entity entity, const Transform& old_transform, const Transform& new_transform);
+    void generate_command(entt::entity entity, const engine::Transform& old_transform, const engine::Transform& new_transform);
 
     EditorContext& m_context;
 
@@ -61,7 +61,7 @@ private:
 
     // Track which entity is being manipulated
     entt::entity m_active_entity = entt::null;
-    Transform m_start_transform;
+    engine::Transform m_start_transform;
 };
 
 } // namespace editor

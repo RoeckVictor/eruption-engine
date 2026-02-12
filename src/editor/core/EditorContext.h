@@ -1,12 +1,15 @@
 #pragma once
 
 #include "editor/commands/CommandHistory.h"
+#include "editor/serialization/SceneSerializer.h"
+#include "editor/core/EditorPixelGridLoader.h"
 #include "RuntimeContext.h"
 #include <entt/entt.hpp>
 #include <vector>
 #include <string>
 #include <functional>
 #include <memory>
+#include <typeindex>
 
 namespace engine {
 class Engine;
@@ -16,6 +19,30 @@ namespace editor {
 
 class ProjectManager;
 class Command;
+
+/// Visibility mode for debug overlays in the viewport.
+enum class GizmoVisibility { None, SelectedOnly, All };
+
+/// Per-overlay visibility settings.
+struct GizmoVisibilitySettings {
+    GizmoVisibility colliders = GizmoVisibility::SelectedOnly;
+    GizmoVisibility terrain_colliders = GizmoVisibility::SelectedOnly;
+    GizmoVisibility object_origin = GizmoVisibility::None;
+    GizmoVisibility object_name = GizmoVisibility::None;
+    GizmoVisibility camera_bounds = GizmoVisibility::SelectedOnly;
+    GizmoVisibility rigidbody_velocity = GizmoVisibility::SelectedOnly;
+    GizmoVisibility pixel_grid_bounds = GizmoVisibility::None;
+    GizmoVisibility parent_child_links = GizmoVisibility::None;
+};
+
+/// Editing override for panels that provide their own registry/selection
+/// (e.g., PrefabEditorPanel). When active, EditorContext delegates
+/// registry(), selection(), select(), mark_dirty(), etc. to the override.
+struct EditingOverride {
+    entt::registry* registry = nullptr;
+    std::vector<entt::entity>* selection = nullptr;
+    std::function<void()> mark_dirty;   // called instead of setting m_dirty
+};
 
 /// Central editor state management.
 /// Holds selection, clipboard, dirty state, and provides
@@ -28,7 +55,8 @@ public:
     // --- Selection Management ---
 
     /// Get the currently selected entities.
-    const std::vector<entt::entity>& selection() const { return m_selection; }
+    /// When an editing override is active, returns the override selection.
+    const std::vector<entt::entity>& selection() const { return m_editing_override.selection ? *m_editing_override.selection : m_selection; }
 
     /// Check if an entity is selected.
     bool is_selected(entt::entity entity) const;
@@ -58,8 +86,24 @@ public:
     void set_registry(entt::registry* registry);
 
     /// Get the active registry (may be null if no scene loaded).
-    entt::registry* registry() { return m_registry; }
-    const entt::registry* registry() const { return m_registry; }
+    /// When an editing override is active, returns the override registry.
+    entt::registry* registry() { return m_editing_override.registry ? m_editing_override.registry : m_registry; }
+    const entt::registry* registry() const { return m_editing_override.registry ? m_editing_override.registry : m_registry; }
+
+    /// Get the scene registry directly (bypasses override).
+    entt::registry* scene_registry() { return m_registry; }
+
+    // --- Editing Override ---
+
+    /// Set an editing override (e.g., from prefab editor).
+    /// When active, registry/selection/mark_dirty delegate to the override.
+    void set_editing_override(const EditingOverride& override);
+
+    /// Clear the editing override, reverting to the scene context.
+    void clear_editing_override();
+
+    /// Check if an editing override is active.
+    bool has_editing_override() const { return m_editing_override.registry != nullptr; }
 
     // --- Dirty State ---
 
@@ -85,6 +129,20 @@ public:
 
     /// Check if clipboard has content.
     bool has_clipboard() const { return !m_clipboard.empty(); }
+
+    // --- Component Clipboard ---
+
+    /// Check if component clipboard has content.
+    bool has_component_clipboard() const { return !m_component_clipboard.empty(); }
+
+    /// Get the type of component in clipboard.
+    std::type_index component_clipboard_type() const { return m_component_clipboard_type; }
+
+    /// Set component clipboard data.
+    void set_component_clipboard(const std::string& data, std::type_index type);
+
+    /// Get component clipboard data.
+    const std::string& component_clipboard() const { return m_component_clipboard; }
 
     // --- Scene Path ---
 
@@ -168,6 +226,23 @@ public:
     /// Get current play state.
     PlayState play_state() const { return m_runtime ? m_runtime->state() : PlayState::Editing; }
 
+    // --- Gizmo Visibility ---
+
+    GizmoVisibilitySettings& gizmo_visibility() { return m_gizmo_visibility; }
+    const GizmoVisibilitySettings& gizmo_visibility() const { return m_gizmo_visibility; }
+
+    // --- Scene Settings ---
+
+    /// Get/set scene settings (physics, simulation, etc.).
+    SceneSettings& scene_settings() { return m_scene_settings; }
+    const SceneSettings& scene_settings() const { return m_scene_settings; }
+
+    // --- Pixel Grid Loader ---
+
+    /// Get the pixel grid loader (for loading .pxg files in editor).
+    EditorPixelGridLoader& pixel_grid_loader() { return m_pixel_grid_loader; }
+    const EditorPixelGridLoader& pixel_grid_loader() const { return m_pixel_grid_loader; }
+
 private:
     void notify_selection_changed();
 
@@ -175,10 +250,13 @@ private:
     SelectionChangedCallback m_selection_callback;
 
     entt::registry* m_registry = nullptr;
+    EditingOverride m_editing_override;
 
     bool m_dirty = false;
     std::string m_scene_path;
     std::string m_clipboard;  // Serialized entity data for copy/paste
+    std::string m_component_clipboard;  // Serialized component data for copy/paste
+    std::type_index m_component_clipboard_type = std::type_index(typeid(void));  // Track component type
 
     EditorCamera m_camera;
 
@@ -190,6 +268,11 @@ private:
     CommandHistory m_history;
 
     RuntimeContext* m_runtime = nullptr;
+
+    GizmoVisibilitySettings m_gizmo_visibility;
+    SceneSettings m_scene_settings;
+
+    EditorPixelGridLoader m_pixel_grid_loader;
 };
 
 } // namespace editor

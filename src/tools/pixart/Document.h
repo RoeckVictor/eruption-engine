@@ -20,6 +20,7 @@ struct Layer {
     std::vector<std::string> enum_names;    // only used for Enum type
     bool visible = true;
     float opacity = 1.0f;                   // 0.0 = fully transparent, 1.0 = fully opaque
+    bool engine_required = false;           // if true, cannot be deleted by the user
 };
 
 /// Pixel grid document with a layer-based data model.
@@ -29,6 +30,11 @@ public:
     int width() const { return m_width; }
     int height() const { return m_height; }
     bool valid() const { return m_width > 0 && m_height > 0; }
+
+    /// Origin/pivot point (pixel coordinates within the grid).
+    int origin_x() const { return m_origin_x; }
+    int origin_y() const { return m_origin_y; }
+    void set_origin(int x, int y) { m_origin_x = x; m_origin_y = y; }
 
     /// Create a new blank document with only the Color layer.
     void create(int w, int h);
@@ -74,6 +80,8 @@ public:
 private:
     int m_width = 0;
     int m_height = 0;
+    int m_origin_x = 0;
+    int m_origin_y = 0;
     std::vector<Layer> m_layers;
 };
 

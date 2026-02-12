@@ -53,8 +53,9 @@ public:
 
     /// Initialize terrain collider manager.
     /// @param world Physics world to use
-    /// @param chunk_size Size of terrain chunks in pixels
-    bool init(PhysicsWorld& world, int chunk_size = 64);
+    /// @param chunk_size_x Width of terrain chunks in pixels
+    /// @param chunk_size_y Height of terrain chunks in pixels
+    bool init(PhysicsWorld& world, int chunk_size_x = 32, int chunk_size_y = 32);
     void shutdown();
 
     /// Update terrain colliders for the entire grid.
@@ -83,11 +84,13 @@ public:
     }
 
     /// Get chunk size in pixels.
-    int chunk_size() const { return m_chunk_size; }
+    int chunk_size_x() const { return m_chunk_size_x; }
+    int chunk_size_y() const { return m_chunk_size_y; }
 
 private:
     PhysicsWorld* m_world = nullptr;
-    int m_chunk_size = 64;
+    int m_chunk_size_x = 32;
+    int m_chunk_size_y = 32;
     std::unordered_map<ChunkCoord, TerrainChunk, ChunkCoordHash> m_terrain_chunks;
     std::vector<uint8_t> m_terrain_readback_buf;
 };

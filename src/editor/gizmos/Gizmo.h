@@ -24,7 +24,7 @@ enum class GizmoSpace {
 /// Result of gizmo interaction.
 struct GizmoResult {
     bool is_active = false;      // Gizmo is being manipulated
-    bool value_changed = false;  // Transform was modified this frame
+    bool value_changed = false;  // engine::Transform was modified this frame
     bool just_started = false;   // Manipulation just started
     bool just_finished = false;  // Manipulation just ended
 };
@@ -50,17 +50,18 @@ public:
         ImVec2 viewport_pos,
         ImVec2 viewport_size,
         entt::entity entity,
-        Transform& transform,
+        engine::Transform& transform,
         float camera_x,
         float camera_y,
-        float zoom
+        float zoom,
+        GizmoSpace space = GizmoSpace::World
     ) = 0;
 
     /// Check if the gizmo is currently being dragged.
     bool is_dragging() const { return m_is_dragging; }
 
     /// Get the transform value when dragging started (for undo).
-    const Transform& start_transform() const { return m_start_transform; }
+    const engine::Transform& start_transform() const { return m_start_transform; }
 
 protected:
     /// Convert world position to screen position.
@@ -86,7 +87,7 @@ protected:
     }
 
     bool m_is_dragging = false;
-    Transform m_start_transform;
+    engine::Transform m_start_transform;
     ImVec2 m_drag_start_mouse;
     ImVec2 m_drag_start_world;
 };

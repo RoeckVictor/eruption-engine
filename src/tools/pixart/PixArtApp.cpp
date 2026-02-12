@@ -1,62 +1,20 @@
 #include "PixArtApp.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <string>
 
-// Native file dialogs via Win32 API
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-#include <commdlg.h>
-#include <shobjidl.h>
-#endif
+#include "engine/platform/PlatformUtils.h"
 
 namespace pixart {
 
-// ---------------------------------------------------------------------------
-// Native file dialogs
-// ---------------------------------------------------------------------------
-
-std::string PixArtApp::open_file_dialog() {
-#ifdef _WIN32
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = nullptr;
-    ofn.lpstrFilter = "Pixel Grid Files (*.pxg)\0*.pxg\0All Files (*.*)\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrTitle = "Open Pixel Grid";
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameA(&ofn)) {
-        return std::string(filename);
-    }
-#endif
-    return {};
-}
-
-std::string PixArtApp::save_file_dialog() {
-#ifdef _WIN32
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = nullptr;
-    ofn.lpstrFilter = "Pixel Grid Files (*.pxg)\0*.pxg\0All Files (*.*)\0*.*\0";
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrTitle = "Save Pixel Grid";
-    ofn.lpstrDefExt = "pxg";
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
-    if (GetSaveFileNameA(&ofn)) {
-        return std::string(filename);
-    }
-#endif
-    return {};
-}
+static const std::vector<engine::platform::FileFilter> PXG_FILTERS = {
+    {"Pixel Grid Files (*.pxg)", "*.pxg"},
+    {"All Files (*.*)", "*.*"}
+};
 
 // ---------------------------------------------------------------------------
 // Keyboard shortcuts
@@ -88,7 +46,7 @@ void PixArtApp::handle_shortcuts() {
     }
     if (ctrl && ImGui::IsKeyPressed(ImGuiKey_S)) {
         if (m_current_path.empty()) {
-            std::string path = save_file_dialog();
+            std::string path = engine::platform::save_file_dialog("Save Pixel Grid", PXG_FILTERS, "pxg");
             if (!path.empty() && m_doc.save(path)) {
                 m_current_path = path;
                 m_has_unsaved_changes = false;
@@ -111,12 +69,30 @@ void PixArtApp::init() {
     m_canvas_dirty = true;
 }
 
+void PixArtApp::init(const std::string& file_path) {
+    if (!file_path.empty() && m_doc.load(file_path)) {
+        m_current_path = file_path;
+        m_canvas_dirty = true;
+        m_active_layer = 0;
+        m_has_unsaved_changes = false;
+    } else {
+        // Fall back to default document if file couldn't be loaded
+        m_doc.create(16, 16);
+        m_canvas_dirty = true;
+    }
+}
+
 void PixArtApp::update() {
     handle_shortcuts();
 
     // Dockspace over the entire viewport
-    ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(),
+    ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(),
                                   ImGuiDockNodeFlags_PassthruCentralNode);
+
+    if (m_first_frame) {
+        setup_default_layout(dockspace_id);
+        m_first_frame = false;
+    }
 
     render_menu_bar();
     render_toolbar();
@@ -138,6 +114,32 @@ void PixArtApp::shutdown() {
     }
 }
 
+void PixArtApp::setup_default_layout(unsigned int dockspace_id) {
+    ImGui::DockBuilderRemoveNode(dockspace_id);
+    ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->WorkSize);
+
+    // Split top strip for Toolbar (~15% height)
+    ImGuiID dock_top, dock_main;
+    ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Up, 0.15f, &dock_top, &dock_main);
+
+    // Split right column from center (~22% width)
+    ImGuiID dock_right, dock_center;
+    ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.22f, &dock_right, &dock_center);
+
+    // Split right column into Layers (top) and Picker (bottom, ~45% of right)
+    ImGuiID dock_right_top, dock_right_bottom;
+    ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Down, 0.45f, &dock_right_bottom, &dock_right_top);
+
+    // Dock the panels
+    ImGui::DockBuilderDockWindow("Toolbar", dock_top);
+    ImGui::DockBuilderDockWindow("Canvas", dock_center);
+    ImGui::DockBuilderDockWindow("Layers", dock_right_top);
+    ImGui::DockBuilderDockWindow("Picker", dock_right_bottom);
+
+    ImGui::DockBuilderFinish(dockspace_id);
+}
+
 // ---------------------------------------------------------------------------
 // Menu bar
 // ---------------------------------------------------------------------------
@@ -153,7 +155,7 @@ void PixArtApp::render_menu_bar() {
             }
             if (ImGui::MenuItem("Save", "Ctrl+S")) {
                 if (m_current_path.empty()) {
-                    std::string path = save_file_dialog();
+                    std::string path = engine::platform::save_file_dialog("Save Pixel Grid", PXG_FILTERS, "pxg");
                     if (!path.empty() && m_doc.save(path)) {
                         m_current_path = path;
                         m_has_unsaved_changes = false;
@@ -165,7 +167,7 @@ void PixArtApp::render_menu_bar() {
                 }
             }
             if (ImGui::MenuItem("Save As...")) {
-                std::string path = save_file_dialog();
+                std::string path = engine::platform::save_file_dialog("Save Pixel Grid", PXG_FILTERS, "pxg");
                 if (!path.empty() && m_doc.save(path)) {
                     m_current_path = path;
                     m_has_unsaved_changes = false;
@@ -225,10 +227,22 @@ void PixArtApp::render_toolbar() {
     ImGui::SetNextItemWidth(120);
     ImGui::SliderInt("Brush", &m_tools.draw_state.brush_size, 1, 32);
 
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    bool origin_was_active = m_setting_origin;
+    if (origin_was_active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.5f, 0.2f, 1.0f));
+    if (ImGui::Button("Origin", ImVec2(70, 0))) {
+        m_setting_origin = !m_setting_origin;
+    }
+    if (origin_was_active) ImGui::PopStyleColor();
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click on the canvas to set the origin/pivot point");
+
     // Status info
     ImGui::Separator();
     if (m_doc.valid()) {
-        ImGui::Text("Grid: %dx%d", m_doc.width(), m_doc.height());
+        ImGui::Text("Grid: %dx%d  Origin: (%d, %d)", m_doc.width(), m_doc.height(),
+                     m_doc.origin_x(), m_doc.origin_y());
         ImGui::SameLine();
         ImGui::Text("| Zoom: %.0fx", m_view.zoom);
         if (m_hover_px >= 0 && m_hover_py >= 0) {
@@ -464,6 +478,22 @@ void PixArtApp::render_canvas() {
         }
     }
 
+    // --- Origin crosshair marker ---
+    {
+        int ox = m_doc.origin_x();
+        int oy = m_doc.origin_y();
+        float ocx = grid_x0 + (ox + 0.5f) * m_view.zoom;  // Center of origin pixel
+        float ocy = grid_y0 + (oy + 0.5f) * m_view.zoom;
+        float arm = std::max(m_view.zoom * 1.5f, 6.0f);    // Crosshair arm length
+        ImU32 origin_col = IM_COL32(0, 220, 220, 220);      // Cyan
+        dl->AddLine(ImVec2(ocx - arm, ocy), ImVec2(ocx + arm, ocy), origin_col, 2.0f);
+        dl->AddLine(ImVec2(ocx, ocy - arm), ImVec2(ocx, ocy + arm), origin_col, 2.0f);
+        // Small diamond at center
+        float d = std::max(m_view.zoom * 0.3f, 3.0f);
+        dl->AddQuadFilled(ImVec2(ocx, ocy - d), ImVec2(ocx + d, ocy),
+                          ImVec2(ocx, ocy + d), ImVec2(ocx - d, ocy), origin_col);
+    }
+
     // --- Grid border ---
     dl->AddRect(ImVec2(grid_x0, grid_y0),
                 ImVec2(grid_x0 + grid_w, grid_y0 + grid_h),
@@ -534,6 +564,19 @@ void PixArtApp::handle_canvas_input(float cx0, float cy0, float cw, float ch) {
     int px, py;
     bool on_grid = m_view.screen_to_pixel(mouse.x, mouse.y, cx0, cy0, cw, ch,
                                           m_doc.width(), m_doc.height(), px, py);
+
+    // Origin placement mode: click to set origin and exit mode
+    if (m_setting_origin) {
+        if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && on_grid) {
+            m_doc.set_origin(px, py);
+            m_setting_origin = false;
+            m_has_unsaved_changes = true;
+        }
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+            m_setting_origin = false;  // Cancel
+        }
+        return;  // Don't process drawing tools while setting origin
+    }
 
     switch (m_tools.active_tool) {
     case Tool::Pencil:
@@ -706,8 +749,8 @@ void PixArtApp::render_layer_panel() {
         if (!can_move_down) ImGui::EndDisabled();
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Move down");
 
-        // Delete button (not for the last remaining layer)
-        if (m_doc.layer_count() > 1) {
+        // Delete button (not for engine-required layers)
+        if (m_doc.layer_count() > 1 && !layer.engine_required) {
             ImGui::SameLine();
             if (ImGui::SmallButton("X")) {
                 m_active_layer = m_doc.remove_layer(i, m_active_layer);
@@ -1001,7 +1044,7 @@ void PixArtApp::do_new_document() {
 }
 
 void PixArtApp::do_open_file() {
-    std::string path = open_file_dialog();
+    std::string path = engine::platform::open_file_dialog("Open Pixel Grid", PXG_FILTERS);
     if (!path.empty() && m_doc.load(path)) {
         if (m_canvas_tex) {
             glDeleteTextures(1, &m_canvas_tex);
@@ -1028,7 +1071,7 @@ void PixArtApp::render_unsaved_changes_dialog() {
             // Try to save
             bool saved = false;
             if (m_current_path.empty()) {
-                std::string path = save_file_dialog();
+                std::string path = engine::platform::save_file_dialog("Save Pixel Grid", PXG_FILTERS, "pxg");
                 if (!path.empty() && m_doc.save(path)) {
                     m_current_path = path;
                     m_has_unsaved_changes = false;

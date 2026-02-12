@@ -3,12 +3,40 @@
 #include <entt/entt.hpp>
 #include <memory>
 #include <string>
+#include <vector>
+
+#include "engine/simulation/PixelGrid.h"
+#include "engine/simulation/MargolusSimulation.h"
+#include "engine/physics/TerrainColliderManager.h"
+#include "engine/graphics/RenderContext.h"
+#include "engine/graphics/Texture.h"
+#include "engine/graphics/ShaderStorageBuffer.h"
+#include "engine/graphics/Shader.h"
 
 namespace engine {
 class Engine;
+
+namespace physics {
+class PhysicsWorld;
+struct Rigidbody;
+}
 }
 
 namespace editor {
+
+struct SceneSettings;
+
+/// State for a single active pixel simulation surface during play mode.
+struct SimSurfaceState {
+    engine::simulation::PixelGrid pixel_grid;
+    engine::simulation::MargolusSimulation simulation;
+    engine::graphics::Texture color_texture;              // RGBA8 for ImGui display
+    engine::graphics::ShaderStorageBuffer palette_ssbo;   // Color palette for material→color
+    std::unique_ptr<engine::physics::TerrainColliderManager> terrain_colliders; // Optional terrain physics
+    entt::entity entity = entt::null;                     // editor entity ID
+    int width = 0;
+    int height = 0;
+};
 
 /// Editor/Runtime state machine.
 enum class PlayState {
@@ -18,8 +46,8 @@ enum class PlayState {
 };
 
 /// Manages the runtime context for play mode.
-/// Creates an isolated copy of the scene for gameplay,
-/// preserving the original for when play mode stops.
+/// Snapshots the scene on play, runs physics/simulation on the editor registry
+/// directly, and restores the snapshot when play stops.
 class RuntimeContext {
 public:
     RuntimeContext();
@@ -38,7 +66,8 @@ public:
     bool is_paused() const { return m_state == PlayState::Paused; }
 
     /// Enter play mode - snapshots scene and starts runtime.
-    void play();
+    /// Uses scene settings for physics gravity and scale.
+    void play(const SceneSettings& settings);
 
     /// Pause the runtime.
     void pause();
@@ -55,9 +84,9 @@ public:
     /// Update the runtime (called each frame when playing).
     void update(float dt);
 
-    /// Get the runtime registry (the copy used during play mode).
-    entt::registry* runtime_registry() { return m_runtime_registry.get(); }
-    const entt::registry* runtime_registry() const { return m_runtime_registry.get(); }
+    /// Get the live simulation color texture GL handle for an entity (during play mode).
+    /// Returns 0 if entity has no active simulation.
+    uint32_t get_sim_texture(entt::entity entity) const;
 
     /// Get time spent in current play session.
     float play_time() const { return m_play_time; }
@@ -65,16 +94,35 @@ public:
     /// Get the frame count since play started.
     uint64_t frame_count() const { return m_frame_count; }
 
+    /// Get the physics world (for debug queries like velocity).
+    engine::physics::PhysicsWorld* physics_world() { return m_physics_world.get(); }
+    const engine::physics::PhysicsWorld* physics_world() const { return m_physics_world.get(); }
+
 private:
     void snapshot_scene();
     void restore_scene();
-    void create_runtime_copy();
+
+    void init_physics_bodies();
+    void create_body_for_entity(entt::entity entity);
+    void attach_collider_shapes(entt::entity entity, engine::physics::Rigidbody& rb);
+    void sync_physics_to_transforms();
+
+    void init_pixel_simulations();
+    void shutdown_pixel_simulations();
+    void update_pixel_simulations(float dt);
 
     entt::registry* m_editor_registry = nullptr;
-    std::unique_ptr<entt::registry> m_runtime_registry;
 
     // Scene snapshot stored as serialized data
     std::string m_scene_snapshot;
+
+    // Engine systems for runtime
+    std::unique_ptr<engine::physics::PhysicsWorld> m_physics_world;
+
+    // Pixel simulation state
+    std::vector<std::unique_ptr<SimSurfaceState>> m_sim_surfaces;
+    engine::graphics::RenderContext m_render_context;
+    engine::graphics::Shader m_color_shader;  // Shared ssbo_to_color compute shader
 
     PlayState m_state = PlayState::Editing;
     float m_play_time = 0.0f;

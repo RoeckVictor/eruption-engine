@@ -78,11 +78,11 @@ void DeleteEntityCommand::undo() {
     for (const auto& stored : m_stored_entities) {
         entt::entity new_entity = m_registry->create();
 
-        // Restore EntityInfo
-        m_registry->emplace<EntityInfo>(new_entity, EntityInfo{stored.name, "", stored.enabled, "", false});
+        // Restore EntityInfo (enabled_in_hierarchy will be computed after hierarchy is restored)
+        m_registry->emplace<EntityInfo>(new_entity, EntityInfo{stored.name, "", stored.enabled, true, "", false});
 
-        // Restore Transform
-        m_registry->emplace<Transform>(new_entity, stored.transform);
+        // Restore engine::Transform
+        m_registry->emplace<engine::Transform>(new_entity, stored.transform);
 
         // Restore Hierarchy (parent will be set below)
         m_registry->emplace<Hierarchy>(new_entity);
@@ -135,9 +135,9 @@ void DeleteEntityCommand::store_entity_recursive(entt::entity entity, entt::enti
         stored.enabled = true;
     }
 
-    // Store Transform
-    if (m_registry->all_of<Transform>(entity)) {
-        stored.transform = m_registry->get<Transform>(entity);
+    // Store engine::Transform
+    if (m_registry->all_of<engine::Transform>(entity)) {
+        stored.transform = m_registry->get<engine::Transform>(entity);
     }
 
     // Store children references

@@ -11,6 +11,8 @@ namespace pixart {
 void Document::create(int w, int h) {
     m_width = w;
     m_height = h;
+    m_origin_x = 0;
+    m_origin_y = 0;
     m_layers.clear();
 
     // Layer 0: mandatory Color layer (RGBA, default = fully transparent)
@@ -19,7 +21,19 @@ void Document::create(int w, int h) {
     color.type = LayerType::Color;
     color.channels = 4;
     color.data.assign(static_cast<size_t>(w) * h * 4, 0);
+    color.engine_required = true;
     m_layers.push_back(std::move(color));
+
+    // Layer 1: mandatory Material layer (Enum, default = 0 / air)
+    Layer material;
+    material.name = "material";
+    material.type = LayerType::Enum;
+    material.channels = 1;
+    material.data.assign(static_cast<size_t>(w) * h, 0);
+    material.enum_names = {"air", "rock", "dirt", "sand", "water",
+                           "lava", "ice", "steam", "fire", "explosive"};
+    material.engine_required = true;
+    m_layers.push_back(std::move(material));
 }
 
 void Document::resize(int new_w, int new_h) {
@@ -61,8 +75,11 @@ int Document::add_layer(const std::string& name, LayerType type,
 }
 
 int Document::remove_layer(int idx, int current_active) {
-    if (idx <= 0 || idx >= static_cast<int>(m_layers.size())) {
+    if (idx < 0 || idx >= static_cast<int>(m_layers.size())) {
         return current_active; // Invalid removal, no change
+    }
+    if (m_layers[idx].engine_required) {
+        return current_active; // Cannot remove engine-required layers
     }
 
     m_layers.erase(m_layers.begin() + idx);
@@ -182,6 +199,7 @@ bool Document::save(const std::string& path) const {
 
     // Build metadata JSON
     nlohmann::json meta;
+    meta["origin"] = {{"x", m_origin_x}, {"y", m_origin_y}};
     meta["layers"] = nlohmann::json::array();
     for (const auto& layer : m_layers) {
         nlohmann::json lj;
@@ -221,12 +239,21 @@ bool Document::load(const std::string& path) {
 
     // Try to parse metadata for layer info
     m_layers.clear();
+    m_origin_x = 0;
+    m_origin_y = 0;
     bool has_metadata = false;
 
     if (!pxg.metadata.empty()) {
         try {
             std::string meta_str(pxg.metadata.begin(), pxg.metadata.end());
             auto meta = nlohmann::json::parse(meta_str);
+
+            // Parse origin point
+            if (meta.contains("origin")) {
+                m_origin_x = meta["origin"].value("x", 0);
+                m_origin_y = meta["origin"].value("y", 0);
+            }
+
             if (meta.contains("layers")) {
                 for (const auto& lj : meta["layers"]) {
                     Layer layer;

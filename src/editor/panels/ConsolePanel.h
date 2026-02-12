@@ -45,6 +45,9 @@ private:
     void hook_logger();
     void unhook_logger();
 
+    /// Copy selected entries (or all visible if none selected) to clipboard.
+    void copy_selected_to_clipboard(const std::vector<LogEntry>& visible_entries);
+
     std::vector<LogEntry> m_entries;
     std::mutex m_entries_mutex;  // For thread-safe logging
     char m_filter[128] = "";
@@ -54,6 +57,10 @@ private:
     bool m_show_errors = true;
     bool m_collapse_duplicates = true;
     bool m_auto_scroll = true;
+
+    // Selection state (indices into the filtered/visible entries)
+    std::vector<bool> m_selected;
+    int m_last_clicked = -1;  // For shift-click range selection
 
     size_t m_logger_sink_id = 0;
     bool m_hooked = false;

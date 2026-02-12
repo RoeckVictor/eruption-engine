@@ -14,16 +14,17 @@ GizmoResult RotateGizmo::render(
     ImVec2 viewport_pos,
     ImVec2 viewport_size,
     entt::entity /*entity*/,
-    Transform& transform,
+    engine::Transform& transform,
     float camera_x,
     float camera_y,
-    float zoom
+    float zoom,
+    GizmoSpace /*space*/
 ) {
     GizmoResult result;
 
-    // Get entity position in screen space
+    // Position gizmo at WORLD coordinates (not local)
     ImVec2 center = world_to_screen(
-        transform.x, transform.y,
+        transform.world_x, transform.world_y,
         viewport_pos, viewport_size,
         camera_x, camera_y, zoom
     );
@@ -94,8 +95,8 @@ GizmoResult RotateGizmo::render(
     // Draw the rotation circle
     draw_list->AddCircle(center, CIRCLE_RADIUS, draw_color, 64, CIRCLE_THICKNESS);
 
-    // Draw rotation indicator line (from center pointing in rotation direction)
-    float rad = transform.rotation * DEG_TO_RAD;
+    // Draw rotation indicator line (from center pointing in world rotation direction)
+    float rad = transform.world_rotation * DEG_TO_RAD;
     ImVec2 indicator_end(
         center.x + CIRCLE_RADIUS * std::cos(-rad + PI * 0.5f),
         center.y + CIRCLE_RADIUS * std::sin(-rad + PI * 0.5f)
