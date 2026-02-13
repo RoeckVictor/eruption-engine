@@ -44,10 +44,6 @@ bool MaterialLibrary::parse_json(const std::string& json_str) {
         m_materials.resize(256);  // Reserve full material ID space
         m_name_to_id.clear();
 
-        // Temporary map for resolving material name references
-        std::unordered_map<std::string, uint8_t> pending_melts;
-        std::unordered_map<std::string, uint8_t> pending_boils;
-
         for (const auto& mat_json : materials_array) {
             MaterialDefinition def;
 
@@ -82,7 +78,7 @@ bool MaterialLibrary::parse_json(const std::string& json_str) {
                 if (mat_json["melt_into"].is_number()) {
                     def.melt_into = mat_json["melt_into"].get<uint8_t>();
                 } else if (mat_json["melt_into"].is_string()) {
-                    pending_melts[def.internal_name] = def.id;
+                    // Name-based resolution handled in second pass below
                 }
             }
 
@@ -90,7 +86,7 @@ bool MaterialLibrary::parse_json(const std::string& json_str) {
                 if (mat_json["boil_into"].is_number()) {
                     def.boil_into = mat_json["boil_into"].get<uint8_t>();
                 } else if (mat_json["boil_into"].is_string()) {
-                    pending_boils[def.internal_name] = def.id;
+                    // Name-based resolution handled in second pass below
                 }
             }
 
@@ -111,7 +107,7 @@ bool MaterialLibrary::parse_json(const std::string& json_str) {
             if (mat_json.contains("color")) {
                 std::string color_str = mat_json["color"].get<std::string>();
                 if (color_str[0] == '#' && color_str.size() == 9) {
-                    def.color = (uint32_t)std::stoul(color_str.substr(1), nullptr, 16);
+                    def.color = static_cast<uint32_t>(std::stoul(color_str.substr(1), nullptr, 16));
                 } else {
                     Logger::instance().warning("MaterialLibrary", "Invalid color format for material %d: %s",
                                           def.id, color_str.c_str());

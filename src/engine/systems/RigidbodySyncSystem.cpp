@@ -2,6 +2,7 @@
 #include "engine/core/Engine.h"
 #include "engine/core/Transform.h"
 #include "engine/core/Logger.h"
+#include "engine/core/MathConstants.h"
 #include "engine/physics/PhysicsWorld.h"
 #include "engine/physics/Rigidbody.h"
 #include "engine/core/EngineContext.h"
@@ -46,23 +47,17 @@ void RigidbodySyncSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
             continue;
         }
 
-        // Read position from Box2D and write to Transform
+        // Read position from Box2D (already in pixels) and angle (radians)
         b2Vec2 pos = m_physics_world->get_body_position(rb.body_id);
         float angle_rad = m_physics_world->get_body_angle(rb.body_id);
-
-        // Convert from meters to pixels
-        float pixel_x, pixel_y;
-        m_physics_world->meters_to_pixels(pos, pixel_x, pixel_y);
-
-        // Convert angle from radians to degrees
-        float angle_deg = angle_rad * (180.0f / B2_PI);
+        float angle_deg = angle_rad * RAD_TO_DEG;
 
         // Apply position locks if specified
         if (!rb.lock_position_x) {
-            transform.x = pixel_x;
+            transform.x = pos.x;
         }
         if (!rb.lock_position_y) {
-            transform.y = pixel_y;
+            transform.y = pos.y;
         }
         if (!rb.lock_rotation) {
             transform.rotation = angle_deg;
@@ -70,6 +65,7 @@ void RigidbodySyncSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
 
         // Handle position locks by zeroing out velocity on locked axes
         if (rb.lock_position_x || rb.lock_position_y) {
+            // get_body_linear_velocity returns pixels/sec
             b2Vec2 vel = m_physics_world->get_body_linear_velocity(rb.body_id);
             if (rb.lock_position_x) {
                 vel.x = 0.0f;
@@ -77,10 +73,8 @@ void RigidbodySyncSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
             if (rb.lock_position_y) {
                 vel.y = 0.0f;
             }
-            // Convert back to pixels for set_body_linear_velocity
-            float vel_x_pixels, vel_y_pixels;
-            m_physics_world->meters_to_pixels(vel, vel_x_pixels, vel_y_pixels);
-            m_physics_world->set_body_linear_velocity(rb.body_id, vel_x_pixels, vel_y_pixels);
+            // set_body_linear_velocity expects pixels/sec (converts internally to meters)
+            m_physics_world->set_body_linear_velocity(rb.body_id, vel.x, vel.y);
         }
     }
 }

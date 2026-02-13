@@ -82,7 +82,7 @@ void Engine::run(Application& app) {
         m_window.poll_events();
         m_input.update(m_window);
 
-        float dt = (float)m_timer.delta_time();
+        float dt = static_cast<float>(m_timer.delta_time());
 
         // Poll asset hot-reload before update phase
         m_assets.poll_hot_reload();
@@ -96,7 +96,7 @@ void Engine::run(Application& app) {
 
         // Fixed timestep updates (physics, simulation).
         // Cap iterations to avoid spiral-of-death after long stalls.
-        float fixed_dt = (float)m_timer.fixed_dt();
+        float fixed_dt = static_cast<float>(m_timer.fixed_dt());
         int steps = 0;
         while (m_timer.consume_fixed_step() && steps < m_config.max_fixed_steps) {
             m_scenes.fixed_update(*this, fixed_dt);

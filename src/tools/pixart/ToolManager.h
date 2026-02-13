@@ -2,13 +2,32 @@
 
 #include "Document.h"
 #include <cstdint>
+#include <cstdlib>
 #include <queue>
+#include <utility>
 #include <vector>
 
 namespace pixart {
 
 /// Available drawing tools.
 enum class Tool { Pencil, Bucket, Line };
+
+/// Walk a Bresenham line and invoke callback(x, y) for each pixel.
+template<typename Func>
+void bresenham_line(int x0, int y0, int x1, int y1, Func&& func) {
+    int dx = std::abs(x1 - x0);
+    int dy = std::abs(y1 - y0);
+    int sx = (x0 < x1) ? 1 : -1;
+    int sy = (y0 < y1) ? 1 : -1;
+    int err = dx - dy;
+    while (true) {
+        func(x0, y0);
+        if (x0 == x1 && y0 == y1) break;
+        int e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; x0 += sx; }
+        if (e2 < dx)  { err += dx; y0 += sy; }
+    }
+}
 
 /// Current drawing color/value state.
 struct DrawState {
@@ -70,20 +89,9 @@ public:
 
     /// Apply line tool between two points.
     void apply_line(Document& doc, int layer_idx, int x0, int y0, int x1, int y1) {
-        // Bresenham's line algorithm
-        int dx = (x1 > x0) ? (x1 - x0) : (x0 - x1);
-        int dy = (y1 > y0) ? (y1 - y0) : (y0 - y1);
-        int sx = (x0 < x1) ? 1 : -1;
-        int sy = (y0 < y1) ? 1 : -1;
-        int err = dx - dy;
-
-        while (true) {
-            apply_pencil(doc, layer_idx, x0, y0);
-            if (x0 == x1 && y0 == y1) break;
-            int e2 = 2 * err;
-            if (e2 > -dy) { err -= dy; x0 += sx; }
-            if (e2 < dx)  { err += dx; y0 += sy; }
-        }
+        bresenham_line(x0, y0, x1, y1, [&](int x, int y) {
+            apply_pencil(doc, layer_idx, x, y);
+        });
     }
 
     /// Apply bucket fill at a point.

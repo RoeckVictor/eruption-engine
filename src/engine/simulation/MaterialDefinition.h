@@ -43,14 +43,14 @@ struct MaterialDefinition {
         slot.category = static_cast<uint8_t>(category);
 
         // Pack phase transition data into user_data[0]
-        slot.user_data[0] = (uint32_t)(melt_point)
-                          | ((uint32_t)(melt_into) << 8);
+        slot.user_data[0] = static_cast<uint32_t>(melt_point)
+                          | (static_cast<uint32_t>(melt_into) << 8);
 
         // Pack remaining thermal + flags into user_data[1]
-        slot.user_data[1] = (uint32_t)(boil_point)
-                          | ((uint32_t)(boil_into) << 8)
-                          | ((uint32_t)(default_temp) << 16)
-                          | ((uint32_t)(flags) << 24);
+        slot.user_data[1] = static_cast<uint32_t>(boil_point)
+                          | (static_cast<uint32_t>(boil_into) << 8)
+                          | (static_cast<uint32_t>(default_temp) << 16)
+                          | (static_cast<uint32_t>(flags) << 24);
 
         return slot;
     }
@@ -62,13 +62,13 @@ struct MaterialDefinition {
         def.density = slot.density;
         def.category = static_cast<MaterialCategory>(slot.category);
 
-        def.melt_point = (uint8_t)(slot.user_data[0] & 0xFFu);
-        def.melt_into = (uint8_t)((slot.user_data[0] >> 8) & 0xFFu);
+        def.melt_point = static_cast<uint8_t>(slot.user_data[0] & 0xFFu);
+        def.melt_into = static_cast<uint8_t>((slot.user_data[0] >> 8) & 0xFFu);
 
-        def.boil_point = (uint8_t)(slot.user_data[1] & 0xFFu);
-        def.boil_into = (uint8_t)((slot.user_data[1] >> 8) & 0xFFu);
-        def.default_temp = (uint8_t)((slot.user_data[1] >> 16) & 0xFFu);
-        def.flags = (uint8_t)((slot.user_data[1] >> 24) & 0xFFu);
+        def.boil_point = static_cast<uint8_t>(slot.user_data[1] & 0xFFu);
+        def.boil_into = static_cast<uint8_t>((slot.user_data[1] >> 8) & 0xFFu);
+        def.default_temp = static_cast<uint8_t>((slot.user_data[1] >> 16) & 0xFFu);
+        def.flags = static_cast<uint8_t>((slot.user_data[1] >> 24) & 0xFFu);
 
         return def;
     }

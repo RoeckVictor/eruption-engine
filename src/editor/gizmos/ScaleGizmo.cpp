@@ -1,13 +1,9 @@
 #include "ScaleGizmo.h"
+#include "engine/core/MathConstants.h"
 #include <cmath>
 #include <algorithm>
 
 namespace editor {
-
-namespace {
-    constexpr float PI = 3.14159265358979323846f;
-    constexpr float DEG_TO_RAD = PI / 180.0f;
-}
 
 GizmoResult ScaleGizmo::render(
     ImDrawList* draw_list,
@@ -43,7 +39,7 @@ GizmoResult ScaleGizmo::render(
     // Compute rotation for axis orientation
     float rot_rad = 0.0f;
     if (space == GizmoSpace::Local) {
-        rot_rad = transform.world_rotation * DEG_TO_RAD;
+        rot_rad = transform.world_rotation * engine::DEG_TO_RAD;
     }
     float cos_r = std::cos(rot_rad);
     float sin_r = std::sin(rot_rad);
@@ -75,7 +71,7 @@ GizmoResult ScaleGizmo::render(
 
             // Project onto screen-space axis directions
             // Use start transform's rotation for consistent axis during drag
-            float drag_wr = m_start_transform.world_rotation * DEG_TO_RAD;
+            float drag_wr = m_start_transform.world_rotation * engine::DEG_TO_RAD;
             float drag_cos = std::cos(drag_wr);
             float drag_sin = std::sin(drag_wr);
 

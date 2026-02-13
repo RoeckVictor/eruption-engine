@@ -1,6 +1,7 @@
 #include "RuntimeContext.h"
 #include "EditorComponents.h"
 #include "editor/serialization/SceneSerializer.h"
+#include "engine/core/MathConstants.h"
 #include "engine/core/Logger.h"
 #include "engine/physics/PhysicsWorld.h"
 #include "engine/physics/Rigidbody.h"
@@ -196,8 +197,7 @@ void RuntimeContext::init_physics_bodies() {
         rb.enabled = true;
 
         auto& transform = m_editor_registry->get<engine::Transform>(entity);
-        constexpr float DEG_TO_RAD = 3.14159265f / 180.0f;
-        float angle_rad = transform.world_rotation * DEG_TO_RAD;
+        float angle_rad = transform.world_rotation * engine::DEG_TO_RAD;
         rb.body_id = m_physics_world->create_static_body(
             transform.world_x, transform.world_y, angle_rad);
 
@@ -220,13 +220,11 @@ void RuntimeContext::create_body_for_entity(entt::entity entity) {
     if (!m_editor_registry || !m_physics_world) return;
     if (!m_editor_registry->all_of<engine::physics::Rigidbody, engine::Transform>(entity)) return;
 
-    constexpr float DEG_TO_RAD = 3.14159265f / 180.0f;
-
     auto& rb = m_editor_registry->get<engine::physics::Rigidbody>(entity);
     auto& transform = m_editor_registry->get<engine::Transform>(entity);
 
     // Create body based on type using world position
-    float angle_rad = transform.world_rotation * DEG_TO_RAD;
+    float angle_rad = transform.world_rotation * engine::DEG_TO_RAD;
 
     switch (rb.body_type) {
         case engine::physics::BodyType::Dynamic:
@@ -280,8 +278,6 @@ void RuntimeContext::attach_collider_shapes(entt::entity entity, engine::physics
     if (!m_editor_registry || !m_physics_world) return;
     if (!m_editor_registry->all_of<engine::Transform>(entity)) return;
 
-    constexpr float DEG_TO_RAD = 3.14159265f / 180.0f;
-
     auto& transform = m_editor_registry->get<engine::Transform>(entity);
     float scale_x = transform.world_scale_x;
     float scale_y = transform.world_scale_y;
@@ -297,7 +293,7 @@ void RuntimeContext::attach_collider_shapes(entt::entity entity, engine::physics
             float ox = m_physics_world->pixels_to_meters(box.offset_x * scale_x);
             float oy = m_physics_world->pixels_to_meters(box.offset_y * scale_y);
 
-            float rot_rad = box.rotation * DEG_TO_RAD;
+            float rot_rad = box.rotation * engine::DEG_TO_RAD;
             float cos_r = std::cos(rot_rad);
             float sin_r = std::sin(rot_rad);
 
@@ -343,7 +339,7 @@ void RuntimeContext::attach_collider_shapes(entt::entity entity, engine::physics
             float rad = m_physics_world->pixels_to_meters(cap.radius * avg_scale);
             float ox = m_physics_world->pixels_to_meters(cap.offset_x * scale_x);
             float oy = m_physics_world->pixels_to_meters(cap.offset_y * scale_y);
-            float cap_rot = cap.rotation * DEG_TO_RAD;
+            float cap_rot = cap.rotation * engine::DEG_TO_RAD;
 
             float ax = -std::sin(cap_rot);
             float ay = std::cos(cap_rot);
@@ -388,9 +384,6 @@ void RuntimeContext::attach_collider_shapes(entt::entity entity, engine::physics
 void RuntimeContext::sync_physics_to_transforms() {
     if (!m_editor_registry || !m_physics_world) return;
 
-    constexpr float RAD_TO_DEG = 180.0f / 3.14159265f;
-    constexpr float DEG_TO_RAD = 3.14159265f / 180.0f;
-
     auto view = m_editor_registry->view<engine::physics::Rigidbody, engine::Transform>();
 
     for (auto entity : view) {
@@ -413,7 +406,7 @@ void RuntimeContext::sync_physics_to_transforms() {
             // Write to local transform (works correctly for root entities)
             transform.x = pos.x;
             transform.y = pos.y;
-            transform.rotation = angle * RAD_TO_DEG;
+            transform.rotation = angle * engine::RAD_TO_DEG;
 
             // Handle position locks by zeroing velocity on locked axes
             if (rb.lock_position_x || rb.lock_position_y) {
@@ -427,7 +420,7 @@ void RuntimeContext::sync_physics_to_transforms() {
             // Sync transform -> physics for kinematic bodies
             m_physics_world->set_body_transform(rb.body_id,
                 transform.world_x, transform.world_y,
-                transform.world_rotation * DEG_TO_RAD);
+                transform.world_rotation * engine::DEG_TO_RAD);
         }
     }
 }
@@ -647,10 +640,26 @@ void RuntimeContext::update_pixel_simulations(float /*dt*/) {
         m_render_context.dispatch_compute(groups_x, groups_y, 1, GL_TEXTURE_FETCH_BARRIER_BIT);
 
         // Update terrain colliders from settled pixels
-        if (state->terrain_colliders) {
+        if (state->terrain_colliders && m_editor_registry->valid(state->entity)) {
+            // Build entity transform for collider positioning
+            engine::physics::TerrainColliderManager::EntityTransform et;
+            if (m_editor_registry->all_of<engine::Transform>(state->entity)) {
+                auto& t = m_editor_registry->get<engine::Transform>(state->entity);
+                et.world_x = t.world_x;
+                et.world_y = t.world_y;
+                et.world_rotation_deg = t.world_rotation;
+                et.scale_x = t.world_scale_x;
+                et.scale_y = t.world_scale_y;
+            }
+            if (m_editor_registry->all_of<engine::simulation::PixelGridComponent>(state->entity)) {
+                auto& gc = m_editor_registry->get<engine::simulation::PixelGridComponent>(state->entity);
+                et.origin_x = gc.origin_x;
+                et.origin_y = gc.origin_y;
+            }
+
             // Mark entire grid dirty (simulation changes every pixel every frame)
             state->terrain_colliders->mark_dirty_region(0, 0, state->width, state->height);
-            state->terrain_colliders->update_terrain_colliders(state->pixel_grid);
+            state->terrain_colliders->update_terrain_colliders(state->pixel_grid, et);
         }
     }
 

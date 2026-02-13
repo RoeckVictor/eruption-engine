@@ -90,6 +90,9 @@ public:
     bool is_indestructible() const { return m_indestructible; }
 
 private:
+    /// BFS-label all connected components. Returns {labels, component_count}.
+    std::pair<std::vector<int>, int> label_components() const;
+
     void compute_center_of_mass();
     void build_solid_grid(bool* solid) const;
 

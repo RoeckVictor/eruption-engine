@@ -76,6 +76,24 @@ Result<EngineConfig, ErrorInfo> EngineConfig::load_from_json(const std::string& 
         if (assets.contains("hot_reload_poll_interval")) config.hot_reload_poll_interval = assets["hot_reload_poll_interval"].get<double>();
     }
 
+    // Validate critical values
+    if (config.fixed_timestep <= 0.0) {
+        ENGINE_ERR("Invalid fixed_timestep (%f) in config, using default", config.fixed_timestep);
+        config.fixed_timestep = defaults().fixed_timestep;
+    }
+    if (config.max_fixed_steps <= 0) {
+        ENGINE_ERR("Invalid max_fixed_steps (%d) in config, using default", config.max_fixed_steps);
+        config.max_fixed_steps = defaults().max_fixed_steps;
+    }
+    if (config.pixels_per_meter <= 0.0f) {
+        ENGINE_ERR("Invalid pixels_per_meter (%f) in config, using default", config.pixels_per_meter);
+        config.pixels_per_meter = defaults().pixels_per_meter;
+    }
+    if (config.physics_substeps <= 0) {
+        ENGINE_ERR("Invalid physics_substeps (%d) in config, using default", config.physics_substeps);
+        config.physics_substeps = defaults().physics_substeps;
+    }
+
     ENGINE_LOG("Loaded engine config from '%s'", file_path.c_str());
     return Ok(config);
 }

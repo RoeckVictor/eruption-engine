@@ -1,6 +1,7 @@
 #include "GamePanel.h"
 #include "editor/core/EditorContext.h"
 #include "editor/core/EditorComponents.h"
+#include "engine/core/MathConstants.h"
 #include "engine/core/Transform.h"
 #include "engine/simulation/PixelGridComponent.h"
 #include "engine/simulation/MaterialLibrary.h"
@@ -139,13 +140,13 @@ void GamePanel::render_game_view(ImVec2 panel_pos, ImVec2 panel_size) {
         if (!renderer.enabled) continue;
 
         // Compute sprite corners (same logic as ViewportPanel)
-        float w = grid_comp.width > 0 ? (float)grid_comp.width : 32.0f;
-        float h = grid_comp.height > 0 ? (float)grid_comp.height : 32.0f;
+        float w = grid_comp.width > 0 ? static_cast<float>(grid_comp.width) : 32.0f;
+        float h = grid_comp.height > 0 ? static_cast<float>(grid_comp.height) : 32.0f;
         float ox = static_cast<float>(grid_comp.origin_x);
         float oy = static_cast<float>(grid_comp.origin_y);
         float sx = transform.world_scale_x;
         float sy = transform.world_scale_y;
-        float rot_rad = transform.world_rotation * (3.14159265f / 180.0f);
+        float rot_rad = transform.world_rotation * engine::DEG_TO_RAD;
         float cos_r = std::cos(rot_rad);
         float sin_r = std::sin(rot_rad);
 

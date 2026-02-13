@@ -9,9 +9,9 @@
 #include "engine/core/SubsystemRegistry.h"
 #include "engine/asset/AssetDatabase.h"
 #include "engine/scene/SceneManager.h"
+#include "engine/core/Logger.h"
 #include <any>
-#include <cassert>
-#include <stdexcept>
+#include <cstdlib>
 
 namespace engine {
 
@@ -65,7 +65,10 @@ public:
     template<typename T>
     T& app_context() const {
         auto* ptr = std::any_cast<T*>(&m_app_ctx);
-        assert(ptr && *ptr && "App context not set or type mismatch");
+        if (!ptr || !*ptr) {
+            Logger::instance().error("Engine", "App context not set or type mismatch — aborting");
+            std::abort();
+        }
         return **ptr;
     }
 

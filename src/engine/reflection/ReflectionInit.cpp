@@ -18,6 +18,7 @@
 
 // Transform reflection
 REFLECT_TYPE_BEGIN(engine::Transform)
+    REFLECT_PROPERTY(enabled, "Enabled")
     REFLECT_PROPERTY(x, "X Position")
     REFLECT_PROPERTY(y, "Y Position")
     REFLECT_PROPERTY(rotation, "Rotation")
@@ -27,6 +28,7 @@ REFLECT_TYPE_END()
 
 // Camera2D reflection
 REFLECT_TYPE_BEGIN(engine::render::Camera2D)
+    REFLECT_PROPERTY(enabled, "Enabled")
     REFLECT_PROPERTY(x, "X Position")
     REFLECT_PROPERTY(y, "Y Position")
     REFLECT_PROPERTY_RANGE(zoom, "Zoom", 0.1f, 10.0f, 0.1f)

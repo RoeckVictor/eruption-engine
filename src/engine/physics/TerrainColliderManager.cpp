@@ -5,6 +5,7 @@
 #include "engine/simulation/PixelGrid.h"
 #include "engine/simulation/MaterialDefs.h"
 #include "engine/core/Log.h"
+#include "engine/core/MathConstants.h"
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -78,16 +79,24 @@ void TerrainColliderManager::mark_dirty_near_bodies(const std::vector<PixelBody*
     }
 }
 
-void TerrainColliderManager::update_terrain_colliders(simulation::PixelGrid& grid) {
+void TerrainColliderManager::update_terrain_colliders(simulation::PixelGrid& grid,
+                                                       const EntityTransform& transform) {
+    int grid_h = grid.height();
+
     // Calculate the number of chunks covering the entire grid
     int num_chunks_x = (grid.width() + m_chunk_size_x - 1) / m_chunk_size_x;
     int num_chunks_y = (grid.height() + m_chunk_size_y - 1) / m_chunk_size_y;
 
+    // Precompute entity rotation for body-local → world conversion (debug verts only)
+    float e_rot_rad = transform.world_rotation_deg * DEG_TO_RAD;
+    float e_cos = std::cos(e_rot_rad);
+    float e_sin = std::sin(e_rot_rad);
+
     // Process all chunks in the grid
     for (int cy = 0; cy < num_chunks_y; cy++) {
         for (int cx = 0; cx < num_chunks_x; cx++) {
-            int world_x = cx * m_chunk_size_x;
-            int world_y = cy * m_chunk_size_y;
+            int chunk_px = cx * m_chunk_size_x;
+            int chunk_py = cy * m_chunk_size_y;
 
             // Find or create terrain chunk entry (O(1) hash map lookup)
             ChunkCoord coord{cx, cy};
@@ -114,15 +123,16 @@ void TerrainColliderManager::update_terrain_colliders(simulation::PixelGrid& gri
                 chunk->body_id = b2_nullBodyId;
                 chunk->chain_ids.clear();
             }
+            chunk->debug_verts.clear();
 
             // Read back this chunk's pixels (exact chunk size, no padding)
-            int chunk_w = std::min(m_chunk_size_x, grid.width() - world_x);
-            int chunk_h = std::min(m_chunk_size_y, grid.height() - world_y);
+            int chunk_w = std::min(m_chunk_size_x, grid.width() - chunk_px);
+            int chunk_h = std::min(m_chunk_size_y, grid.height() - chunk_py);
 
             size_t pixel_size = grid.pixel_size();
             size_t buf_size = static_cast<size_t>(chunk_w) * chunk_h * pixel_size;
             m_terrain_readback_buf.resize(buf_size);
-            grid.readback_region(world_x, world_y, chunk_w, chunk_h,
+            grid.readback_region(chunk_px, chunk_py, chunk_w, chunk_h,
                                 m_terrain_readback_buf.data(), static_cast<int>(buf_size));
 
             // Build solid grid from chunk
@@ -132,7 +142,7 @@ void TerrainColliderManager::update_terrain_colliders(simulation::PixelGrid& gri
             bool has_moving = false;  // Track if chunk has moving pixels
 
             // Determine if this chunk is at the bottom of the grid
-            bool at_grid_bottom = (world_y + chunk_h >= grid.height());
+            bool at_grid_bottom = (chunk_py + chunk_h >= grid.height());
 
             for (int ly = 0; ly < chunk_h; ly++) {
                 for (int lx = 0; lx < chunk_w; lx++) {
@@ -200,22 +210,41 @@ void TerrainColliderManager::update_terrain_colliders(simulation::PixelGrid& gri
             for (auto& contour : contours) {
                 if (contour.is_hole || contour.vertices.size() < 4) continue;
 
-                // Convert to Box2D coordinates (world meters)
-                // Vertices are in chunk local coords, so offset by world_x/world_y to get world coords
+                // Convert contour vertices from grid-local Y-down to entity-local Y-up space.
+                // Grid-local (gx, gy) Y-down → entity-local:
+                //   entity_x = (gx - origin_x) * scale_x
+                //   entity_y = (grid_height - gy - origin_y) * scale_y
+                // Then convert to meters for Box2D body-local space.
+                //
                 // Reverse vertex order: marching squares produces CW winding
                 // (negative signed area in Y-down), but Box2D chain shapes
                 // require CCW winding so normals point outward.
                 std::vector<b2Vec2> chain_verts(contour.vertices.size());
+                std::vector<b2Vec2> debug_world(contour.vertices.size());
+
                 for (size_t i = 0; i < contour.vertices.size(); i++) {
-                    float px = static_cast<float>(world_x) + contour.vertices[i].x;
-                    float py = static_cast<float>(world_y) + contour.vertices[i].y;
-                    chain_verts[i] = m_world->pixels_to_meters(px, py);
+                    // Grid-local position (Y-down)
+                    float gx = static_cast<float>(chunk_px) + contour.vertices[i].x;
+                    float gy = static_cast<float>(chunk_py) + contour.vertices[i].y;
+
+                    // Convert to entity-local Y-up, applying origin offset and scale
+                    float local_x = (gx - static_cast<float>(transform.origin_x)) * transform.scale_x;
+                    float local_y = (static_cast<float>(grid_h) - gy - static_cast<float>(transform.origin_y)) * transform.scale_y;
+
+                    // Body-local meters (body is at entity world pos with entity rotation)
+                    chain_verts[i] = m_world->pixels_to_meters(local_x, local_y);
+
+                    // World-space pixels for debug rendering
+                    debug_world[i].x = transform.world_x + local_x * e_cos - local_y * e_sin;
+                    debug_world[i].y = transform.world_y + local_x * e_sin + local_y * e_cos;
                 }
                 std::reverse(chain_verts.begin(), chain_verts.end());
+                std::reverse(debug_world.begin(), debug_world.end());
 
-                // Create static body for this chunk (shared by all contours)
+                // Create static body at entity's world position with entity's rotation
                 if (!b2Body_IsValid(chunk->body_id)) {
-                    chunk->body_id = m_world->create_static_body(0.0f, 0.0f);
+                    chunk->body_id = m_world->create_static_body(
+                        transform.world_x, transform.world_y, e_rot_rad);
                 }
 
                 // Add chain for this contour (multiple disconnected regions per chunk)
@@ -223,6 +252,7 @@ void TerrainColliderManager::update_terrain_colliders(simulation::PixelGrid& gri
                     chunk->body_id, chain_verts.data(),
                     static_cast<int>(chain_verts.size()));
                 chunk->chain_ids.push_back(chain);
+                chunk->debug_verts.push_back(std::move(debug_world));
             }
         }
     }

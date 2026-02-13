@@ -1,6 +1,7 @@
 #include "engine/core/SystemManager.h"
 #include "engine/core/Engine.h"
 #include "engine/core/Log.h"
+#include <typeinfo>
 #include <unordered_set>
 
 namespace engine {
@@ -20,7 +21,7 @@ bool SystemManager::init_all(Engine& engine) {
 
     for (auto* sys : all) {
         if (!sys->init(engine)) {
-            ENGINE_ERR("System init failed");
+            ENGINE_ERR("System init failed: %s", typeid(*sys).name());
             return false;
         }
         m_initialized.push_back(sys);

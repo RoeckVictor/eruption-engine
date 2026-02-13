@@ -3,7 +3,6 @@
 #include "engine/core/Logger.h"
 #include "engine/asset/PixelGridFile.h"
 #include "engine/asset/PxgDataParser.h"
-#include "engine/asset/VFS.h"
 #include "engine/simulation/PixelGridComponent.h"
 #include "engine/physics/Colliders.h"
 #include "engine/core/EngineContext.h"

@@ -44,7 +44,8 @@ void Logger::log(LogLevel level, const char* tag, const char* fmt, ...) {
 
 void Logger::log_v(LogLevel level, const char* tag, const char* fmt, va_list args) {
     // Format the message
-    char buffer[2048];
+    static constexpr int LOG_FORMAT_BUFFER_SIZE = 2048;
+    char buffer[LOG_FORMAT_BUFFER_SIZE];
     vsnprintf(buffer, sizeof(buffer), fmt, args);
 
     LogEntry entry;

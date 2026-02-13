@@ -65,8 +65,8 @@ int Document::add_layer(const std::string& name, LayerType type,
     Layer layer;
     layer.name = name;
     layer.type = type;
-    layer.channels = 1;
-    layer.data.assign(static_cast<size_t>(m_width) * m_height, 0);
+    layer.channels = (type == LayerType::Color) ? 4 : 1;
+    layer.data.assign(static_cast<size_t>(m_width) * m_height * layer.channels, 0);
     if (type == LayerType::Enum) {
         layer.enum_names = enum_names;
     }

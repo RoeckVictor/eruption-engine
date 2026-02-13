@@ -143,23 +143,21 @@ void PixelBody::recompute_shapes(PhysicsWorld& world, float simplify_epsilon) {
 
 // --- Connected component analysis ---
 
-int PixelBody::count_components() const {
-    if (m_pixel_count <= 1) return m_pixel_count;
-
+std::pair<std::vector<int>, int> PixelBody::label_components() const {
     std::vector<int> labels(m_width * m_height, 0);
-    int current_label = 0;
-    std::queue<int> queue;
+    int num_components = 0;
+    std::queue<int> bfs;
 
     for (int i = 0; i < m_width * m_height; i++) {
         if (m_materials[i] == 0 || labels[i] != 0) continue;
 
-        current_label++;
-        labels[i] = current_label;
-        queue.push(i);
+        num_components++;
+        labels[i] = num_components;
+        bfs.push(i);
 
-        while (!queue.empty()) {
-            int idx = queue.front();
-            queue.pop();
+        while (!bfs.empty()) {
+            int idx = bfs.front();
+            bfs.pop();
 
             int x = idx % m_width;
             int y = idx / m_width;
@@ -174,53 +172,26 @@ int PixelBody::count_components() const {
             for (int ni = 0; ni < 4; ni++) {
                 int n = neighbors[ni];
                 if (n >= 0 && m_materials[n] != 0 && labels[n] == 0) {
-                    labels[n] = current_label;
-                    queue.push(n);
+                    labels[n] = num_components;
+                    bfs.push(n);
                 }
             }
         }
     }
 
-    return current_label;
+    return {std::move(labels), num_components};
+}
+
+int PixelBody::count_components() const {
+    if (m_pixel_count <= 1) return m_pixel_count;
+    auto [labels, count] = label_components();
+    return count;
 }
 
 std::vector<PixelBody::Component> PixelBody::extract_components() const {
     if (m_pixel_count == 0) return {};
 
-    // Label all connected components
-    std::vector<int> labels(m_width * m_height, 0);
-    int num_components = 0;
-    std::queue<int> queue;
-
-    for (int i = 0; i < m_width * m_height; i++) {
-        if (m_materials[i] == 0 || labels[i] != 0) continue;
-
-        num_components++;
-        labels[i] = num_components;
-        queue.push(i);
-
-        while (!queue.empty()) {
-            int idx = queue.front();
-            queue.pop();
-
-            int x = idx % m_width;
-            int y = idx / m_width;
-
-            int neighbors[4] = {-1, -1, -1, -1};
-            if (x > 0)            neighbors[0] = idx - 1;
-            if (x < m_width - 1)  neighbors[1] = idx + 1;
-            if (y > 0)            neighbors[2] = idx - m_width;
-            if (y < m_height - 1) neighbors[3] = idx + m_width;
-
-            for (int ni = 0; ni < 4; ni++) {
-                int n = neighbors[ni];
-                if (n >= 0 && m_materials[n] != 0 && labels[n] == 0) {
-                    labels[n] = num_components;
-                    queue.push(n);
-                }
-            }
-        }
-    }
+    auto [labels, num_components] = label_components();
 
     if (num_components <= 1) return {}; // No split occurred
 

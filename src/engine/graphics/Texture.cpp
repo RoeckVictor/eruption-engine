@@ -50,6 +50,7 @@ Texture::Texture(Texture&& other) noexcept
     other.m_handle = 0;
     other.m_width = 0;
     other.m_height = 0;
+    other.m_is_1d = false;
 }
 
 Texture& Texture::operator=(Texture&& other) noexcept {
@@ -63,6 +64,7 @@ Texture& Texture::operator=(Texture&& other) noexcept {
         other.m_handle = 0;
         other.m_width = 0;
         other.m_height = 0;
+        other.m_is_1d = false;
     }
     return *this;
 }
@@ -71,6 +73,11 @@ bool Texture::create_2d(int width, int height, TextureFormat format,
                         TextureFilter filter, TextureWrap wrap,
                         const void* initial_data)
 {
+    if (width <= 0 || height <= 0) {
+        ENGINE_ERR("Invalid texture dimensions: %dx%d", width, height);
+        return false;
+    }
+
     destroy();
 
     GLFormatInfo fi = gl_format(format);
@@ -107,6 +114,11 @@ bool Texture::create_1d(int width, TextureFormat format,
                         TextureFilter filter, TextureWrap wrap,
                         const void* initial_data)
 {
+    if (width <= 0) {
+        ENGINE_ERR("Invalid 1D texture width: %d", width);
+        return false;
+    }
+
     destroy();
 
     GLFormatInfo fi = gl_format(format);

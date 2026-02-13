@@ -82,45 +82,8 @@ struct TypeRegistrar {
                 info.add_property(prop); \
             }
 
-/// Reflect a Vec2 property (two floats).
-#define REFLECT_PROPERTY_VEC2(member, displayName) \
-            { \
-                PropertyInfo prop; \
-                prop.name = #member; \
-                prop.display_name = displayName; \
-                prop.offset = offsetof(CurrentType, member); \
-                prop.size = sizeof(float) * 2; \
-                prop.type = PropertyType::Vec2; \
-                prop.flags = PropertyFlags::None; \
-                info.add_property(prop); \
-            }
-
-/// Reflect a color property (RGBA).
-#define REFLECT_PROPERTY_COLOR(member, displayName) \
-            { \
-                PropertyInfo prop; \
-                prop.name = #member; \
-                prop.display_name = displayName; \
-                prop.offset = offsetof(CurrentType, member); \
-                prop.size = sizeof(float) * 4; \
-                prop.type = PropertyType::Color; \
-                prop.flags = PropertyFlags::Color; \
-                info.add_property(prop); \
-            }
-
 /// End type reflection and register.
 #define REFLECT_TYPE_END() \
         } \
     }; \
     } /* namespace engine::reflection */
-
-/// Register the type (call this in a .cpp file).
-/// This ensures the type is registered at static initialization.
-#define REGISTER_REFLECTED_TYPE(Type) \
-    static engine::reflection::TypeRegistrar<Type> s_##Type##_registrar;
-
-/// Convenience macro to declare and register in header.
-/// Use this after REFLECT_TYPE_END() in a .cpp file.
-#define REFLECT_TYPE_REGISTER(Type) \
-    REFLECT_TYPE_END() \
-    REGISTER_REFLECTED_TYPE(Type)

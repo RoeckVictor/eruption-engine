@@ -1,13 +1,9 @@
 #include "TranslateGizmo.h"
+#include "engine/core/MathConstants.h"
 #include <cmath>
 #include <algorithm>
 
 namespace editor {
-
-namespace {
-    constexpr float PI = 3.14159265358979323846f;
-    constexpr float DEG_TO_RAD = PI / 180.0f;
-}
 
 GizmoResult TranslateGizmo::render(
     ImDrawList* draw_list,
@@ -43,7 +39,7 @@ GizmoResult TranslateGizmo::render(
     // Compute rotation for axis orientation
     float rot_rad = 0.0f;
     if (space == GizmoSpace::Local) {
-        rot_rad = transform.world_rotation * DEG_TO_RAD;
+        rot_rad = transform.world_rotation * engine::DEG_TO_RAD;
     }
     float cos_r = std::cos(rot_rad);
     float sin_r = std::sin(rot_rad);
@@ -86,7 +82,7 @@ GizmoResult TranslateGizmo::render(
             float world_dx = 0, world_dy = 0;
 
             // Use start transform's world rotation for consistent axis during drag
-            float drag_wr = m_start_transform.world_rotation * DEG_TO_RAD;
+            float drag_wr = m_start_transform.world_rotation * engine::DEG_TO_RAD;
             float drag_cos = std::cos(drag_wr);
             float drag_sin = std::sin(drag_wr);
 
@@ -133,7 +129,7 @@ GizmoResult TranslateGizmo::render(
             float parent_sy = (std::abs(m_start_transform.scale_y) > 0.0001f)
                 ? m_start_transform.world_scale_y / m_start_transform.scale_y : 1.0f;
 
-            float inv_rad = -parent_rot * DEG_TO_RAD;
+            float inv_rad = -parent_rot * engine::DEG_TO_RAD;
             float cos_inv = std::cos(inv_rad);
             float sin_inv = std::sin(inv_rad);
 

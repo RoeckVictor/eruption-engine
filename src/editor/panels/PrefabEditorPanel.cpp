@@ -3,6 +3,7 @@
 #include "editor/core/EditorComponents.h"
 #include "editor/serialization/SceneSerializer.h"
 #include "editor/icons/IconsFontAwesome6.h"
+#include "engine/core/MathConstants.h"
 #include "engine/core/Transform.h"
 #include "engine/core/TransformSystem.h"
 #include "engine/core/Logger.h"
@@ -288,13 +289,13 @@ void PrefabEditorPanel::render_viewport() {
 
             if (!renderer.enabled) continue;
 
-            float w = grid_comp.width > 0 ? (float)grid_comp.width : 32.0f;
-            float h = grid_comp.height > 0 ? (float)grid_comp.height : 32.0f;
+            float w = grid_comp.width > 0 ? static_cast<float>(grid_comp.width) : 32.0f;
+            float h = grid_comp.height > 0 ? static_cast<float>(grid_comp.height) : 32.0f;
             float ox = static_cast<float>(grid_comp.origin_x);
             float oy = static_cast<float>(grid_comp.origin_y);
             float sx = transform.world_scale_x;
             float sy = transform.world_scale_y;
-            float rot_rad = transform.world_rotation * (3.14159265f / 180.0f);
+            float rot_rad = transform.world_rotation * engine::DEG_TO_RAD;
             float cos_r = std::cos(rot_rad);
             float sin_r = std::sin(rot_rad);
 
@@ -494,8 +495,8 @@ void PrefabEditorPanel::select_entity_at(float screen_x, float screen_y) {
         auto& t = sprite_view.get<engine::Transform>(entity);
         auto& grid = sprite_view.get<engine::simulation::PixelGridComponent>(entity);
 
-        float w = grid.width > 0 ? (float)grid.width : 32.0f;
-        float h = grid.height > 0 ? (float)grid.height : 32.0f;
+        float w = grid.width > 0 ? static_cast<float>(grid.width) : 32.0f;
+        float h = grid.height > 0 ? static_cast<float>(grid.height) : 32.0f;
         float ox = static_cast<float>(grid.origin_x);
         float oy = static_cast<float>(grid.origin_y);
 

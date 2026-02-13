@@ -1,5 +1,6 @@
 #include "EditorComponents.h"
 #include "ComponentTypeRegistry.h"
+#include "engine/core/MathConstants.h"
 #include "engine/render/Camera2D.h"
 #include "engine/render/PixelGridRenderer.h"
 #include "engine/animation/Animator.h"
@@ -9,7 +10,6 @@
 #include "engine/physics/Colliders.h"
 #include "engine/gameplay/PlayerController.h"
 #include "engine/gameplay/CameraFollower.h"
-#include <algorithm>
 #include <cmath>
 
 namespace editor {
@@ -29,35 +29,7 @@ void set_parent(entt::registry& registry, entt::entity child, entt::entity new_p
         saved_world_sy = t.world_scale_y;
     }
 
-    // Ensure child has Hierarchy component
-    if (!registry.all_of<Hierarchy>(child)) {
-        registry.emplace<Hierarchy>(child);
-    }
-
-    auto& child_hierarchy = registry.get<Hierarchy>(child);
-
-    // Remove from old parent
-    if (child_hierarchy.parent != entt::null && registry.valid(child_hierarchy.parent)) {
-        if (registry.all_of<Hierarchy>(child_hierarchy.parent)) {
-            auto& old_parent_hierarchy = registry.get<Hierarchy>(child_hierarchy.parent);
-            auto& children = old_parent_hierarchy.children;
-            children.erase(std::remove(children.begin(), children.end(), child), children.end());
-        }
-    }
-
-    // Set new parent
-    child_hierarchy.parent = new_parent;
-
-    // Add to new parent's children
-    if (new_parent != entt::null) {
-        if (!registry.all_of<Hierarchy>(new_parent)) {
-            registry.emplace<Hierarchy>(new_parent);
-        }
-        auto& parent_hierarchy = registry.get<Hierarchy>(new_parent);
-        parent_hierarchy.children.push_back(child);
-    }
-
-    // ALSO update engine::TransformParent for runtime transform hierarchy
+    // Delegate all hierarchy management (parent + children) to the engine
     engine::TransformSystem::set_parent(registry, child, new_parent);
 
     // Recalculate local transform to preserve world position (Unity-style)
@@ -76,7 +48,7 @@ void set_parent(entt::registry& registry, entt::entity child, entt::entity new_p
             // Inverse-rotate the position delta by parent's world rotation
             float dx = saved_world_x - pw_x;
             float dy = saved_world_y - pw_y;
-            float rad = -pw_rot * 3.14159265f / 180.0f;
+            float rad = -pw_rot * engine::DEG_TO_RAD;
             float cos_r = std::cos(rad);
             float sin_r = std::sin(rad);
 
@@ -103,7 +75,6 @@ void set_parent(entt::registry& registry, entt::entity child, entt::entity new_p
 
 void remove_from_parent(entt::registry& registry, entt::entity child) {
     set_parent(registry, child, entt::null);
-    // Note: set_parent already calls engine::TransformSystem::set_parent with entt::null
 }
 
 std::vector<entt::entity> get_root_entities(entt::registry& registry) {

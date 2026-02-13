@@ -98,6 +98,9 @@ public:
     engine::physics::PhysicsWorld* physics_world() { return m_physics_world.get(); }
     const engine::physics::PhysicsWorld* physics_world() const { return m_physics_world.get(); }
 
+    /// Access active simulation surfaces (for debug visualization).
+    const std::vector<std::unique_ptr<SimSurfaceState>>& sim_surfaces() const { return m_sim_surfaces; }
+
 private:
     void snapshot_scene();
     void restore_scene();

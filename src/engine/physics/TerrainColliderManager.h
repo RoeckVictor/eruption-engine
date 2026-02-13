@@ -44,9 +44,21 @@ struct ChunkCoordHash {
 /// for static and settled materials (rock, settled sand, etc.).
 class TerrainColliderManager {
 public:
+    /// Entity transform data for positioning terrain colliders in world space.
+    struct EntityTransform {
+        float world_x = 0.0f;
+        float world_y = 0.0f;
+        float world_rotation_deg = 0.0f;
+        float scale_x = 1.0f;
+        float scale_y = 1.0f;
+        int origin_x = 0;      // Pixel grid origin/pivot X
+        int origin_y = 0;      // Pixel grid origin/pivot Y
+    };
+
     struct TerrainChunk {
         b2BodyId body_id = b2_nullBodyId;
         std::vector<b2ChainId> chain_ids;  // Multiple chains for disconnected regions
+        std::vector<std::vector<b2Vec2>> debug_verts;  // World-space pixel coords per chain (for debug draw)
         bool active = false;
         bool dirty = true;
     };
@@ -61,7 +73,9 @@ public:
     /// Update terrain colliders for the entire grid.
     /// Regenerates colliders for any chunks marked as dirty.
     /// @param grid Pixel grid to read terrain from
-    void update_terrain_colliders(simulation::PixelGrid& grid);
+    /// @param transform Entity transform for positioning colliders in world space
+    void update_terrain_colliders(simulation::PixelGrid& grid,
+                                   const EntityTransform& transform);
 
     /// Mark terrain chunks overlapping a pixel-space rectangle as dirty.
     /// @param x X position in pixels

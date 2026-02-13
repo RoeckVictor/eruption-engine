@@ -1,13 +1,8 @@
 #include "RotateGizmo.h"
+#include "engine/core/MathConstants.h"
 #include <cmath>
 
 namespace editor {
-
-namespace {
-    constexpr float PI = 3.14159265358979323846f;
-    constexpr float RAD_TO_DEG = 180.0f / PI;
-    constexpr float DEG_TO_RAD = PI / 180.0f;
-}
 
 GizmoResult RotateGizmo::render(
     ImDrawList* draw_list,
@@ -96,10 +91,10 @@ GizmoResult RotateGizmo::render(
     draw_list->AddCircle(center, CIRCLE_RADIUS, draw_color, 64, CIRCLE_THICKNESS);
 
     // Draw rotation indicator line (from center pointing in world rotation direction)
-    float rad = transform.world_rotation * DEG_TO_RAD;
+    float rad = transform.world_rotation * engine::DEG_TO_RAD;
     ImVec2 indicator_end(
-        center.x + CIRCLE_RADIUS * std::cos(-rad + PI * 0.5f),
-        center.y + CIRCLE_RADIUS * std::sin(-rad + PI * 0.5f)
+        center.x + CIRCLE_RADIUS * std::cos(-rad + engine::PI * 0.5f),
+        center.y + CIRCLE_RADIUS * std::sin(-rad + engine::PI * 0.5f)
     );
     draw_list->AddLine(center, indicator_end, indicator_color, 2.0f);
 
@@ -125,7 +120,7 @@ float RotateGizmo::angle_to_point(ImVec2 center, ImVec2 point) const {
     float dy = point.y - center.y;
     // atan2 returns angle in radians, convert to degrees
     // Note: screen Y is inverted, so we negate dy
-    return std::atan2(-dy, dx) * RAD_TO_DEG;
+    return std::atan2(-dy, dx) * engine::RAD_TO_DEG;
 }
 
 bool RotateGizmo::is_mouse_near_circle(ImVec2 mouse, ImVec2 center, float radius, float threshold) const {

@@ -20,7 +20,7 @@ public:
 
     // Fraction of a fixed step remaining in the accumulator (0.0 to ~1.0).
     // Use for interpolating between physics states during rendering.
-    float interpolation_alpha() const { return (float)(m_accumulator / m_fixed_dt); }
+    float interpolation_alpha() const { return static_cast<float>(m_accumulator / m_fixed_dt); }
 
 private:
     using Clock = std::chrono::high_resolution_clock;

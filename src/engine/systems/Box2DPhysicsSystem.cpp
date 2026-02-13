@@ -6,8 +6,6 @@
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
 #include "engine/simulation/PixelGridComponent.h"
-#include "engine/physics/ContourGenerator.h"
-#include "engine/physics/Triangulator.h"
 #include "PixelGridLoaderSystem.h"
 #include "engine/core/EngineContext.h"
 #include "editor/core/EditorComponents.h"

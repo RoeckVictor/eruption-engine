@@ -35,8 +35,8 @@ bool MargolusSimulation::init(const MaterialSlot* slots, int mat_count,
     int count = mat_count < max_material_slots ? mat_count : max_material_slots;
     for (int i = 0; i < count; i++) {
         const MaterialSlot& m = slots[i];
-        packed[i * 2 + 0] = (uint32_t)(m.density)
-                           | (((uint32_t)m.category & 0xFu) << 8)
+        packed[i * 2 + 0] = static_cast<uint32_t>(m.density)
+                           | ((static_cast<uint32_t>(m.category) & 0xFu) << 8)
                            | ((m.user_data[0] & 0xFFFFFu) << 12);
         packed[i * 2 + 1] = m.user_data[1];
     }

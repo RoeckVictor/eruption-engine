@@ -93,7 +93,12 @@ void PixelGridRenderSystem::ensure_texture_for_entity(entt::entity entity, const
 
     // Get loaded pixel grid data from loader system if available
     if (!m_loader) {
-        return;  // Loader not set yet
+        static bool warned = false;
+        if (!warned) {
+            Logger::instance().warning("PixelGridRender", "Loader not set - call set_loader() before rendering");
+            warned = true;
+        }
+        return;
     }
 
     const LoadedPixelGrid* grid_data = m_loader->get_loaded_grid(entity);
@@ -197,7 +202,7 @@ void PixelGridRenderSystem::render(Engine& engine) {
 
     // Set camera uniforms (constant for all sprites)
     m_sprite_shader.set_vec2("u_camera_pos", m_camera->x, m_camera->y);
-    m_sprite_shader.set_vec2("u_screen_size", (float)window.width(), (float)window.height());
+    m_sprite_shader.set_vec2("u_screen_size", static_cast<float>(window.width()), static_cast<float>(window.height()));
     m_sprite_shader.set_float("u_zoom", m_camera->zoom);
 
     // Set texture unit
@@ -218,12 +223,15 @@ void PixelGridRenderSystem::render(Engine& engine) {
 
         // Set per-sprite uniforms
         m_sprite_shader.set_float("u_opacity", item.renderer->opacity);
+        glUniform4f(glGetUniformLocation(m_sprite_shader.handle(), "u_tint"),
+                    item.renderer->tint_r, item.renderer->tint_g,
+                    item.renderer->tint_b, item.renderer->tint_a);
 
         // Update quad vertices to match entity position and size
         float x = item.transform->x;
         float y = item.transform->y;
-        float w = (float)item.grid_comp->width;
-        float h = (float)item.grid_comp->height;
+        float w = static_cast<float>(item.grid_comp->width);
+        float h = static_cast<float>(item.grid_comp->height);
 
         // Update VBO with transformed quad
         float quad_vertices[] = {

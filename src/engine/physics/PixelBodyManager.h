@@ -69,7 +69,8 @@ public:
 
     /// Update terrain colliders for the entire grid.
     /// Regenerates colliders for any chunks marked as dirty.
-    void update_terrain_colliders(simulation::PixelGrid& grid);
+    void update_terrain_colliders(simulation::PixelGrid& grid,
+                                  const TerrainColliderManager::EntityTransform& transform);
 
     /// Mark terrain chunks overlapping a pixel-space rectangle as dirty.
     void mark_terrain_dirty_region(int x, int y, int w, int h);

@@ -1,6 +1,7 @@
 #include "ViewportPanel.h"
 #include "editor/core/EditorContext.h"
 #include "editor/core/EditorComponents.h"
+#include "engine/core/MathConstants.h"
 #include "engine/core/Transform.h"
 #include "engine/simulation/PixelGridComponent.h"
 #include "engine/simulation/MaterialLibrary.h"
@@ -294,13 +295,13 @@ void ViewportPanel::render_overlay() {
             }
 
             // Get dimensions, origin, and world-space transform (includes parent hierarchy)
-            float w = grid_comp.width > 0 ? (float)grid_comp.width : 32.0f;
-            float h = grid_comp.height > 0 ? (float)grid_comp.height : 32.0f;
+            float w = grid_comp.width > 0 ? static_cast<float>(grid_comp.width) : 32.0f;
+            float h = grid_comp.height > 0 ? static_cast<float>(grid_comp.height) : 32.0f;
             float ox = static_cast<float>(grid_comp.origin_x);
             float oy = static_cast<float>(grid_comp.origin_y);
             float sx = transform.world_scale_x;
             float sy = transform.world_scale_y;
-            float rot_rad = transform.world_rotation * (3.14159265f / 180.0f);
+            float rot_rad = transform.world_rotation * engine::DEG_TO_RAD;
             float cos_r = std::cos(rot_rad);
             float sin_r = std::sin(rot_rad);
 
@@ -596,7 +597,6 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
         return m_context.is_selected(e);
     };
 
-    constexpr float DEG_TO_RAD = 3.14159265f / 180.0f;
     constexpr ImU32 collider_color   = IM_COL32(0, 200, 0, 180);
     constexpr ImU32 trigger_color    = IM_COL32(200, 200, 0, 180);
     constexpr ImU32 origin_color     = IM_COL32(255, 255, 255, 200);
@@ -628,7 +628,7 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
                 float oy = box.offset_y * t.world_scale_y;
 
                 // Step 1: body-local corners rotated by collider local rotation + offset
-                float c_rot = box.rotation * DEG_TO_RAD;
+                float c_rot = box.rotation * engine::DEG_TO_RAD;
                 float c_cos = std::cos(c_rot);
                 float c_sin = std::sin(c_rot);
 
@@ -642,7 +642,7 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
                 }
 
                 // Step 2: apply body rotation (entity world rotation) and translate to world pos
-                float e_rot = t.world_rotation * DEG_TO_RAD;
+                float e_rot = t.world_rotation * engine::DEG_TO_RAD;
                 float e_cos = std::cos(e_rot);
                 float e_sin = std::sin(e_rot);
 
@@ -672,7 +672,7 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
                 float ox = circle.offset_x * t.world_scale_x;
                 float oy = circle.offset_y * t.world_scale_y;
 
-                float e_rot = t.world_rotation * DEG_TO_RAD;
+                float e_rot = t.world_rotation * engine::DEG_TO_RAD;
                 float e_cos = std::cos(e_rot);
                 float e_sin = std::sin(e_rot);
                 float world_cx = t.world_x + ox * e_cos - oy * e_sin;
@@ -703,7 +703,7 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
                 float oy = cap.offset_y * t.world_scale_y;
 
                 // Capsule axis in body-local space (only collider rotation)
-                float c_rot = cap.rotation * DEG_TO_RAD;
+                float c_rot = cap.rotation * engine::DEG_TO_RAD;
                 float c_cos = std::cos(c_rot);
                 float c_sin = std::sin(c_rot);
                 float local_ax = -c_sin;
@@ -716,7 +716,7 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
                 float local_bot_y = oy - local_ay * half_len;
 
                 // Apply entity rotation to transform body-local → world
-                float e_rot = t.world_rotation * DEG_TO_RAD;
+                float e_rot = t.world_rotation * engine::DEG_TO_RAD;
                 float e_cos = std::cos(e_rot);
                 float e_sin = std::sin(e_rot);
 
@@ -733,7 +733,7 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
                 draw_list->AddCircle(bot_screen, screen_rad, col, 32, 1.5f);
 
                 // Connecting lines - perpendicular direction in world space
-                float total_rot = (t.world_rotation + cap.rotation) * DEG_TO_RAD;
+                float total_rot = (t.world_rotation + cap.rotation) * engine::DEG_TO_RAD;
                 float perp_x = std::cos(total_rot);
                 float perp_y = std::sin(total_rot);
                 float side_wx1 = top_wx + perp_x * rad;
@@ -748,6 +748,33 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
                 side_wy2 = bot_wy - perp_y * rad;
                 draw_list->AddLine(world_to_screen(side_wx1, side_wy1),
                                    world_to_screen(side_wx2, side_wy2), col, 1.5f);
+            }
+        }
+    }
+
+    // --- Terrain Colliders (play mode only) ---
+    if (vis.terrain_colliders != GizmoVisibility::None && m_context.is_playing()) {
+        auto* rt = m_context.runtime();
+        if (rt) {
+            constexpr ImU32 terrain_col = IM_COL32(0, 200, 220, 180);
+            for (auto& state : rt->sim_surfaces()) {
+                if (!state->terrain_colliders) continue;
+                if (!should_draw(vis.terrain_colliders, state->entity)) continue;
+
+                for (auto& [coord, chunk] : state->terrain_colliders->terrain_chunks()) {
+                    if (!chunk.active) continue;
+                    for (auto& verts : chunk.debug_verts) {
+                        if (verts.size() < 3) continue;
+                        // Convert world-space vertices to screen and draw closed polyline
+                        std::vector<ImVec2> screen_pts(verts.size());
+                        for (size_t i = 0; i < verts.size(); i++) {
+                            screen_pts[i] = world_to_screen(verts[i].x, verts[i].y);
+                        }
+                        draw_list->AddPolyline(screen_pts.data(),
+                                               static_cast<int>(screen_pts.size()),
+                                               terrain_col, ImDrawFlags_Closed, 1.0f);
+                    }
+                }
             }
         }
     }
@@ -898,7 +925,7 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
             float oy = static_cast<float>(grid_comp.origin_y);
             float sx = t.world_scale_x;
             float sy = t.world_scale_y;
-            float rot_rad = t.world_rotation * DEG_TO_RAD;
+            float rot_rad = t.world_rotation * engine::DEG_TO_RAD;
             float cos_r = std::cos(rot_rad);
             float sin_r = std::sin(rot_rad);
 

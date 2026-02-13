@@ -1,4 +1,5 @@
 #include "engine/core/EventBus.h"
+#include "engine/core/Logger.h"
 
 namespace engine {
 
@@ -18,6 +19,8 @@ void EventBus::unsubscribe(Handle handle) {
             }
         }
     }
+
+    Logger::instance().warning("EventBus", "unsubscribe called with unknown handle %u", handle);
 }
 
 void EventBus::clear() {

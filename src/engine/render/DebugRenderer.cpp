@@ -64,20 +64,20 @@ void DebugRenderer::end() {
 
     m_shader.use();
     m_shader.set_vec2("u_camera_pos", m_cam_x, m_cam_y);
-    m_shader.set_vec2("u_screen_size", (float)m_screen_w, (float)m_screen_h);
+    m_shader.set_vec2("u_screen_size", static_cast<float>(m_screen_w), static_cast<float>(m_screen_h));
     m_shader.set_float("u_zoom", m_zoom);
 
     glBindVertexArray(m_vao);
 
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
     glBufferData(GL_ARRAY_BUFFER,
-                 (GLsizeiptr)(m_vertices.size() * sizeof(Vertex)),
+                 static_cast<GLsizeiptr>(m_vertices.size() * sizeof(Vertex)),
                  m_vertices.data(), GL_DYNAMIC_DRAW);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    glDrawArrays(GL_LINES, 0, (GLsizei)m_vertices.size());
+    glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(m_vertices.size()));
 
     glDisable(GL_BLEND);
     glBindVertexArray(0);

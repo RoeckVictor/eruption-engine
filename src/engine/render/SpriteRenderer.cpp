@@ -97,7 +97,7 @@ void SpriteRenderer::begin(float cam_x, float cam_y, float zoom,
 
 void SpriteRenderer::draw_rect(float min_x, float min_y, float max_x, float max_y,
                                 float r, float g, float b, float a) {
-    uint32_t base = (uint32_t)m_vertices.size();
+    uint32_t base = static_cast<uint32_t>(m_vertices.size());
 
     m_vertices.push_back({ min_x, min_y, r, g, b, a });
     m_vertices.push_back({ max_x, min_y, r, g, b, a });
@@ -117,25 +117,25 @@ void SpriteRenderer::end() {
 
     m_shader.use();
     m_shader.set_vec2("u_camera_pos", m_cam_x, m_cam_y);
-    m_shader.set_vec2("u_screen_size", (float)m_screen_w, (float)m_screen_h);
+    m_shader.set_vec2("u_screen_size", static_cast<float>(m_screen_w), static_cast<float>(m_screen_h));
     m_shader.set_float("u_zoom", m_zoom);
 
     glBindVertexArray(m_vao);
 
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
     glBufferData(GL_ARRAY_BUFFER,
-                 (GLsizeiptr)(m_vertices.size() * sizeof(Vertex)),
+                 static_cast<GLsizeiptr>(m_vertices.size() * sizeof(Vertex)),
                  m_vertices.data(), GL_DYNAMIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                 (GLsizeiptr)(m_indices.size() * sizeof(uint32_t)),
+                 static_cast<GLsizeiptr>(m_indices.size() * sizeof(uint32_t)),
                  m_indices.data(), GL_DYNAMIC_DRAW);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    glDrawElements(GL_TRIANGLES, (GLsizei)m_indices.size(), GL_UNSIGNED_INT, nullptr);
+    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(m_indices.size()), GL_UNSIGNED_INT, nullptr);
 
     glDisable(GL_BLEND);
     glBindVertexArray(0);

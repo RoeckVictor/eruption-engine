@@ -27,11 +27,9 @@ struct EntityInfo {
     std::vector<std::string> component_order;
 };
 
-/// Component for parent-child hierarchy.
-struct Hierarchy {
-    entt::entity parent = entt::null;
-    std::vector<entt::entity> children;
-};
+// Unified hierarchy component lives in the engine.
+// Import into editor namespace so existing code keeps working unqualified.
+using engine::Hierarchy;
 
 // --- Hierarchy Helper Functions ---
 
@@ -58,8 +56,6 @@ void update_enabled_in_hierarchy(entt::registry& registry, entt::entity entity);
 /// Initialize component type registry for dynamic component access.
 /// Must be called once at editor startup (after reflection initialization).
 void init_component_type_registry();
-/// Called automatically by set_entity_enabled() and set_parent().
-void update_enabled_in_hierarchy(entt::registry& registry, entt::entity entity);
 
 /// Create a new entity with default components.
 entt::entity create_entity(entt::registry& registry, const std::string& name = "Entity");

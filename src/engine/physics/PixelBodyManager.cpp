@@ -187,8 +187,9 @@ int PixelBodyManager::handle_splits() {
 
 // --- Terrain collider management ---
 
-void PixelBodyManager::update_terrain_colliders(simulation::PixelGrid& grid) {
-    m_terrain_colliders.update_terrain_colliders(grid);
+void PixelBodyManager::update_terrain_colliders(simulation::PixelGrid& grid,
+                                                  const TerrainColliderManager::EntityTransform& transform) {
+    m_terrain_colliders.update_terrain_colliders(grid, transform);
 }
 
 void PixelBodyManager::mark_terrain_dirty_region(int x, int y, int w, int h) {

@@ -79,7 +79,7 @@ void ShaderStorageBuffer::update(size_t offset, size_t size, const void* data) {
 }
 
 bool ShaderStorageBuffer::readback(size_t offset, size_t size, void* dst) const {
-    if (!m_handle || offset + size > m_size) return false;
+    if (!m_handle || !dst || offset + size > m_size) return false;
 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_handle);
     void* ptr = glMapBufferRange(GL_SHADER_STORAGE_BUFFER, offset, size, GL_MAP_READ_BIT);

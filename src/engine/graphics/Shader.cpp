@@ -6,6 +6,8 @@
 
 namespace engine::graphics {
 
+static constexpr int GL_LOG_BUFFER_SIZE = 1024;
+
 Shader::~Shader() {
     destroy();
 }
@@ -58,7 +60,7 @@ uint32_t Shader::compile_shader(uint32_t type, const char* source, const char* p
     GLint success;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
     if (!success) {
-        char log[1024];
+        char log[GL_LOG_BUFFER_SIZE];
         glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
         ENGINE_ERR("Shader compile error in %s:\n%s", path, log);
         glDeleteShader(shader);
@@ -90,7 +92,7 @@ bool Shader::load_graphics(const char* vert_path, const char* frag_path) {
     GLint success;
     glGetProgramiv(m_program, GL_LINK_STATUS, &success);
     if (!success) {
-        char log[1024];
+        char log[GL_LOG_BUFFER_SIZE];
         glGetProgramInfoLog(m_program, sizeof(log), nullptr, log);
         ENGINE_ERR("Shader link error:\n%s", log);
         glDeleteProgram(m_program);
@@ -125,7 +127,7 @@ bool Shader::load_compute(const char* comp_path) {
     GLint success;
     glGetProgramiv(m_program, GL_LINK_STATUS, &success);
     if (!success) {
-        char log[1024];
+        char log[GL_LOG_BUFFER_SIZE];
         glGetProgramInfoLog(m_program, sizeof(log), nullptr, log);
         ENGINE_ERR("Compute shader link error:\n%s", log);
         glDeleteProgram(m_program);
@@ -223,7 +225,7 @@ bool Shader::try_reload() {
         GLint success;
         glGetProgramiv(prog, GL_LINK_STATUS, &success);
         if (!success) {
-            char log[1024];
+            char log[GL_LOG_BUFFER_SIZE];
             glGetProgramInfoLog(prog, sizeof(log), nullptr, log);
             ENGINE_ERR("Hot-reload link error:\n%s", log);
             glDeleteProgram(prog);
@@ -257,7 +259,7 @@ bool Shader::try_reload() {
         GLint success;
         glGetProgramiv(prog, GL_LINK_STATUS, &success);
         if (!success) {
-            char log[1024];
+            char log[GL_LOG_BUFFER_SIZE];
             glGetProgramInfoLog(prog, sizeof(log), nullptr, log);
             ENGINE_ERR("Hot-reload link error:\n%s", log);
             glDeleteProgram(prog);

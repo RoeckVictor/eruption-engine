@@ -135,6 +135,16 @@ bool SceneSerializer::deserialize(const nlohmann::json& json) {
             }
         }
 
+        // Validate that the reflection system is initialized
+        {
+            auto& type_registry = engine::reflection::TypeRegistry::instance();
+            if (type_registry.get_all_types().empty()) {
+                engine::Logger::instance().error("SceneSerializer",
+                    "TypeRegistry is empty — init_engine_reflections() may not have been called. "
+                    "Components will not be deserialized.");
+            }
+        }
+
         // Load entities
         if (json.contains("entities") && json["entities"].is_array()) {
             for (const auto& entity_json : json["entities"]) {

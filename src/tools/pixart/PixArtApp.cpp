@@ -594,20 +594,9 @@ void PixArtApp::handle_canvas_input(float cx0, float cy0, float cw, float ch) {
         if (m_drawing && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
             if (on_grid && (px != m_last_draw_x || py != m_last_draw_y)) {
                 // Record pixels along the line for undo
-                int x0 = m_last_draw_x, y0 = m_last_draw_y;
-                int x1 = px, y1 = py;
-                int dx = std::abs(x1 - x0);
-                int dy = std::abs(y1 - y0);
-                int sx = (x0 < x1) ? 1 : -1;
-                int sy = (y0 < y1) ? 1 : -1;
-                int err = dx - dy;
-                while (true) {
-                    m_undo.record_brush(m_active_layer, x0, y0, m_tools.draw_state.brush_size);
-                    if (x0 == x1 && y0 == y1) break;
-                    int e2 = 2 * err;
-                    if (e2 > -dy) { err -= dy; x0 += sx; }
-                    if (e2 < dx)  { err += dx; y0 += sy; }
-                }
+                bresenham_line(m_last_draw_x, m_last_draw_y, px, py, [&](int x, int y) {
+                    m_undo.record_brush(m_active_layer, x, y, m_tools.draw_state.brush_size);
+                });
                 // Apply the line
                 m_tools.apply_line(m_doc, m_active_layer, m_last_draw_x, m_last_draw_y, px, py);
                 m_last_draw_x = px;
@@ -650,20 +639,9 @@ void PixArtApp::handle_canvas_input(float cx0, float cy0, float cw, float ch) {
             } else {
                 // Record pixels along the line for undo
                 m_undo.begin_operation(m_doc);
-                int x0 = m_tools.line_start_x, y0 = m_tools.line_start_y;
-                int x1 = px, y1 = py;
-                int dx = std::abs(x1 - x0);
-                int dy = std::abs(y1 - y0);
-                int sx = (x0 < x1) ? 1 : -1;
-                int sy = (y0 < y1) ? 1 : -1;
-                int err = dx - dy;
-                while (true) {
-                    m_undo.record_brush(m_active_layer, x0, y0, m_tools.draw_state.brush_size);
-                    if (x0 == x1 && y0 == y1) break;
-                    int e2 = 2 * err;
-                    if (e2 > -dy) { err -= dy; x0 += sx; }
-                    if (e2 < dx)  { err += dx; y0 += sy; }
-                }
+                bresenham_line(m_tools.line_start_x, m_tools.line_start_y, px, py, [&](int x, int y) {
+                    m_undo.record_brush(m_active_layer, x, y, m_tools.draw_state.brush_size);
+                });
                 m_tools.apply_line(m_doc, m_active_layer, m_tools.line_start_x, m_tools.line_start_y, px, py);
                 m_undo.end_operation();
                 m_tools.line_started = false;

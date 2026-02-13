@@ -125,7 +125,7 @@ static void glfw_framebuffer_callback(GLFWwindow* window, int width, int height)
 
 static void glfw_scroll_callback(GLFWwindow* window, double /*xoffset*/, double yoffset) {
     auto* win = static_cast<Window*>(glfwGetWindowUserPointer(window));
-    if (win) win->on_scroll((float)yoffset);
+    if (win) win->on_scroll(static_cast<float>(yoffset));
 }
 
 // ---- Internal event handlers ----
