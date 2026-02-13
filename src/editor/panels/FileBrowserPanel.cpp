@@ -40,10 +40,10 @@ void FileBrowserPanel::on_gui() {
 
     // Delete confirmation modal (rendered outside children)
     if (!m_pending_delete_path.empty()) {
-        ImGui::OpenPopup("ConfirmDeletePopup");
+        ImGui::OpenPopup("Confirm Delete");
     }
 
-    if (ImGui::BeginPopupModal("ConfirmDeletePopup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (ImGui::BeginPopupModal("Confirm Delete", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         std::string filename = fs::path(m_pending_delete_path).filename().string();
         ImGui::Text("Are you sure you want to delete \"%s\"?", filename.c_str());
         ImGui::Text("This cannot be undone.");
@@ -532,6 +532,81 @@ void FileBrowserPanel::render_file_list() {
         }
     }
 
+    // Inline script creation
+    if (m_creating_script) {
+        ImGui::TextColored(ImVec4(0.6f, 0.8f, 0.4f, 1.0f), "%s", ICON_FA_CODE);
+        ImGui::SameLine();
+
+        if (!m_create_focus_set) {
+            ImGui::SetKeyboardFocusHere();
+            m_create_focus_set = true;
+        }
+
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::InputText("##createscript", m_create_buffer, sizeof(m_create_buffer),
+                             ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+            std::string name(m_create_buffer);
+            if (!name.empty()) {
+                // Strip any extension the user may have typed
+                fs::path name_path(name);
+                std::string class_name = name_path.stem().string();
+
+                // Create in the current directory
+                fs::path header_path = fs::path(m_current_path) / (class_name + ".h");
+                fs::path source_path = fs::path(m_current_path) / (class_name + ".cpp");
+
+                try {
+                    // Generate header
+                    {
+                        std::ofstream file(header_path);
+                        if (file.is_open()) {
+                            file << "#pragma once\n\n";
+                            file << "#include \"runtime/ComponentScript.h\"\n";
+                            file << "#include \"engine/core/Transform.h\"\n\n";
+                            file << "class " << class_name << " : public runtime::ComponentScript {\n";
+                            file << "public:\n";
+                            file << "    const char* type_name() const override { return \"" << class_name << "\"; }\n\n";
+                            file << "    void on_create() override {\n";
+                            file << "        // Called when the script is first created\n";
+                            file << "    }\n\n";
+                            file << "    void on_destroy() override {\n";
+                            file << "        // Called when the script is about to be destroyed\n";
+                            file << "    }\n\n";
+                            file << "    void on_update() override {\n";
+                            file << "        // float dt = delta_time();\n";
+                            file << "        // Called every frame\n";
+                            file << "    }\n\n";
+                            file << "private:\n";
+                            file << "};\n";
+                        }
+                    }
+
+                    // Generate source
+                    {
+                        std::ofstream file(source_path);
+                        if (file.is_open()) {
+                            file << "#include \"" << class_name << ".h\"\n\n";
+                            file << "REGISTER_COMPONENT_SCRIPT(" << class_name << ")\n";
+                        }
+                    }
+
+                    engine::Logger::instance().info("FileBrowser",
+                        "Created script: %s (.h + .cpp)", class_name.c_str());
+                } catch (const std::exception& e) {
+                    engine::Logger::instance().error("FileBrowser",
+                        "Failed to create script: %s", e.what());
+                }
+                refresh();
+            }
+            m_creating_script = false;
+            std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            m_creating_script = false;
+            std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+        }
+    }
+
     // Right-click on empty space
     if (ImGui::BeginPopupContextWindow(nullptr, ImGuiPopupFlags_NoOpenOverItems | ImGuiPopupFlags_MouseButtonRight)) {
         if (ImGui::BeginMenu("Create")) {
@@ -540,6 +615,7 @@ void FileBrowserPanel::render_file_list() {
                 m_creating_scene = false;
                 m_creating_pxg = false;
                 m_creating_prefab = false;
+                m_creating_script = false;
                 std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
                 m_create_focus_set = false;
             }
@@ -548,6 +624,7 @@ void FileBrowserPanel::render_file_list() {
                 m_creating_folder = false;
                 m_creating_pxg = false;
                 m_creating_prefab = false;
+                m_creating_script = false;
                 std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
                 m_create_focus_set = false;
             }
@@ -556,6 +633,7 @@ void FileBrowserPanel::render_file_list() {
                 m_creating_folder = false;
                 m_creating_scene = false;
                 m_creating_prefab = false;
+                m_creating_script = false;
                 std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
                 m_create_focus_set = false;
             }
@@ -564,6 +642,17 @@ void FileBrowserPanel::render_file_list() {
                 m_creating_folder = false;
                 m_creating_scene = false;
                 m_creating_pxg = false;
+                m_creating_script = false;
+                std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
+                m_create_focus_set = false;
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Script (.h/.cpp)")) {
+                m_creating_script = true;
+                m_creating_folder = false;
+                m_creating_scene = false;
+                m_creating_pxg = false;
+                m_creating_prefab = false;
                 std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
                 m_create_focus_set = false;
             }

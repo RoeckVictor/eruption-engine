@@ -16,6 +16,8 @@
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
 #include "editor/icons/IconsFontAwesome6.h"
+#include "editor/scripting/ScriptManager.h"
+#include "runtime/ScriptComponent.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -160,6 +162,46 @@ void InspectorPanel::render_entity_inspector(entt::entity entity) {
 
         if (component_ptr) {
             render_component_inspector(entity, type_info, component_ptr, i, present_components.size());
+        }
+    }
+
+    // Render script components (same visual style as engine components)
+    if (registry->all_of<runtime::ScriptComponent>(entity)) {
+        auto& sc = registry->get<runtime::ScriptComponent>(entity);
+        for (size_t i = 0; i < sc.script_types.size(); ++i) {
+            ImGui::PushID(("script_" + std::to_string(i)).c_str());
+
+            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Framed;
+            bool open = ImGui::CollapsingHeader(sc.script_types[i].c_str(), flags);
+
+            if (open) {
+                // Delete button (same style as engine component delete)
+                ImGui::Spacing();
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.2f, 0.2f, 0.6f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.3f, 0.3f, 0.8f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.0f, 0.1f, 0.1f, 1.0f));
+
+                if (ImGui::Button(ICON_FA_TRASH " Delete Component", ImVec2(-1, 0))) {
+                    sc.remove_script_by_name(sc.script_types[i]);
+                    if (sc.empty()) {
+                        registry->remove<runtime::ScriptComponent>(entity);
+                    }
+                    m_context.mark_dirty();
+                    ImGui::PopStyleColor(3);
+                    ImGui::PopID();
+                    break; // List changed, bail out of loop
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                // During play mode, call on_inspector_gui if script instance exists
+                if (i < sc.scripts.size() && sc.scripts[i]) {
+                    sc.scripts[i]->on_inspector_gui();
+                }
+            }
+            ImGui::PopID();
         }
     }
 
@@ -308,7 +350,7 @@ void InspectorPanel::render_component_inspector(entt::entity entity, const engin
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.0f, 0.1f, 0.1f, 1.0f));
 
             if (ImGui::Button(ICON_FA_TRASH " Delete Component", ImVec2(-1, 0))) {
-                ImGui::OpenPopup("ConfirmRemoveComponent");
+                ImGui::OpenPopup("Remove Component");
             }
 
             ImGui::PopStyleColor(3);
@@ -318,7 +360,7 @@ void InspectorPanel::render_component_inspector(entt::entity entity, const engin
         }
 
         // Confirmation popup for removing component
-        if (!is_required && ImGui::BeginPopupModal("ConfirmRemoveComponent", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (!is_required && ImGui::BeginPopupModal("Remove Component", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::Text("Remove this component?");
             ImGui::Text("This action cannot be undone.");
             ImGui::Spacing();
@@ -437,8 +479,53 @@ void InspectorPanel::render_add_component_button(entt::entity entity) {
             }
         }
 
-        // Show message if no components available
-        if (categories.empty()) {
+        // Scripts category
+        auto* sm = m_context.script_manager();
+        bool any_scripts_shown = false;
+        if (sm && sm->are_scripts_loaded()) {
+            auto* sc = registry->try_get<runtime::ScriptComponent>(entity);
+
+            std::vector<std::string> available_scripts;
+            for (const auto& type_info : sm->dll_manager().script_types()) {
+                if (type_info.is_system) continue;
+
+                // Skip if already attached
+                if (sc) {
+                    auto it = std::find(sc->script_types.begin(), sc->script_types.end(), type_info.name);
+                    if (it != sc->script_types.end()) continue;
+                }
+
+                // Filter by search text
+                std::string lower_name = type_info.name;
+                std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+                std::string lower_search = search;
+                std::transform(lower_search.begin(), lower_search.end(), lower_search.begin(), ::tolower);
+
+                if (strlen(search) > 0 && lower_name.find(lower_search) == std::string::npos) {
+                    continue;
+                }
+
+                available_scripts.push_back(type_info.name);
+            }
+
+            if (!available_scripts.empty()) {
+                ImGui::TextDisabled("-- Scripts --");
+                for (const auto& script_name : available_scripts) {
+                    if (ImGui::MenuItem(script_name.c_str())) {
+                        if (!sc) {
+                            sc = &registry->emplace<runtime::ScriptComponent>(entity);
+                        }
+                        sc->script_types.push_back(script_name);
+                        m_context.mark_dirty();
+                        ImGui::CloseCurrentPopup();
+                    }
+                }
+                any_scripts_shown = true;
+            }
+        }
+
+        // Show message if nothing available
+        if (categories.empty() && !any_scripts_shown) {
             ImGui::TextDisabled("No components available");
             if (strlen(search) > 0) {
                 ImGui::TextDisabled("(try different search)");

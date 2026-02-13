@@ -1,5 +1,6 @@
 #include "DLLManager.h"
 #include "engine/core/Logger.h"
+#include <imgui.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -50,6 +51,13 @@ bool DLLManager::load(const std::string& path) {
         return false;
     }
 #endif
+
+    // Share the editor's ImGui context with the DLL so scripts can use ImGui
+    using SetImGuiContextFn = void(*)(ImGuiContext*);
+    auto set_ctx = reinterpret_cast<SetImGuiContextFn>(get_symbol("SetImGuiContext"));
+    if (set_ctx) {
+        set_ctx(ImGui::GetCurrentContext());
+    }
 
     // Discover registered scripts
     discover_scripts();

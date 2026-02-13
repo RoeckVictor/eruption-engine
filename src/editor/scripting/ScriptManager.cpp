@@ -23,9 +23,9 @@ void ScriptManager::init(const std::string& project_path, const std::string& eng
         on_build_complete(success);
     });
 
-    // Set up watcher
-    std::string scripts_path = (fs::path(project_path) / "Scripts").string();
-    m_watcher.set_watch_path(scripts_path);
+    // Set up watcher - watch Assets folder for script changes
+    std::string assets_path = (fs::path(project_path) / "Assets").string();
+    m_watcher.set_watch_path(assets_path);
     m_watcher.set_changed_callback([this]() {
         on_scripts_changed();
     });

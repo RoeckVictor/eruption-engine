@@ -43,8 +43,8 @@ EditorApplication::EditorApplication()
     // Set up the scene registry in context
     m_context.set_registry(&m_scene_registry);
 
-    // Initialize runtime context with the editor's registry
-    m_runtime.init(&m_scene_registry);
+    // Initialize runtime context with the editor's registry and script manager
+    m_runtime.init(&m_scene_registry, &m_script_manager);
 
     // Link runtime context to editor context
     m_context.set_runtime(&m_runtime);
@@ -55,6 +55,9 @@ EditorApplication::~EditorApplication() = default;
 bool EditorApplication::on_init(engine::Engine& engine) {
     // Initialize engine component reflections
     engine::reflection::init_engine_reflections();
+
+    // Provide engine pointer to runtime context for script input/physics/time API
+    m_runtime.set_engine(&engine);
 
     // Initialize component type registry for dynamic component access
     init_component_type_registry();
@@ -705,6 +708,11 @@ void EditorApplication::on_project_loaded() {
         engine::Logger::instance().info("Editor", "Engine build path: %s", engine_build_path.c_str());
     }
     m_script_manager.init(m_project_manager->project_path(), m_engine_src_path, engine_build_path);
+    m_context.set_script_manager(&m_script_manager);
+
+    // Pass project assets path to runtime context for prefab loading
+    auto runtime_assets_path = std::filesystem::path(m_project_manager->project_path()) / "Assets";
+    m_runtime.set_project_assets_path(runtime_assets_path.string());
 
     // Show all editor panels
     if (auto* p = m_panel_manager.get_panel<ConsolePanel>()) p->set_visible(true);
@@ -714,7 +722,9 @@ void EditorApplication::on_project_loaded() {
     auto* asset_preview = m_panel_manager.get_panel<AssetPreviewPanel>();
     if (auto* file_browser = m_panel_manager.get_panel<FileBrowserPanel>()) {
         file_browser->set_visible(true);
-        file_browser->set_root(m_project_manager->project_path());
+        auto assets_path = std::filesystem::path(m_project_manager->project_path()) / "Assets";
+        std::filesystem::create_directories(assets_path);
+        file_browser->set_root(assets_path.string());
 
         // Connect file browser selection to asset preview
         if (asset_preview) {

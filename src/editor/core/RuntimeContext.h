@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 #include "engine/simulation/PixelGrid.h"
 #include "engine/simulation/MargolusSimulation.h"
@@ -12,6 +13,7 @@
 #include "engine/graphics/Texture.h"
 #include "engine/graphics/ShaderStorageBuffer.h"
 #include "engine/graphics/Shader.h"
+#include "runtime/ComponentScript.h"
 
 namespace engine {
 class Engine;
@@ -20,11 +22,17 @@ namespace physics {
 class PhysicsWorld;
 struct Rigidbody;
 }
+
+namespace prefab {
+class ComponentRegistry;
+class PrefabManager;
+}
 }
 
 namespace editor {
 
 struct SceneSettings;
+class ScriptManager;
 
 /// State for a single active pixel simulation surface during play mode.
 struct SimSurfaceState {
@@ -53,8 +61,11 @@ public:
     RuntimeContext();
     ~RuntimeContext();
 
-    /// Initialize with the editor's scene registry.
-    void init(entt::registry* editor_registry);
+    /// Initialize with the editor's scene registry and script manager.
+    void init(entt::registry* editor_registry, ScriptManager* script_manager = nullptr);
+
+    /// Set the engine pointer (called from EditorApplication::on_init).
+    void set_engine(engine::Engine* engine) { m_engine = engine; }
 
     /// Get the current play state.
     PlayState state() const { return m_state; }
@@ -101,6 +112,15 @@ public:
     /// Access active simulation surfaces (for debug visualization).
     const std::vector<std::unique_ptr<SimSurfaceState>>& sim_surfaces() const { return m_sim_surfaces; }
 
+    /// Queue an entity for deferred destruction (called by script host API).
+    void queue_destroy(entt::entity entity) { m_deferred_destroys.push_back(entity); }
+
+    /// Set the project assets path (for loading prefabs at runtime).
+    void set_project_assets_path(const std::string& path) { m_project_assets_path = path; }
+
+    /// Instantiate a prefab by name (called by host API callback).
+    entt::entity instantiate_prefab_internal(const char* prefab_name);
+
 private:
     void snapshot_scene();
     void restore_scene();
@@ -114,7 +134,16 @@ private:
     void shutdown_pixel_simulations();
     void update_pixel_simulations(float dt);
 
+    void init_scripts();
+    void shutdown_scripts();
+    void fixed_update_scripts();
+    void update_scripts();
+    void late_update_scripts();
+    void check_enable_disable_scripts();
+
     entt::registry* m_editor_registry = nullptr;
+    ScriptManager* m_script_manager = nullptr;
+    engine::Engine* m_engine = nullptr;
 
     // Scene snapshot stored as serialized data
     std::string m_scene_snapshot;
@@ -131,6 +160,24 @@ private:
     float m_play_time = 0.0f;
     uint64_t m_frame_count = 0;
     bool m_step_requested = false;
+
+    // Fixed timestep for on_fixed_update / physics
+    float m_fixed_timestep = 1.0f / 60.0f;
+    float m_fixed_time_accumulator = 0.0f;
+
+    // Track entity enabled state for on_enable/on_disable callbacks
+    std::unordered_set<entt::entity> m_previously_enabled_script_entities;
+
+    // Script host API (shared instance for all scripts)
+    runtime::ScriptHostAPI m_host_api;
+
+    // Deferred entity destruction (queued by scripts, flushed at end of frame)
+    std::vector<entt::entity> m_deferred_destroys;
+
+    // Prefab system for script instantiation
+    std::unique_ptr<engine::prefab::ComponentRegistry> m_component_registry;
+    std::unique_ptr<engine::prefab::PrefabManager> m_prefab_manager;
+    std::string m_project_assets_path;
 };
 
 } // namespace editor

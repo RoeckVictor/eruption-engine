@@ -19,6 +19,7 @@ namespace editor {
 
 class ProjectManager;
 class Command;
+class ScriptManager;
 
 /// Visibility mode for debug overlays in the viewport.
 enum class GizmoVisibility { None, SelectedOnly, All };
@@ -226,6 +227,12 @@ public:
     /// Get current play state.
     PlayState play_state() const { return m_runtime ? m_runtime->state() : PlayState::Editing; }
 
+    // --- Script Manager ---
+
+    void set_script_manager(ScriptManager* sm) { m_script_manager = sm; }
+    ScriptManager* script_manager() { return m_script_manager; }
+    const ScriptManager* script_manager() const { return m_script_manager; }
+
     // --- Gizmo Visibility ---
 
     GizmoVisibilitySettings& gizmo_visibility() { return m_gizmo_visibility; }
@@ -268,6 +275,7 @@ private:
     CommandHistory m_history;
 
     RuntimeContext* m_runtime = nullptr;
+    ScriptManager* m_script_manager = nullptr;
 
     GizmoVisibilitySettings m_gizmo_visibility;
     SceneSettings m_scene_settings;

@@ -74,6 +74,7 @@ private:
     bool m_creating_scene = false;
     bool m_creating_pxg = false;
     bool m_creating_prefab = false;
+    bool m_creating_script = false;
     char m_create_buffer[256] = {};
     bool m_create_focus_set = false;
 

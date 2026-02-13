@@ -3,6 +3,8 @@
 #include "editor/serialization/SceneSerializer.h"
 #include "engine/core/MathConstants.h"
 #include "engine/core/Logger.h"
+#include "engine/core/Engine.h"
+#include "engine/platform/Input.h"
 #include "engine/physics/PhysicsWorld.h"
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
@@ -12,16 +14,188 @@
 #include "engine/simulation/MaterialLibrary.h"
 #include "engine/asset/PixelGridFile.h"
 #include "engine/asset/PxgDataParser.h"
+#include "editor/scripting/ScriptManager.h"
+#include "runtime/ScriptComponent.h"
+#include "engine/prefab/PrefabManager.h"
+#include "engine/prefab/ComponentRegistry.h"
+#include "engine/EngineComponentRegistry.h"
 #include <glad/gl.h>
 #include <cmath>
+#include <fstream>
 
 namespace editor {
+
+// =============================================================================
+// File-scoped state for host API callbacks (valid only during play mode)
+// =============================================================================
+static engine::Engine* s_host_engine = nullptr;
+static RuntimeContext* s_host_runtime = nullptr;
+
+// --- Input callbacks ---
+
+static bool host_is_key_held(int key) {
+    if (!s_host_engine) return false;
+    return s_host_engine->input().is_held(static_cast<engine::platform::KeyCode>(key));
+}
+
+static bool host_is_key_pressed(int key) {
+    if (!s_host_engine) return false;
+    return s_host_engine->input().is_pressed(static_cast<engine::platform::KeyCode>(key));
+}
+
+static bool host_is_key_released(int key) {
+    if (!s_host_engine) return false;
+    return s_host_engine->input().is_released(static_cast<engine::platform::KeyCode>(key));
+}
+
+static bool host_is_mouse_held(int button) {
+    if (!s_host_engine) return false;
+    return s_host_engine->input().is_mouse_held(static_cast<engine::platform::MouseButton>(button));
+}
+
+static bool host_is_mouse_pressed(int button) {
+    if (!s_host_engine) return false;
+    return s_host_engine->input().is_mouse_pressed(static_cast<engine::platform::MouseButton>(button));
+}
+
+static double host_get_mouse_x() {
+    return s_host_engine ? s_host_engine->input().mouse_x() : 0.0;
+}
+
+static double host_get_mouse_y() {
+    return s_host_engine ? s_host_engine->input().mouse_y() : 0.0;
+}
+
+// --- Logging callbacks ---
+
+static void host_log_info(const char* msg) {
+    engine::Logger::instance().info("Script", "%s", msg);
+}
+
+static void host_log_warning(const char* msg) {
+    engine::Logger::instance().warning("Script", "%s", msg);
+}
+
+static void host_log_error(const char* msg) {
+    engine::Logger::instance().error("Script", "%s", msg);
+}
+
+// --- Physics callbacks ---
+
+static void host_get_velocity(entt::registry* reg, entt::entity entity, float* vx, float* vy) {
+    *vx = 0.0f; *vy = 0.0f;
+    if (!reg || !reg->valid(entity) || !s_host_runtime || !s_host_runtime->physics_world()) return;
+    if (!reg->all_of<engine::physics::Rigidbody>(entity)) return;
+    auto& rb = reg->get<engine::physics::Rigidbody>(entity);
+    if (!b2Body_IsValid(rb.body_id)) return;
+    b2Vec2 vel = s_host_runtime->physics_world()->get_body_linear_velocity(rb.body_id);
+    *vx = vel.x; *vy = vel.y;
+}
+
+static void host_set_velocity(entt::registry* reg, entt::entity entity, float vx, float vy) {
+    if (!reg || !reg->valid(entity) || !s_host_runtime || !s_host_runtime->physics_world()) return;
+    if (!reg->all_of<engine::physics::Rigidbody>(entity)) return;
+    auto& rb = reg->get<engine::physics::Rigidbody>(entity);
+    if (!b2Body_IsValid(rb.body_id)) return;
+    s_host_runtime->physics_world()->set_body_linear_velocity(rb.body_id, vx, vy);
+}
+
+static void host_add_force(entt::registry* reg, entt::entity entity, float fx, float fy) {
+    if (!reg || !reg->valid(entity) || !s_host_runtime || !s_host_runtime->physics_world()) return;
+    if (!reg->all_of<engine::physics::Rigidbody>(entity)) return;
+    auto& rb = reg->get<engine::physics::Rigidbody>(entity);
+    if (!b2Body_IsValid(rb.body_id)) return;
+    s_host_runtime->physics_world()->apply_force(rb.body_id, fx, fy);
+}
+
+static void host_add_impulse(entt::registry* reg, entt::entity entity, float ix, float iy) {
+    if (!reg || !reg->valid(entity) || !s_host_runtime || !s_host_runtime->physics_world()) return;
+    if (!reg->all_of<engine::physics::Rigidbody>(entity)) return;
+    auto& rb = reg->get<engine::physics::Rigidbody>(entity);
+    if (!b2Body_IsValid(rb.body_id)) return;
+    s_host_runtime->physics_world()->apply_impulse(rb.body_id, ix, iy);
+}
+
+// --- Entity operation callbacks ---
+
+static entt::entity host_find_entity_by_name(entt::registry* reg, const char* name) {
+    if (!reg || !name) return entt::null;
+    auto view = reg->view<EntityInfo>();
+    for (auto entity : view) {
+        if (view.get<EntityInfo>(entity).name == name) return entity;
+    }
+    return entt::null;
+}
+
+static void host_destroy_entity(entt::registry* reg, entt::entity entity) {
+    if (!reg || !reg->valid(entity) || !s_host_runtime) return;
+    // Queue for deferred destruction (avoids destroying while iterating)
+    s_host_runtime->queue_destroy(entity);
+}
+
+/// Host-side component accessor. This function is compiled into the editor EXE,
+/// so entt template instantiations use the EXE's type system (avoiding DLL type ID mismatch).
+static void* host_get_component(entt::registry* reg, entt::entity entity, entt::id_type type_hash) {
+    if (!reg || !reg->valid(entity)) return nullptr;
+    auto* storage = reg->storage(type_hash);
+    if (!storage || !storage->contains(entity)) return nullptr;
+    return storage->value(entity);
+}
+
+// --- Component manipulation callbacks ---
+
+static void* host_add_component(entt::registry* reg, entt::entity entity, entt::id_type type_hash) {
+    if (!reg || !reg->valid(entity)) return nullptr;
+    auto* storage = reg->storage(type_hash);
+    if (!storage) return nullptr;
+    if (storage->contains(entity)) return storage->value(entity); // Already has it
+    storage->push(entity);  // Default-constructs the component
+    return storage->value(entity);
+}
+
+static void host_remove_component(entt::registry* reg, entt::entity entity, entt::id_type type_hash) {
+    if (!reg || !reg->valid(entity)) return;
+    auto* storage = reg->storage(type_hash);
+    if (!storage || !storage->contains(entity)) return;
+    storage->remove(entity);
+}
+
+// --- Prefab instantiation callback ---
+
+static entt::entity host_instantiate_prefab(entt::registry* /*reg*/, const char* prefab_name) {
+    if (!prefab_name || !s_host_runtime) return entt::null;
+    return s_host_runtime->instantiate_prefab_internal(prefab_name);
+}
 
 RuntimeContext::RuntimeContext() = default;
 RuntimeContext::~RuntimeContext() = default;
 
-void RuntimeContext::init(entt::registry* editor_registry) {
+void RuntimeContext::init(entt::registry* editor_registry, ScriptManager* script_manager) {
     m_editor_registry = editor_registry;
+    m_script_manager = script_manager;
+
+    // Populate ScriptHostAPI function pointers (constant for lifetime of runtime)
+    m_host_api.get_component = &host_get_component;
+    m_host_api.is_key_held = &host_is_key_held;
+    m_host_api.is_key_pressed = &host_is_key_pressed;
+    m_host_api.is_key_released = &host_is_key_released;
+    m_host_api.is_mouse_held = &host_is_mouse_held;
+    m_host_api.is_mouse_pressed = &host_is_mouse_pressed;
+    m_host_api.get_mouse_x = &host_get_mouse_x;
+    m_host_api.get_mouse_y = &host_get_mouse_y;
+    m_host_api.log_info = &host_log_info;
+    m_host_api.log_warning = &host_log_warning;
+    m_host_api.log_error = &host_log_error;
+    m_host_api.get_velocity = &host_get_velocity;
+    m_host_api.set_velocity = &host_set_velocity;
+    m_host_api.add_force = &host_add_force;
+    m_host_api.add_impulse = &host_add_impulse;
+    m_host_api.find_entity_by_name = &host_find_entity_by_name;
+    m_host_api.destroy_entity = &host_destroy_entity;
+    m_host_api.add_component = &host_add_component;
+    m_host_api.remove_component = &host_remove_component;
+    m_host_api.instantiate_prefab = &host_instantiate_prefab;
+    m_host_api.fixed_delta_time = m_fixed_timestep;
 }
 
 void RuntimeContext::play(const SceneSettings& settings) {
@@ -52,9 +226,23 @@ void RuntimeContext::play(const SceneSettings& settings) {
     // Initialize pixel simulations for entities with SimSurface + PixelGridComponent
     init_pixel_simulations();
 
+    // Initialize prefab system for script instantiation
+    m_component_registry = std::make_unique<engine::prefab::ComponentRegistry>();
+    engine::register_engine_components(*m_component_registry);
+    m_prefab_manager = std::make_unique<engine::prefab::PrefabManager>();
+    m_prefab_manager->set_registry(*m_component_registry);
+
+    // Instantiate component scripts from DLL
+    init_scripts();
+
     m_state = PlayState::Playing;
     m_play_time = 0.0f;
     m_frame_count = 0;
+    m_fixed_time_accumulator = 0.0f;
+
+    // Set static pointers for host API callbacks
+    s_host_engine = m_engine;
+    s_host_runtime = this;
 
     engine::Logger::instance().info("Runtime", "Entered play mode with physics system");
 }
@@ -82,9 +270,18 @@ void RuntimeContext::stop() {
         return; // Not playing
     }
 
+    // Clear static pointers used by host API callbacks
+    s_host_engine = nullptr;
+    s_host_runtime = nullptr;
+
     // Shutdown engine systems before restoring scene
+    shutdown_scripts();
+    m_previously_enabled_script_entities.clear();
+    m_deferred_destroys.clear();
     shutdown_pixel_simulations();
     m_physics_world.reset();
+    m_prefab_manager.reset();
+    m_component_registry.reset();
 
     // Restore the original scene state
     restore_scene();
@@ -121,19 +318,49 @@ void RuntimeContext::update(float dt) {
     // Run engine systems on the editor registry
     if (!m_editor_registry) return;
 
-    // Update physics (Box2D simulation)
-    if (m_physics_world) {
-        m_physics_world->step(dt, 4); // 4 substeps for stability
+    // Update host API frame state (scripts read these via convenience methods)
+    m_host_api.delta_time = dt;
+    m_host_api.time = m_play_time;
+    m_host_api.frame_count = m_frame_count;
+    m_host_api.fixed_delta_time = m_fixed_timestep;
 
-        // Sync physics results back to transforms
+    // --- Fixed timestep loop (on_fixed_update + physics) ---
+    m_fixed_time_accumulator += dt;
+    while (m_fixed_time_accumulator >= m_fixed_timestep) {
+        m_fixed_time_accumulator -= m_fixed_timestep;
+
+        // Script fixed update (physics-rate logic)
+        fixed_update_scripts();
+
+        // Physics step at fixed rate
+        if (m_physics_world) {
+            m_physics_world->step(m_fixed_timestep, 4);
+        }
+    }
+
+    // Sync physics results back to transforms (once per frame)
+    if (m_physics_world) {
         sync_physics_to_transforms();
     }
 
     // Update world transforms for hierarchy
     update_world_transforms(*m_editor_registry);
 
+    // --- Per-frame script callbacks ---
+    check_enable_disable_scripts();
+    update_scripts();
+    late_update_scripts();
+
     // Update pixel simulations (falling sand, liquids, gases)
     update_pixel_simulations(dt);
+
+    // Flush deferred entity destructions (queued by scripts calling destroy_self/destroy_entity)
+    for (auto entity : m_deferred_destroys) {
+        if (m_editor_registry->valid(entity)) {
+            destroy_entity_recursive(*m_editor_registry, entity);
+        }
+    }
+    m_deferred_destroys.clear();
 }
 
 void RuntimeContext::snapshot_scene() {
@@ -688,6 +915,197 @@ uint32_t RuntimeContext::get_sim_texture(entt::entity entity) const {
         }
     }
     return 0;
+}
+
+void RuntimeContext::init_scripts() {
+    if (!m_script_manager || !m_script_manager->are_scripts_loaded()) return;
+    if (!m_editor_registry) return;
+
+    auto& dll = m_script_manager->dll_manager();
+
+    auto view = m_editor_registry->view<runtime::ScriptComponent>();
+    int script_count = 0;
+    for (auto entity : view) {
+        auto& sc = view.get<runtime::ScriptComponent>(entity);
+
+        // Instantiate script objects from stored type names
+        for (const auto& type_name : sc.script_types) {
+            auto* script = dll.create_script(type_name);
+            if (script) {
+                script->init_context(entity, m_editor_registry, m_engine, &m_host_api);
+                sc.scripts.push_back(std::unique_ptr<runtime::ComponentScript>(script));
+                script_count++;
+            } else {
+                engine::Logger::instance().warning("Runtime",
+                    "Script type not found in DLL: %s", type_name.c_str());
+            }
+        }
+
+        // Call on_create for all instantiated scripts
+        for (auto& script : sc.scripts) {
+            if (script) script->on_create();
+        }
+
+        // Track initial enabled state for on_enable/on_disable detection
+        bool enabled = true;
+        if (m_editor_registry->all_of<EntityInfo>(entity)) {
+            enabled = m_editor_registry->get<EntityInfo>(entity).enabled_in_hierarchy;
+        }
+        if (enabled) {
+            m_previously_enabled_script_entities.insert(entity);
+        }
+    }
+
+    engine::Logger::instance().info("Runtime", "Scripts initialized (%d instances)", script_count);
+}
+
+void RuntimeContext::shutdown_scripts() {
+    if (!m_editor_registry) return;
+
+    auto view = m_editor_registry->view<runtime::ScriptComponent>();
+    for (auto entity : view) {
+        auto& sc = view.get<runtime::ScriptComponent>(entity);
+        for (auto& script : sc.scripts) {
+            if (script) script->on_destroy();
+        }
+        sc.scripts.clear(); // Destroy instances, keep type names for serialization
+    }
+}
+
+void RuntimeContext::fixed_update_scripts() {
+    if (!m_editor_registry) return;
+
+    auto view = m_editor_registry->view<runtime::ScriptComponent>();
+    for (auto entity : view) {
+        auto& sc = view.get<runtime::ScriptComponent>(entity);
+
+        if (m_editor_registry->all_of<EntityInfo>(entity)) {
+            if (!m_editor_registry->get<EntityInfo>(entity).enabled_in_hierarchy) {
+                continue;
+            }
+        }
+
+        for (auto& script : sc.scripts) {
+            if (script) script->on_fixed_update();
+        }
+    }
+}
+
+void RuntimeContext::update_scripts() {
+    if (!m_editor_registry) return;
+
+    auto view = m_editor_registry->view<runtime::ScriptComponent>();
+    for (auto entity : view) {
+        auto& sc = view.get<runtime::ScriptComponent>(entity);
+
+        if (m_editor_registry->all_of<EntityInfo>(entity)) {
+            if (!m_editor_registry->get<EntityInfo>(entity).enabled_in_hierarchy) {
+                continue;
+            }
+        }
+
+        for (auto& script : sc.scripts) {
+            if (script) script->on_update();
+        }
+    }
+}
+
+void RuntimeContext::late_update_scripts() {
+    if (!m_editor_registry) return;
+
+    auto view = m_editor_registry->view<runtime::ScriptComponent>();
+    for (auto entity : view) {
+        auto& sc = view.get<runtime::ScriptComponent>(entity);
+
+        if (m_editor_registry->all_of<EntityInfo>(entity)) {
+            if (!m_editor_registry->get<EntityInfo>(entity).enabled_in_hierarchy) {
+                continue;
+            }
+        }
+
+        for (auto& script : sc.scripts) {
+            if (script) script->on_late_update();
+        }
+    }
+}
+
+void RuntimeContext::check_enable_disable_scripts() {
+    if (!m_editor_registry) return;
+
+    auto view = m_editor_registry->view<runtime::ScriptComponent>();
+    for (auto entity : view) {
+        auto& sc = view.get<runtime::ScriptComponent>(entity);
+        if (sc.scripts.empty()) continue;
+
+        bool currently_enabled = true;
+        if (m_editor_registry->all_of<EntityInfo>(entity)) {
+            currently_enabled = m_editor_registry->get<EntityInfo>(entity).enabled_in_hierarchy;
+        }
+
+        bool was_enabled = m_previously_enabled_script_entities.count(entity) > 0;
+
+        if (currently_enabled && !was_enabled) {
+            // Entity just became enabled
+            for (auto& script : sc.scripts) {
+                if (script) script->on_enable();
+            }
+            m_previously_enabled_script_entities.insert(entity);
+        } else if (!currently_enabled && was_enabled) {
+            // Entity just became disabled
+            for (auto& script : sc.scripts) {
+                if (script) script->on_disable();
+            }
+            m_previously_enabled_script_entities.erase(entity);
+        }
+    }
+}
+
+entt::entity RuntimeContext::instantiate_prefab_internal(const char* prefab_name) {
+    if (!m_prefab_manager || !m_editor_registry || !prefab_name) return entt::null;
+
+    // Load prefab on demand if not already cached
+    if (!m_prefab_manager->find(prefab_name)) {
+        if (m_project_assets_path.empty()) {
+            engine::Logger::instance().error("Runtime",
+                "Cannot instantiate prefab '%s': no project assets path set", prefab_name);
+            return entt::null;
+        }
+
+        std::string file_path = m_project_assets_path + "/" + std::string(prefab_name) + ".prefab";
+        std::ifstream file(file_path);
+        if (!file.is_open()) {
+            engine::Logger::instance().error("Runtime",
+                "Prefab file not found: %s", file_path.c_str());
+            return entt::null;
+        }
+
+        std::string json_str((std::istreambuf_iterator<char>(file)),
+                              std::istreambuf_iterator<char>());
+        if (!m_prefab_manager->load_prefab_from_string(json_str)) {
+            engine::Logger::instance().error("Runtime",
+                "Failed to parse prefab: %s", file_path.c_str());
+            return entt::null;
+        }
+    }
+
+    auto entity = m_prefab_manager->instantiate(prefab_name, *m_editor_registry);
+    if (entity == entt::null) return entt::null;
+
+    // Add editor metadata if not already present (prefab factories don't add these)
+    if (!m_editor_registry->all_of<EntityInfo>(entity)) {
+        auto& info = m_editor_registry->emplace<EntityInfo>(entity);
+        info.name = prefab_name;
+        info.is_prefab_instance = true;
+        info.prefab_path = std::string(prefab_name) + ".prefab";
+    }
+    if (!m_editor_registry->all_of<Hierarchy>(entity)) {
+        m_editor_registry->emplace<Hierarchy>(entity);
+    }
+
+    engine::Logger::instance().info("Runtime",
+        "Instantiated prefab '%s' as entity %u", prefab_name, static_cast<unsigned>(entity));
+
+    return entity;
 }
 
 } // namespace editor

@@ -82,7 +82,9 @@ struct ScriptComponent {
             if (dynamic_cast<T*>(scripts[i].get())) {
                 scripts[i]->on_destroy();
                 scripts.erase(scripts.begin() + i);
-                script_types.erase(script_types.begin() + i);
+                if (i < script_types.size()) {
+                    script_types.erase(script_types.begin() + i);
+                }
                 return true;
             }
         }
@@ -93,8 +95,11 @@ struct ScriptComponent {
     bool remove_script_by_name(const std::string& type_name) {
         for (size_t i = 0; i < script_types.size(); ++i) {
             if (script_types[i] == type_name) {
-                scripts[i]->on_destroy();
-                scripts.erase(scripts.begin() + i);
+                // Scripts instances may not exist (edit mode only has type names)
+                if (i < scripts.size() && scripts[i]) {
+                    scripts[i]->on_destroy();
+                    scripts.erase(scripts.begin() + i);
+                }
                 script_types.erase(script_types.begin() + i);
                 return true;
             }
@@ -102,8 +107,8 @@ struct ScriptComponent {
         return false;
     }
 
-    /// Check if this component has any scripts.
-    bool empty() const { return scripts.empty(); }
+    /// Check if this component has any scripts (type names or live instances).
+    bool empty() const { return script_types.empty(); }
 
     /// Get the number of scripts.
     size_t size() const { return scripts.size(); }

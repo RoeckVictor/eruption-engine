@@ -3,6 +3,7 @@
 #include "editor/core/ComponentTypeRegistry.h"
 #include "engine/core/Logger.h"
 #include "engine/reflection/TypeRegistry.h"
+#include "runtime/ScriptComponent.h"
 #include <fstream>
 
 namespace editor {
@@ -269,6 +270,17 @@ nlohmann::json SceneSerializer::serialize_entity(entt::entity entity) const {
         json["components"].push_back(comp_json);
     }
 
+    // Scripts
+    if (m_registry.all_of<runtime::ScriptComponent>(entity)) {
+        const auto& sc = m_registry.get<runtime::ScriptComponent>(entity);
+        if (!sc.script_types.empty()) {
+            json["scripts"] = nlohmann::json::array();
+            for (const auto& type_name : sc.script_types) {
+                json["scripts"].push_back(type_name);
+            }
+        }
+    }
+
     // Children
     if (m_registry.all_of<Hierarchy>(entity)) {
         const auto& hierarchy = m_registry.get<Hierarchy>(entity);
@@ -431,6 +443,14 @@ entt::entity SceneSerializer::deserialize_entity(const nlohmann::json& json, ent
     // Ensure engine::Transform exists
     if (!m_registry.all_of<engine::Transform>(entity)) {
         m_registry.emplace<engine::Transform>(entity);
+    }
+
+    // Scripts
+    if (json.contains("scripts") && json["scripts"].is_array()) {
+        auto& sc = m_registry.emplace<runtime::ScriptComponent>(entity);
+        for (const auto& name : json["scripts"]) {
+            sc.script_types.push_back(name.get<std::string>());
+        }
     }
 
     // Children
