@@ -33,14 +33,11 @@ void main() {
         return;
     }
 
-    // World pixel position to NDC (same math as render_grid.frag, inverted)
-    vec2 visible_size = u_screen_size / u_zoom;
-    vec2 screen_frac = (p.pos - u_camera_pos + visible_size * 0.5) / visible_size;
-
-    // NDC: x [-1,1] left to right, y [-1,1] bottom to top
-    // screen_frac: (0,0) = top-left, (1,1) = bottom-right
-    vec2 ndc = screen_frac * 2.0 - 1.0;
-    ndc.y = -ndc.y; // flip Y (screen Y goes down, NDC Y goes up)
+    // World pixel position to NDC (Y-up world matches Y-up NDC)
+    vec2 rel = p.pos - u_camera_pos;
+    vec2 ndc;
+    ndc.x = rel.x * 2.0 * u_zoom / u_screen_size.x;
+    ndc.y = rel.y * 2.0 * u_zoom / u_screen_size.y;
 
     gl_Position = vec4(ndc, 0.0, 1.0);
 

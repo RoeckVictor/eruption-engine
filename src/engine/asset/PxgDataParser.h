@@ -62,7 +62,7 @@ inline ParsedPixelGrid parse_pxg(const PxgFile& pxg) {
             auto meta = nlohmann::json::parse(meta_str);
 
             // Parse origin point
-            if (meta.contains("origin")) {
+            if (meta.contains("origin") && meta["origin"].is_object()) {
                 result.origin_x = meta["origin"].value("x", 0);
                 result.origin_y = meta["origin"].value("y", 0);
             }
@@ -88,7 +88,7 @@ inline ParsedPixelGrid parse_pxg(const PxgFile& pxg) {
                 }
                 parsed_metadata = true;
             }
-        } catch (...) {
+        } catch (const std::exception&) {
             // Metadata parse failed, fall through to descriptor-based detection
         }
     }
@@ -100,7 +100,7 @@ inline ParsedPixelGrid parse_pxg(const PxgFile& pxg) {
             const char* expected[] = {"color_r", "color_g", "color_b", "color_a"};
             bool has_color = true;
             for (int i = 0; i < 4; ++i) {
-                if (std::strncmp(pxg.channels[i].name, expected[i], 11) != 0) {
+                if (std::strcmp(pxg.channels[i].name, expected[i]) != 0) {
                     has_color = false;
                     break;
                 }
@@ -113,7 +113,7 @@ inline ParsedPixelGrid parse_pxg(const PxgFile& pxg) {
 
         // Check for a channel named "material"
         for (int i = 0; i < total_channels; ++i) {
-            if (std::strncmp(pxg.channels[i].name, "material", 11) == 0) {
+            if (std::strcmp(pxg.channels[i].name, "material") == 0) {
                 // Compute offset: if color was found at offset 0, color takes 4 channels
                 // We need to figure out the actual byte offset for this channel
                 // In the descriptor fallback, channels map 1:1 to byte positions
@@ -128,6 +128,12 @@ inline ParsedPixelGrid parse_pxg(const PxgFile& pxg) {
     if (!result.has_color_layer && !result.has_material_layer && total_channels > 0) {
         material_offset = 0;
         result.has_material_layer = true;
+    }
+
+    // Validate pixel buffer size before extraction
+    size_t expected_size = pixel_count * static_cast<size_t>(total_channels);
+    if (pxg.pixels.size() < expected_size) {
+        return result; // Truncated pixel data — return without extraction
     }
 
     // Extract color RGBA

@@ -42,10 +42,12 @@ set(BOX2D_VALIDATE OFF CACHE BOOL "" FORCE)
 
 # Dear ImGui - immediate mode GUI (for PixArt editor tool)
 # Using the docking branch for dockable windows support.
+# Pin to a specific version tag to ensure reproducible builds.
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG docking
+    GIT_TAG v1.91.6-docking
+    GIT_SHALLOW TRUE
 )
 
 FetchContent_MakeAvailable(glfw entt nlohmann_json box2d imgui)

@@ -37,10 +37,12 @@ public:
     void set_origin(int x, int y) { m_origin_x = x; m_origin_y = y; }
 
     /// Create a new blank document with only the Color layer.
-    void create(int w, int h);
+    /// @return false if dimensions are invalid or would overflow.
+    bool create(int w, int h);
 
     /// Resize the grid, preserving content at the top-left corner.
-    void resize(int new_w, int new_h);
+    /// @return false if dimensions are invalid or would overflow.
+    bool resize(int new_w, int new_h);
 
     // --- Layer management ---
 

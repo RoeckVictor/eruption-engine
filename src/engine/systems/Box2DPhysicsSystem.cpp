@@ -141,11 +141,30 @@ void Box2DPhysicsSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
             create_dynamic_collider(entity, rb.body_id, collider);
         }
     }
+
+    // Step 4: Apply mass overrides for dynamic bodies that have shapes
+    {
+        auto view = m_registry->view<physics::Rigidbody>();
+        for (auto entity : view) {
+            auto& rb = view.get<physics::Rigidbody>(entity);
+            if (rb.body_type != physics::BodyType::Dynamic) continue;
+            if (!b2Body_IsValid(rb.body_id)) continue;
+            if (rb.mass <= 0.0f || rb.mass_applied) continue;
+
+            // Only apply after at least one shape exists
+            if (b2Body_GetShapeCount(rb.body_id) == 0) continue;
+
+            b2MassData mass_data = b2Body_GetMassData(rb.body_id);
+            mass_data.mass = rb.mass;
+            b2Body_SetMassData(rb.body_id, mass_data);
+            rb.mass_applied = true;
+        }
+    }
 }
 
 void Box2DPhysicsSystem::create_body_for_entity(entt::entity entity, physics::Rigidbody& rb, const Transform& transform) {
     // Convert body type to Box2D type
-    b2BodyType b2_type;
+    b2BodyType b2_type = b2_dynamicBody;
     switch (rb.body_type) {
         case physics::BodyType::Static:    b2_type = b2_staticBody; break;
         case physics::BodyType::Kinematic: b2_type = b2_kinematicBody; break;
@@ -186,11 +205,7 @@ void Box2DPhysicsSystem::create_body_for_entity(entt::entity entity, physics::Ri
         }
     }
 
-    // Set mass override if specified (for Dynamic bodies only)
-    if (rb.body_type == physics::BodyType::Dynamic && rb.mass > 0.0f) {
-        // Mass will be set after shapes are added (via density)
-        // For now we just note it - actual mass override happens after fixture creation
-    }
+    // Mass override will be applied after shapes are created (see fixed_update step 4)
 
     // Apply position locks (implemented via constraints in Box2D)
     // Note: Box2D doesn't have built-in axis locking, we'll handle this in sync
@@ -203,7 +218,7 @@ void Box2DPhysicsSystem::create_body_for_entity(entt::entity entity, physics::Ri
 
     Logger::instance().info("Box2DPhysics", "Created body for entity (type=%d)", static_cast<int>(rb.body_type));
 
-    // TODO: Create collider shapes (Step 3)
+    // Note: Collider shapes are created separately via attach_collider_shapes()
 }
 
 void Box2DPhysicsSystem::sync_kinematic_bodies() {
@@ -345,8 +360,10 @@ void Box2DPhysicsSystem::create_capsule_collider(b2BodyId body, physics::Capsule
     // Reserve space for 3 shapes (box + 2 circles)
     collider.shape_ids.reserve(3);
 
-    // Determine capsule orientation
-    bool is_vertical = (std::fabs(std::fmod(collider.rotation, 180.0f)) < 45.0f);
+    // Determine capsule orientation based on rotation angle.
+    // Normalize to [0, 180) range, then check if closer to 0 (vertical) or 90 (horizontal).
+    float norm_angle = std::fmod(std::fabs(collider.rotation), 180.0f);
+    bool is_vertical = (norm_angle < 45.0f || norm_angle > 135.0f);
 
     if (is_vertical) {
         float half_length = length_meters * 0.5f;
@@ -407,9 +424,9 @@ void Box2DPhysicsSystem::create_dynamic_collider(entt::entity entity, b2BodyId b
         return;
     }
 
-    // For now, the triangulated geometry is stored externally
-    // We'll create simple box colliders as a placeholder
-    // TODO: Store triangles in DynamicCollider and create polygon shapes
+    // Known limitation: DynamicCollider polygon shape creation from triangulated
+    // pixel data is not yet implemented. Requires marching squares + polygon
+    // simplification to convert pixel grids into Box2D convex hull shapes.
 
     Logger::instance().info("Box2DPhysics", "Created DynamicCollider with %d triangles", collider.triangle_count);
     collider.generated = true;
@@ -422,10 +439,8 @@ void Box2DPhysicsSystem::triangulate_pixel_grid(entt::entity entity, physics::Dy
         return;
     }
 
-    // Get loaded pixel data from PixelGridLoaderSystem
-    // For now, we'll need to access the loader system - simplest is to store it as a member
-    // For this implementation, let's skip the actual triangulation and just mark as generated
-    // TODO: Access PixelGridLoaderSystem to get pixel data, convert to bool array, triangulate
+    // Known limitation: Pixel grid triangulation is not yet implemented.
+    // Would need PixelGridLoaderSystem pixel data → bool array → marching squares → simplification.
 
     Logger::instance().info("Box2DPhysics", "Triangulating pixel grid (%dx%d) with simplification=%.2f",
                             grid_comp->width, grid_comp->height, collider.simplification);

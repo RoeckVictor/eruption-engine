@@ -18,8 +18,11 @@ namespace fs = std::filesystem;
 namespace editor {
 
 #ifdef _WIN32
+/// Maximum time (ms) to wait for a cmake subprocess before killing it.
+static constexpr DWORD SUBPROCESS_TIMEOUT_MS = 120000;  // 2 minutes
+
 /// Run a command silently (no visible CMD window) and wait for completion.
-/// Returns the process exit code, or -1 on failure.
+/// Returns the process exit code, -1 on launch failure, or -2 on timeout.
 static int run_command_hidden(const std::string& command, std::string& output) {
     SECURITY_ATTRIBUTES sa{};
     sa.nLength = sizeof(sa);
@@ -65,7 +68,17 @@ static int run_command_hidden(const std::string& command, std::string& output) {
     }
     CloseHandle(read_pipe);
 
-    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD wait_result = WaitForSingleObject(pi.hProcess, SUBPROCESS_TIMEOUT_MS);
+
+    if (wait_result == WAIT_TIMEOUT) {
+        engine::Logger::instance().error("ScriptCompiler",
+            "Process timed out after %d seconds, terminating",
+            SUBPROCESS_TIMEOUT_MS / 1000);
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        return -2;
+    }
 
     DWORD exit_code = 0;
     GetExitCodeProcess(pi.hProcess, &exit_code);
@@ -374,7 +387,7 @@ std::string ScriptCompiler::find_cmake() const {
     std::array<char, 512> buffer;
     FILE* pipe = _popen("where cmake 2>nul", "r");
     if (pipe) {
-        if (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
+        if (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
             std::string result = buffer.data();
             // Remove trailing newline
             while (!result.empty() && (result.back() == '\n' || result.back() == '\r')) {
@@ -429,8 +442,10 @@ bool ScriptCompiler::run_cmake_configure() {
 
     std::string command;
 #ifdef _WIN32
+    // Don't specify -G generator: CMake 3.20+ auto-detects the newest
+    // available Visual Studio (works with VS 2019, 2022, and future versions).
     command = "\"" + cmake_exe + "\" -S \"" + m_scripts_path + "\" -B \"" + m_build_path + "\"";
-    command += " -G \"Visual Studio 17 2022\" -A x64";
+    command += " -A x64";
 #else
     command = "\"" + cmake_exe + "\" -S \"" + m_scripts_path + "\" -B \"" + m_build_path + "\"";
 #endif

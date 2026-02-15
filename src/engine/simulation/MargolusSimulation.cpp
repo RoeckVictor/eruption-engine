@@ -33,6 +33,10 @@ bool MargolusSimulation::init(const MaterialSlot* slots, int mat_count,
     std::vector<uint32_t> packed(max_material_slots * WORDS_PER_MATERIAL, 0);
 
     int count = mat_count < max_material_slots ? mat_count : max_material_slots;
+    if (count < mat_count) {
+        ENGINE_LOG_WARN("MargolusSimulation: %d materials provided but max is %d — extras ignored",
+                        mat_count, max_material_slots);
+    }
     for (int i = 0; i < count; i++) {
         const MaterialSlot& m = slots[i];
         packed[i * 2 + 0] = static_cast<uint32_t>(m.density)
@@ -45,7 +49,7 @@ bool MargolusSimulation::init(const MaterialSlot* slots, int mat_count,
                            graphics::BufferUsage::StaticDraw);
 
     if (!m_sim_shader.load_compute(shader_path)) {
-        ENGINE_ERR("Failed to load simulation compute shader: %s", shader_path);
+        ENGINE_ERR("MargolusSimulation: Failed to load compute shader '%s'", shader_path);
         return false;
     }
 

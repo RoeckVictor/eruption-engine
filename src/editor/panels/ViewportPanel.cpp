@@ -1,8 +1,11 @@
 #include "ViewportPanel.h"
 #include "editor/core/EditorContext.h"
 #include "editor/core/EditorComponents.h"
+#include "editor/core/SimulationPlayback.h"
+#include "editor/render/SceneRenderUtils.h"
 #include "engine/core/MathConstants.h"
 #include "engine/core/Transform.h"
+#include "engine/core/Logger.h"
 #include "engine/simulation/PixelGridComponent.h"
 #include "engine/simulation/MaterialLibrary.h"
 #include "engine/render/PixelGridRenderer.h"
@@ -29,14 +32,6 @@ ViewportPanel::ViewportPanel(EditorContext& context)
 }
 
 ViewportPanel::~ViewportPanel() {
-    // Clean up cached grid textures
-    for (auto& [entity, cached] : m_grid_textures) {
-        if (cached.texture_id) {
-            glDeleteTextures(1, &cached.texture_id);
-        }
-    }
-    m_grid_textures.clear();
-
     destroy_framebuffer();
 }
 
@@ -64,10 +59,23 @@ void ViewportPanel::on_gui() {
         return;
     }
 
-    // Recreate framebuffer if size changed
-    if (width != m_viewport_width || height != m_viewport_height) {
-        destroy_framebuffer();
-        create_framebuffer(width, height);
+    // Debounced framebuffer resize: avoid destroying/recreating GPU objects every
+    // frame while the user is dragging a panel splitter.  Record the desired size
+    // and only commit the resize once the size has been stable for a short period.
+    if (width != m_pending_width || height != m_pending_height) {
+        m_pending_width = width;
+        m_pending_height = height;
+        m_resize_timer = 0.0f;
+        m_framebuffer_failed = false;  // New size requested — allow retry
+    }
+
+    if (!m_framebuffer_failed &&
+        (m_pending_width != m_viewport_width || m_pending_height != m_viewport_height)) {
+        m_resize_timer += ImGui::GetIO().DeltaTime;
+        if (m_resize_timer >= RESIZE_DEBOUNCE_SEC || m_viewport_width == 0) {
+            destroy_framebuffer();
+            create_framebuffer(m_pending_width, m_pending_height);
+        }
     }
 
     // Render scene to framebuffer
@@ -122,11 +130,14 @@ void ViewportPanel::create_framebuffer(int width, int height) {
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, m_depth_buffer);
 
     // Check framebuffer status
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-        // Log error
-    }
-
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        engine::Logger::instance().error("Viewport", "Framebuffer incomplete (status=0x%X)", status);
+        destroy_framebuffer();
+        m_framebuffer_failed = true;  // Prevent retry loop until size changes
+    }
 }
 
 void ViewportPanel::destroy_framebuffer() {
@@ -264,16 +275,8 @@ void ViewportPanel::render_overlay() {
     // Draw entities that have PixelGridRenderer (actual pixel grid textures)
     auto* registry = m_context.registry();
     if (registry) {
-        float screen_center_x = pos.x + size.x * 0.5f;
-        float screen_center_y = pos.y + size.y * 0.5f;
+        WorldToScreen wts(pos, size, camera.x, camera.y, camera.zoom);
 
-        auto world_to_screen = [&](float wx, float wy) -> ImVec2 {
-            float sx = screen_center_x + (wx - camera.x) * camera.zoom;
-            float sy = screen_center_y - (wy - camera.y) * camera.zoom;  // Flip Y
-            return ImVec2(sx, sy);
-        };
-
-        // Only render entities with Transform + PixelGridComponent + PixelGridRenderer
         auto view = registry->view<engine::Transform,
                                     engine::simulation::PixelGridComponent,
                                     engine::render::PixelGridRenderer>();
@@ -282,98 +285,23 @@ void ViewportPanel::render_overlay() {
             auto& grid_comp = view.get<engine::simulation::PixelGridComponent>(entity);
             auto& renderer = view.get<engine::render::PixelGridRenderer>(entity);
 
-            // Skip disabled entities
             if (registry->all_of<EntityInfo>(entity)) {
-                if (!registry->get<EntityInfo>(entity).enabled_in_hierarchy) {
-                    continue;
-                }
+                if (!registry->get<EntityInfo>(entity).enabled_in_hierarchy) continue;
             }
+            if (!renderer.enabled) continue;
 
-            // Skip if renderer is disabled
-            if (!renderer.enabled) {
-                continue;
-            }
+            auto quad = compute_pixel_grid_quad(transform, grid_comp, renderer, wts);
+            GLuint grid_tex = resolve_grid_texture(
+                entity, grid_comp.pixel_grid_path, m_context.runtime(), m_grid_textures);
 
-            // Get dimensions, origin, and world-space transform (includes parent hierarchy)
-            float w = grid_comp.width > 0 ? static_cast<float>(grid_comp.width) : 32.0f;
-            float h = grid_comp.height > 0 ? static_cast<float>(grid_comp.height) : 32.0f;
-            float ox = static_cast<float>(grid_comp.origin_x);
-            float oy = static_cast<float>(grid_comp.origin_y);
-            float sx = transform.world_scale_x;
-            float sy = transform.world_scale_y;
-            float rot_rad = transform.world_rotation * engine::DEG_TO_RAD;
-            float cos_r = std::cos(rot_rad);
-            float sin_r = std::sin(rot_rad);
+            draw_pixel_grid_quad(draw_list, quad, grid_tex);
 
-            // 4 corners in local space (relative to origin, scaled)
-            // Local coords: origin pixel is at (0,0), Y-up
-            // top-left pixel = (-ox, h-oy), bottom-right pixel = (w-ox, -oy)
-            float lx0 = -ox * sx,       ly0 = (h - oy) * sy;  // top-left
-            float lx1 = (w - ox) * sx,  ly1 = (h - oy) * sy;  // top-right
-            float lx2 = (w - ox) * sx,  ly2 = -oy * sy;       // bottom-right
-            float lx3 = -ox * sx,       ly3 = -oy * sy;       // bottom-left
-
-            // Rotate around world position and convert to screen
-            auto rotate_to_screen = [&](float lx, float ly) -> ImVec2 {
-                float wx = transform.world_x + lx * cos_r - ly * sin_r;
-                float wy = transform.world_y + lx * sin_r + ly * cos_r;
-                return world_to_screen(wx, wy);
-            };
-
-            ImVec2 p0 = rotate_to_screen(lx0, ly0);  // top-left
-            ImVec2 p1 = rotate_to_screen(lx1, ly1);  // top-right
-            ImVec2 p2 = rotate_to_screen(lx2, ly2);  // bottom-right
-            ImVec2 p3 = rotate_to_screen(lx3, ly3);  // bottom-left
-
-            // During play mode, use live simulation texture if available
-            GLuint grid_tex = 0;
-            if (m_context.is_playing()) {
-                auto* rt = m_context.runtime();
-                if (rt) {
-                    grid_tex = rt->get_sim_texture(entity);
-                }
-            }
-
-            // Fall back to cached static texture
-            if (grid_tex == 0) {
-                grid_tex = get_pixel_grid_texture(entity, grid_comp.pixel_grid_path);
-            }
-            if (grid_tex != 0) {
-                // Compute tint color from renderer properties
-                uint8_t tr = static_cast<uint8_t>(renderer.tint_r * renderer.opacity * 255.0f);
-                uint8_t tg = static_cast<uint8_t>(renderer.tint_g * renderer.opacity * 255.0f);
-                uint8_t tb = static_cast<uint8_t>(renderer.tint_b * renderer.opacity * 255.0f);
-                uint8_t ta = static_cast<uint8_t>(renderer.tint_a * renderer.opacity * 255.0f);
-                ImU32 tint = IM_COL32(tr, tg, tb, ta);
-
-                draw_list->AddImageQuad(
-                    (ImTextureID)(uintptr_t)grid_tex,
-                    p0, p1, p2, p3,
-                    ImVec2(0, 0), ImVec2(1, 0), ImVec2(1, 1), ImVec2(0, 1),
-                    tint
-                );
-            } else {
-                // Fallback: draw a red outline to indicate missing/unloaded grid
-                draw_list->AddQuad(p0, p1, p2, p3,
-                                   IM_COL32(200, 80, 80, 180), 1.5f);
-            }
-
-            // Draw label if entity is selected
-            if (registry->all_of<EntityInfo>(entity)) {
-                bool is_selected = false;
-                for (auto sel : m_context.selection()) {
-                    if (sel == entity) { is_selected = true; break; }
-                }
-                if (is_selected) {
-                    // Selection outline
-                    draw_list->AddQuad(p0, p1, p2, p3,
-                                       IM_COL32(255, 200, 50, 220), 2.0f);
-                }
+            if (m_context.is_selected(entity)) {
+                draw_selection_outline(draw_list, quad);
             }
         }
 
-        // Clean up textures for deleted entities
-        cleanup_texture_cache();
+        m_grid_textures.cleanup(m_context.registry());
     }
 
     // Draw debug overlays (colliders, origins, names, etc.)
@@ -471,109 +399,6 @@ void ViewportPanel::render_overlay() {
         );
     }
 }
-
-GLuint ViewportPanel::get_pixel_grid_texture(entt::entity entity, const std::string& path) {
-    if (path.empty()) {
-        return 0;
-    }
-
-    // Check cache - return existing texture if path hasn't changed
-    auto it = m_grid_textures.find(entity);
-    if (it != m_grid_textures.end()) {
-        if (it->second.source_path == path) {
-            return it->second.texture_id;
-        }
-        // Path changed - delete old texture
-        if (it->second.texture_id) {
-            glDeleteTextures(1, &it->second.texture_id);
-        }
-        m_grid_textures.erase(it);
-    }
-
-    // Load the .pxg file
-    auto pxg_file = engine::asset::pxg_load(path);
-    if (!pxg_file) {
-        return 0;
-    }
-
-    // Parse the .pxg data to extract color and material channels
-    auto parsed = engine::asset::parse_pxg(*pxg_file);
-    if (parsed.width <= 0 || parsed.height <= 0) {
-        return 0;
-    }
-
-    std::vector<uint8_t> rgba;
-
-    if (parsed.has_color_layer && !parsed.color_rgba.empty()) {
-        // Use RGBA color directly from the file
-        rgba = std::move(parsed.color_rgba);
-    } else {
-        // Legacy fallback: material ID -> palette color lookup
-        auto* lib = engine::simulation::MaterialLibraryRegistry::instance().get_library("default");
-        std::vector<uint32_t> palette(256, 0x00000000);
-        if (lib) {
-            palette = lib->build_color_palette();
-        }
-
-        int pixel_count = parsed.width * parsed.height;
-        rgba.resize(pixel_count * 4);
-        for (int i = 0; i < pixel_count; i++) {
-            uint8_t mat_id = parsed.material_ids.empty() ? 0 : parsed.material_ids[i];
-            if (mat_id == 0) {
-                rgba[i * 4 + 0] = 0;
-                rgba[i * 4 + 1] = 0;
-                rgba[i * 4 + 2] = 0;
-                rgba[i * 4 + 3] = 0;
-            } else {
-                uint32_t color = palette[mat_id];
-                rgba[i * 4 + 0] = (color >> 24) & 0xFF;
-                rgba[i * 4 + 1] = (color >> 16) & 0xFF;
-                rgba[i * 4 + 2] = (color >> 8)  & 0xFF;
-                rgba[i * 4 + 3] = (color >> 0)  & 0xFF;
-            }
-        }
-    }
-
-    // Create OpenGL texture
-    GLuint tex = 0;
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, parsed.width, parsed.height, 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    // Cache it
-    m_grid_textures[entity] = CachedGridTexture{tex, path, parsed.width, parsed.height};
-    return tex;
-}
-
-void ViewportPanel::cleanup_texture_cache() {
-    auto* registry = m_context.registry();
-    if (!registry) return;
-
-    // Remove textures for entities that no longer exist or lost their components
-    std::vector<entt::entity> to_remove;
-    for (auto& [entity, cached] : m_grid_textures) {
-        if (!registry->valid(entity) ||
-            !registry->all_of<engine::simulation::PixelGridComponent,
-                              engine::render::PixelGridRenderer>(entity)) {
-            to_remove.push_back(entity);
-        }
-    }
-
-    for (auto entity : to_remove) {
-        auto& cached = m_grid_textures[entity];
-        if (cached.texture_id) {
-            glDeleteTextures(1, &cached.texture_id);
-        }
-        m_grid_textures.erase(entity);
-    }
-}
-
 
 void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, ImVec2 vp_size) {
     auto* registry = m_context.registry();

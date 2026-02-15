@@ -5,12 +5,13 @@
 #include "editor/gizmos/TranslateGizmo.h"
 #include "editor/gizmos/RotateGizmo.h"
 #include "editor/gizmos/ScaleGizmo.h"
+#include "editor/render/ViewportCamera.h"
+#include "editor/core/PixelGridTextureCache.h"
 #include <glad/gl.h>
 #include <entt/entt.hpp>
 #include <string>
 #include <vector>
 #include <functional>
-#include <unordered_map>
 
 namespace editor {
 
@@ -63,20 +64,12 @@ private:
     void activate_editing_override();
     void deactivate_editing_override();
 
-    // Texture cache (same pattern as ViewportPanel)
-    GLuint get_pixel_grid_texture(entt::entity entity, const std::string& path);
-    void cleanup_texture_cache();
-
     // Main context ref (for snap settings, local_space, etc.)
     EditorContext& m_main_context;
 
     // Isolated prefab state
     entt::registry m_prefab_registry;
-    struct {
-        float x = 0.0f;
-        float y = 0.0f;
-        float zoom = 2.0f;
-    } m_camera;
+    ViewportCamera m_camera{0.0f, 0.0f, 2.0f, 0.1f, 20.0f, 2.0f};
     std::vector<entt::entity> m_selection;
 
     // Gizmo instances (direct, no GizmoRenderer wrapper needed)
@@ -94,18 +87,9 @@ private:
     // Viewport interaction state
     ImVec2 m_viewport_pos = {0, 0};
     ImVec2 m_viewport_size = {0, 0};
-    bool m_is_panning = false;
-    float m_pan_start_x = 0.0f;
-    float m_pan_start_y = 0.0f;
 
-    // Texture cache
-    struct CachedGridTexture {
-        GLuint texture_id = 0;
-        std::string source_path;
-        int width = 0;
-        int height = 0;
-    };
-    std::unordered_map<entt::entity, CachedGridTexture> m_grid_textures;
+    // Pixel grid texture cache (shared implementation with ViewportPanel)
+    PixelGridTextureCache m_grid_textures;
 
     // Unsaved changes dialog state
     bool m_show_unsaved_dialog = false;

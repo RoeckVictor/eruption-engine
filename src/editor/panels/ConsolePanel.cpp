@@ -76,7 +76,7 @@ void ConsolePanel::hook_logger() {
     // Create a sink that forwards to this panel
     m_logger_sink_id = engine::Logger::instance().add_sink(
         [this](const engine::LogEntry& entry) {
-            LogEntry::Level level;
+            LogEntry::Level level = LogEntry::Level::Info;
             switch (entry.level) {
                 case engine::LogLevel::Info:
                     level = LogEntry::Level::Info;
@@ -133,7 +133,7 @@ void ConsolePanel::render_messages() {
     ImGui::BeginChild("ConsoleMessages", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
 
     std::string filter_str(m_filter);
-    std::transform(filter_str.begin(), filter_str.end(), filter_str.begin(), ::tolower);
+    std::transform(filter_str.begin(), filter_str.end(), filter_str.begin(), [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
 
     // Copy entries under lock to avoid holding lock during rendering
     std::vector<LogEntry> entries_copy;
@@ -159,7 +159,7 @@ void ConsolePanel::render_messages() {
 
         if (!filter_str.empty()) {
             std::string message_lower = entry.message;
-            std::transform(message_lower.begin(), message_lower.end(), message_lower.begin(), ::tolower);
+            std::transform(message_lower.begin(), message_lower.end(), message_lower.begin(), [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
             if (message_lower.find(filter_str) == std::string::npos) {
                 continue;
             }
@@ -200,8 +200,8 @@ void ConsolePanel::render_messages() {
         ImGui::PushID(static_cast<int>(vi));
 
         // Determine row color
-        ImVec4 color;
-        const char* icon;
+        ImVec4 color = ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
+        const char* icon = "[INFO]";
         switch (entry.level) {
             case LogEntry::Level::Info:
                 color = ImVec4(0.8f, 0.8f, 0.8f, 1.0f);

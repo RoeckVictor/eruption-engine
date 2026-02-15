@@ -1,12 +1,31 @@
 #include "ProjectManager.h"
+#include "engine/core/Log.h"
 
 #include <fstream>
 #include <filesystem>
 #include <algorithm>
+#include <random>
+#include <sstream>
+#include <iomanip>
 
 namespace fs = std::filesystem;
 
 namespace editor {
+
+static std::string generate_guid() {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<uint32_t> dist(0, 0xFFFFFFFF);
+
+    auto hex = [&](int bytes) {
+        std::ostringstream oss;
+        uint32_t val = dist(gen);
+        oss << std::hex << std::setfill('0') << std::setw(bytes * 2) << (val & ((1ull << (bytes * 8)) - 1));
+        return oss.str();
+    };
+
+    return hex(4) + "-" + hex(2) + "-" + hex(2) + "-" + hex(2) + "-" + hex(4) + hex(2);
+}
 
 ProjectManager::ProjectManager() {
     load_recent_projects();
@@ -45,29 +64,26 @@ bool ProjectManager::save_project() {
 }
 
 bool ProjectManager::create_project(const std::string& path, const std::string& name) {
-    // Create the project directory if it doesn't exist
     try {
         fs::create_directories(path);
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+        ENGINE_ERR("Failed to create project directory '%s': %s", path.c_str(), e.what());
         return false;
     }
 
-    // Set up project info
     m_project_info = ProjectInfo{};
     m_project_info.name = name;
     m_project_info.version = "1.0.0";
     m_project_info.engine_version = "0.1.0";
-    m_project_info.guid = ""; // TODO: Generate GUID
+    m_project_info.guid = generate_guid();
     m_project_info.default_scene = "Assets/Main.scene";
     m_project_info.script_assembly_name = "GameScripts";
     m_project_info.asset_paths = {"Assets"};
 
     m_project_path = path;
 
-    // Create directory structure
     create_project_directories(path);
 
-    // Save the project file
     if (!save_project_file()) {
         return false;
     }
@@ -79,13 +95,10 @@ bool ProjectManager::create_project(const std::string& path, const std::string& 
 }
 
 void ProjectManager::add_to_recent(const std::string& path) {
-    // Remove if already exists
     remove_from_recent(path);
 
-    // Add to front
     m_recent_projects.insert(m_recent_projects.begin(), path);
 
-    // Trim to max size
     if (m_recent_projects.size() > MAX_RECENT_PROJECTS) {
         m_recent_projects.resize(MAX_RECENT_PROJECTS);
     }
@@ -129,19 +142,19 @@ void ProjectManager::load_recent_projects() {
                 }
             }
         }
-    } catch (const std::exception&) {
-        // Ignore parse errors
+    } catch (const std::exception& e) {
+        ENGINE_LOG_WARN("Failed to parse recent projects: %s", e.what());
     }
 }
 
 void ProjectManager::save_recent_projects() {
     std::string prefs_path = get_prefs_file_path();
 
-    // Ensure directory exists
     fs::path path(prefs_path);
     try {
         fs::create_directories(path.parent_path());
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+        ENGINE_LOG_WARN("Failed to create preferences directory: %s", e.what());
         return;
     }
 
@@ -190,7 +203,8 @@ bool ProjectManager::load_project_file(const std::string& path) {
         }
 
         return true;
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+        ENGINE_ERR("Failed to parse project file '%s': %s", path.c_str(), e.what());
         return false;
     }
 }
@@ -225,13 +239,12 @@ void ProjectManager::create_project_directories(const std::string& path) {
         fs::create_directories(fs::path(path) / "ProjectSettings");
         fs::create_directories(fs::path(path) / "Library");
         fs::create_directories(fs::path(path) / "Logs");
-    } catch (const std::exception&) {
-        // Ignore errors, directories may already exist
+    } catch (const std::exception& e) {
+        ENGINE_LOG_WARN("Failed to create some project directories: %s", e.what());
     }
 }
 
 std::string ProjectManager::get_prefs_file_path() const {
-    // Store preferences in user's app data directory
 #ifdef _WIN32
     const char* appdata = std::getenv("APPDATA");
     if (appdata) {
@@ -247,4 +260,4 @@ std::string ProjectManager::get_prefs_file_path() const {
 #endif
 }
 
-} // namespace editor
+}

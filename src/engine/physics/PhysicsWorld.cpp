@@ -1,6 +1,7 @@
 #include "engine/physics/PhysicsWorld.h"
 #include "engine/core/Log.h"
 #include <vector>
+#include <cmath>
 
 namespace engine::physics {
 
@@ -55,28 +56,25 @@ float PhysicsWorld::meters_to_pixels(float meters) const {
 
 // --- Body management ---
 
-b2BodyId PhysicsWorld::create_dynamic_body(float pixel_x, float pixel_y, float angle_rad) {
+static b2BodyId create_body_impl(b2WorldId world, b2BodyType type,
+                                  b2Vec2 position, float angle_rad) {
     b2BodyDef body_def = b2DefaultBodyDef();
-    body_def.type = b2_dynamicBody;
-    body_def.position = pixels_to_meters(pixel_x, pixel_y);
+    body_def.type = type;
+    body_def.position = position;
     body_def.rotation = b2MakeRot(angle_rad);
-    return b2CreateBody(m_world_id, &body_def);
+    return b2CreateBody(world, &body_def);
+}
+
+b2BodyId PhysicsWorld::create_dynamic_body(float pixel_x, float pixel_y, float angle_rad) {
+    return create_body_impl(m_world_id, b2_dynamicBody, pixels_to_meters(pixel_x, pixel_y), angle_rad);
 }
 
 b2BodyId PhysicsWorld::create_static_body(float pixel_x, float pixel_y, float angle_rad) {
-    b2BodyDef body_def = b2DefaultBodyDef();
-    body_def.type = b2_staticBody;
-    body_def.position = pixels_to_meters(pixel_x, pixel_y);
-    body_def.rotation = b2MakeRot(angle_rad);
-    return b2CreateBody(m_world_id, &body_def);
+    return create_body_impl(m_world_id, b2_staticBody, pixels_to_meters(pixel_x, pixel_y), angle_rad);
 }
 
 b2BodyId PhysicsWorld::create_kinematic_body(float pixel_x, float pixel_y, float angle_rad) {
-    b2BodyDef body_def = b2DefaultBodyDef();
-    body_def.type = b2_kinematicBody;
-    body_def.position = pixels_to_meters(pixel_x, pixel_y);
-    body_def.rotation = b2MakeRot(angle_rad);
-    return b2CreateBody(m_world_id, &body_def);
+    return create_body_impl(m_world_id, b2_kinematicBody, pixels_to_meters(pixel_x, pixel_y), angle_rad);
 }
 
 void PhysicsWorld::destroy_body(b2BodyId body) {
@@ -91,7 +89,8 @@ b2ShapeId PhysicsWorld::add_polygon_shape(b2BodyId body, const b2Vec2* verts, in
                                           float density, float friction, float restitution) {
     b2Hull hull = b2ComputeHull(verts, count);
     if (hull.count < 3 || !b2ValidateHull(&hull)) {
-        return {};  // Degenerate hull, skip
+        ENGINE_LOG_WARN("PhysicsWorld::add_polygon_shape() - Degenerate hull (count=%d, input=%d)", hull.count, count);
+        return {};
     }
     b2Polygon polygon = b2MakePolygon(&hull, 0.0f);
 
@@ -100,7 +99,12 @@ b2ShapeId PhysicsWorld::add_polygon_shape(b2BodyId body, const b2Vec2* verts, in
     shape_def.material.friction = friction;
     shape_def.material.restitution = restitution;
 
-    return b2CreatePolygonShape(body, &shape_def, &polygon);
+    b2ShapeId shape = b2CreatePolygonShape(body, &shape_def, &polygon);
+    if (!b2Shape_IsValid(shape)) {
+        ENGINE_ERR("PhysicsWorld::add_polygon_shape() - b2CreatePolygonShape returned invalid shape");
+        return {};
+    }
+    return shape;
 }
 
 b2ChainId PhysicsWorld::add_chain_shape(b2BodyId body, const b2Vec2* verts, int count,
@@ -116,7 +120,12 @@ b2ChainId PhysicsWorld::add_chain_shape(b2BodyId body, const b2Vec2* verts, int 
     chain_def.materials = &surface;
     chain_def.materialCount = 1;
 
-    return b2CreateChain(body, &chain_def);
+    b2ChainId chain = b2CreateChain(body, &chain_def);
+    if (!b2Chain_IsValid(chain)) {
+        ENGINE_ERR("PhysicsWorld::add_chain_shape() - b2CreateChain returned invalid chain (count=%d)", count);
+        return {};
+    }
+    return chain;
 }
 
 void PhysicsWorld::destroy_all_shapes(b2BodyId body) {
@@ -194,37 +203,32 @@ void PhysicsWorld::set_gravity_scale(b2BodyId body, float scale) {
 bool PhysicsWorld::is_grounded(b2BodyId body, float tolerance_pixels) const {
     if (!b2Body_IsValid(body)) return false;
 
-    // Get body capacity to access contacts
     int contact_capacity = b2Body_GetContactCapacity(body);
     if (contact_capacity == 0) return false;
 
-    // Get contact data for this body
     std::vector<b2ContactData> contacts(contact_capacity);
     int contact_count = b2Body_GetContactData(body, contacts.data(), contact_capacity);
-
     if (contact_count == 0) return false;
 
-    // Get body position
     b2Vec2 body_pos = b2Body_GetPosition(body);
     float tolerance_m = pixels_to_meters(tolerance_pixels);
 
-    // Check if any contact point is below the body (grounded)
     for (int i = 0; i < contact_count; i++) {
         const b2ContactData& contact = contacts[i];
         const b2Manifold& manifold = contact.manifold;
+        if (manifold.pointCount == 0) continue;
 
-        // Check if contact has points and the normal points upward
-        if (manifold.pointCount > 0 && manifold.normal.y < -0.1f) {
-            // Contact normal points upward (negative Y = up)
-            // Check if any contact point is below body center
-            for (int j = 0; j < manifold.pointCount; j++) {
-                // Contact point is in world space
-                float point_y = manifold.points[j].point.y;
+        // Check for a significant vertical normal component.
+        // We use fabs because the manifold normal direction depends on
+        // which body is shape A vs B in the contact pair, which we can't control.
+        if (std::fabs(manifold.normal.y) < 0.3f) continue;
 
-                // If contact point is below body (within tolerance), we're grounded
-                if (point_y > body_pos.y - tolerance_m) {
-                    return true;
-                }
+        // Verify the contact point is at or below the body center.
+        // In our Y-down coordinate system, greater Y = below.
+        for (int j = 0; j < manifold.pointCount; j++) {
+            float point_y = manifold.points[j].point.y;
+            if (point_y > body_pos.y - tolerance_m) {
+                return true;
             }
         }
     }

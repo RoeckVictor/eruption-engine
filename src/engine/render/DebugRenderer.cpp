@@ -11,7 +11,6 @@ DebugRenderer::~DebugRenderer() {
 bool DebugRenderer::init() {
     // Reuse the sprite shaders (same vertex format: position + color, same camera uniforms)
     if (!m_shader.load_graphics("shaders/sprite.vert", "shaders/sprite.frag")) {
-        ENGINE_ERR("DebugRenderer: Failed to load shaders");
         return false;
     }
 
@@ -40,6 +39,7 @@ bool DebugRenderer::init() {
 void DebugRenderer::shutdown() {
     if (m_vbo) { glDeleteBuffers(1, &m_vbo); m_vbo = 0; }
     if (m_vao) { glDeleteVertexArrays(1, &m_vao); m_vao = 0; }
+    m_vbo_capacity = 0;
     m_shader.destroy();
 }
 
@@ -70,9 +70,15 @@ void DebugRenderer::end() {
     glBindVertexArray(m_vao);
 
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER,
-                 static_cast<GLsizeiptr>(m_vertices.size() * sizeof(Vertex)),
-                 m_vertices.data(), GL_DYNAMIC_DRAW);
+    size_t data_size = m_vertices.size() * sizeof(Vertex);
+    if (data_size > m_vbo_capacity) {
+        // Grow buffer with headroom to avoid frequent reallocations
+        m_vbo_capacity = data_size + data_size / 2;
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_vbo_capacity),
+                     nullptr, GL_STREAM_DRAW);
+    }
+    glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(data_size),
+                    m_vertices.data());
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -80,6 +86,7 @@ void DebugRenderer::end() {
     glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(m_vertices.size()));
 
     glDisable(GL_BLEND);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
 }
 

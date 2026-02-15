@@ -52,6 +52,10 @@ private:
     std::vector<Vertex> m_vertices;
     std::vector<uint32_t> m_indices;
 
+    // Buffer capacities (bytes) to avoid per-frame reallocation
+    size_t m_vbo_capacity = 0;
+    size_t m_ebo_capacity = 0;
+
     float m_cam_x = 0, m_cam_y = 0;
     float m_zoom = 1.0f;
     int m_screen_w = 0, m_screen_h = 0;

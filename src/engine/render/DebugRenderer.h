@@ -32,6 +32,7 @@ private:
     graphics::Shader m_shader;
     uint32_t m_vao = 0;
     uint32_t m_vbo = 0;
+    size_t m_vbo_capacity = 0;  // Current VBO capacity in bytes
 
     struct Vertex {
         float x, y;

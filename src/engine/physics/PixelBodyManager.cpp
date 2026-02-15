@@ -52,6 +52,10 @@ PixelBody* PixelBodyManager::create_body(const uint8_t* materials, const uint8_t
         ENGINE_ERR("PixelBodyManager::create_body() called before init()");
         return nullptr;
     }
+    if (w <= 0 || h <= 0 || !materials || !categories) {
+        ENGINE_ERR("PixelBodyManager::create_body() - Invalid parameters (w=%d, h=%d)", w, h);
+        return nullptr;
+    }
     auto body = std::make_unique<PixelBody>();
     if (!body->init(*m_world, materials, categories, w, h, world_px, world_py, is_dynamic, indestructible)) {
         return nullptr;
@@ -120,13 +124,14 @@ int PixelBodyManager::handle_splits() {
     std::vector<std::pair<PixelBody*, std::vector<PixelBody::Component>>> splits;
 
     for (auto& body : m_bodies) {
-        if (!body->is_dirty() && body->pixel_count() >= min_body_pixels) continue;
-
-        // Check for too-small bodies
+        // Remove bodies that are too small (regardless of dirty state)
         if (body->pixel_count() < min_body_pixels) {
             to_remove.push_back(body.get());
             continue;
         }
+
+        // Skip bodies that aren't dirty — no split check needed
+        if (!body->is_dirty()) continue;
 
         int components = body->count_components();
         if (components > 1) {
@@ -169,8 +174,17 @@ int PixelBodyManager::handle_splits() {
                 comp.width, comp.height, new_wx, new_wy, true);
 
             if (new_body) {
-                // Transfer velocity
-                m_world->set_body_linear_velocity(new_body->body_id(), lin_vel.x, lin_vel.y);
+                // Distribute velocity: account for angular contribution at each
+                // fragment's center-of-mass offset from the original body's COM.
+                // In world space the offset is rotated by the original body angle:
+                //   r_world = rotation_matrix * (comp.center - orig_center)
+                // The tangential velocity from rotation is omega x r (2D cross):
+                //   v_tangential = (-ang_vel * r_world.y, ang_vel * r_world.x)
+                float rx_world = dx * cos_a - dy * sin_a;
+                float ry_world = dx * sin_a + dy * cos_a;
+                float frag_vx = lin_vel.x + (-ang_vel * ry_world);
+                float frag_vy = lin_vel.y + ( ang_vel * rx_world);
+                m_world->set_body_linear_velocity(new_body->body_id(), frag_vx, frag_vy);
                 b2Body_SetAngularVelocity(new_body->body_id(), ang_vel);
                 new_bodies++;
             }

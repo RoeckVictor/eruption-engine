@@ -1,11 +1,11 @@
 #pragma once
 
 #include "Panel.h"
+#include "editor/core/PixelGridTextureCache.h"
 #include <imgui.h>
 #include <glad/gl.h>
 #include <entt/entt.hpp>
 #include <string>
-#include <unordered_map>
 
 namespace editor {
 
@@ -30,21 +30,8 @@ private:
     /// Find the first entity with an enabled Camera2D component.
     entt::entity find_camera_entity() const;
 
-    /// Get or create a cached RGBA texture for a pixel grid entity.
-    GLuint get_pixel_grid_texture(entt::entity entity, const std::string& path);
-
-    /// Remove stale entries from the texture cache.
-    void cleanup_texture_cache();
-
     EditorContext& m_context;
-
-    struct CachedGridTexture {
-        GLuint texture_id = 0;
-        std::string source_path;
-        int width = 0;
-        int height = 0;
-    };
-    std::unordered_map<entt::entity, CachedGridTexture> m_grid_textures;
+    PixelGridTextureCache m_grid_textures;
 };
 
 } // namespace editor

@@ -6,7 +6,6 @@
 
 namespace editor {
 
-/// Command for modifying an entity's transform.
 class TransformCommand : public Command {
 public:
     TransformCommand(entt::registry* registry, entt::entity entity,
@@ -56,4 +55,4 @@ private:
     engine::Transform m_new_transform;
 };
 
-} // namespace editor
+}

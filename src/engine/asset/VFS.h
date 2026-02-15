@@ -49,6 +49,12 @@ private:
         std::string disk_path;
         std::string virtual_prefix;
     };
+
+    /// Try to strip a mount's virtual_prefix from a normalized virtual path.
+    /// Returns the relative path on success, or std::nullopt if the path doesn't match.
+    static std::optional<std::string> strip_prefix(const std::string& norm_path,
+                                                    const std::string& norm_prefix);
+
     std::vector<MountPoint> m_mounts;  // searched in reverse order
 };
 

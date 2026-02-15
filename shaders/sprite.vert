@@ -13,8 +13,8 @@ void main() {
     // World position to NDC: camera-centered, zoom-scaled
     vec2 rel = a_pos - u_camera_pos;
     vec2 ndc;
-    ndc.x =  rel.x * 2.0 * u_zoom / u_screen_size.x;
-    ndc.y = -rel.y * 2.0 * u_zoom / u_screen_size.y; // flip Y (world Y-down, NDC Y-up)
+    ndc.x = rel.x * 2.0 * u_zoom / u_screen_size.x;
+    ndc.y = rel.y * 2.0 * u_zoom / u_screen_size.y;
     gl_Position = vec4(ndc, 0.0, 1.0);
     v_color = a_color;
 }

@@ -43,20 +43,47 @@ void Logger::log(LogLevel level, const char* tag, const char* fmt, ...) {
 }
 
 void Logger::log_v(LogLevel level, const char* tag, const char* fmt, va_list args) {
-    // Format the message
-    static constexpr int LOG_FORMAT_BUFFER_SIZE = 2048;
-    char buffer[LOG_FORMAT_BUFFER_SIZE];
-    vsnprintf(buffer, sizeof(buffer), fmt, args);
+    if (!fmt) {
+        fmt = "(null)";
+    }
+
+    // Format with stack buffer, fallback to heap for long messages
+    static constexpr int STACK_BUF_SIZE = 2048;
+    char stack_buf[STACK_BUF_SIZE];
+
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int needed = vsnprintf(stack_buf, sizeof(stack_buf), fmt, args);
 
     LogEntry entry;
     entry.level = level;
     entry.tag = tag ? tag : "";
-    entry.message = buffer;
 
-    // Dispatch to all sinks
-    std::lock_guard<std::mutex> lock(m_mutex);
-    for (const auto& sink_entry : m_sinks) {
-        sink_entry.sink(entry);
+    if (needed < STACK_BUF_SIZE) {
+        entry.message = stack_buf;
+    } else {
+        // Message was truncated; allocate exact size on heap
+        std::string heap_buf(static_cast<size_t>(needed) + 1, '\0');
+        vsnprintf(heap_buf.data(), heap_buf.size(), fmt, args_copy);
+        heap_buf.resize(static_cast<size_t>(needed));
+        entry.message = std::move(heap_buf);
+    }
+    va_end(args_copy);
+
+    // Copy sinks under the lock, then invoke outside to prevent deadlock on reentrant logging
+    std::vector<SinkEntry> sinks_snapshot;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        sinks_snapshot = m_sinks;
+    }
+    for (const auto& sink_entry : sinks_snapshot) {
+        try {
+            sink_entry.sink(entry);
+        } catch (...) {
+            // Prevent a faulty sink from crashing the logger.
+            // Can't log here (would risk infinite recursion), so write to stderr.
+            fprintf(stderr, "[Logger] Sink threw an exception\n");
+        }
     }
 }
 

@@ -2,8 +2,7 @@
 
 #include <string>
 #include <cstddef>
-#include <functional>
-#include <any>
+#include <vector>
 
 namespace engine::reflection {
 
@@ -68,10 +67,6 @@ struct PropertyInfo {
 
     // For enums
     std::vector<std::string> enum_names;
-
-    // Get/Set functions for more complex access patterns
-    std::function<std::any(const void*)> getter;
-    std::function<void(void*, const std::any&)> setter;
 
     /// Get a pointer to the property value within an object.
     template<typename T>

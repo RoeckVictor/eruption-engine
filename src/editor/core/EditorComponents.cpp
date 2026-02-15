@@ -1,6 +1,9 @@
 #include "EditorComponents.h"
 #include "ComponentTypeRegistry.h"
+#include "engine/reflection/TypeInfo.h"
+#include "engine/reflection/EngineComponentList.h"
 #include "engine/core/MathConstants.h"
+#include "engine/core/Logger.h"
 #include "engine/render/Camera2D.h"
 #include "engine/render/PixelGridRenderer.h"
 #include "engine/animation/Animator.h"
@@ -11,11 +14,27 @@
 #include "engine/gameplay/PlayerController.h"
 #include "engine/gameplay/CameraFollower.h"
 #include <cmath>
+#include <unordered_map>
 
 namespace editor {
 
 void set_parent(entt::registry& registry, entt::entity child, entt::entity new_parent) {
-    if (child == new_parent) return;  // Can't parent to self
+    if (child == new_parent) return;
+
+    // Detect circular hierarchy: walk from new_parent to root, reject if child is encountered
+    if (new_parent != entt::null) {
+        entt::entity ancestor = new_parent;
+        while (ancestor != entt::null) {
+            if (ancestor == child) {
+                engine::Logger::instance().warning("Editor",
+                    "Cannot set parent: would create circular hierarchy (entity %u)",
+                    static_cast<unsigned>(child));
+                return;
+            }
+            if (!registry.valid(ancestor) || !registry.all_of<Hierarchy>(ancestor)) break;
+            ancestor = registry.get<Hierarchy>(ancestor).parent;
+        }
+    }
 
     // Save child's current world transform so we can preserve it
     float saved_world_x = 0, saved_world_y = 0, saved_world_rot = 0;
@@ -29,10 +48,8 @@ void set_parent(entt::registry& registry, entt::entity child, entt::entity new_p
         saved_world_sy = t.world_scale_y;
     }
 
-    // Delegate all hierarchy management (parent + children) to the engine
     engine::TransformSystem::set_parent(registry, child, new_parent);
 
-    // Recalculate local transform to preserve world position (Unity-style)
     if (registry.all_of<engine::Transform>(child)) {
         auto& t = registry.get<engine::Transform>(child);
 
@@ -69,7 +86,6 @@ void set_parent(entt::registry& registry, entt::entity child, entt::entity new_p
         }
     }
 
-    // Update enabled_in_hierarchy for child and its descendants (parent changed)
     update_enabled_in_hierarchy(registry, child);
 }
 
@@ -98,7 +114,6 @@ std::vector<entt::entity> get_root_entities(entt::registry& registry) {
 }
 
 void update_world_transforms(entt::registry& registry) {
-    // Use engine TransformSystem for world transform calculation
     engine::TransformSystem::update(registry);
 }
 
@@ -162,30 +177,53 @@ void destroy_entity_recursive(entt::registry& registry, entt::entity entity) {
         }
     }
 
-    // Remove from parent
     remove_from_parent(registry, entity);
 
-    // Destroy the entity
     registry.destroy(entity);
 }
 
 void init_component_type_registry() {
     auto& registry = ComponentTypeRegistry::instance();
 
-    // Register all engine component types
-    registry.register_component<engine::Transform>();
-    registry.register_component<engine::render::Camera2D>();
-    registry.register_component<engine::render::PixelGridRenderer>();
-    registry.register_component<engine::animation::Animator>();
-    registry.register_component<engine::simulation::PixelGridComponent>();
-    registry.register_component<engine::simulation::SimSurface>();
-    registry.register_component<engine::physics::Rigidbody>();
-    registry.register_component<engine::physics::BoxCollider>();
-    registry.register_component<engine::physics::CapsuleCollider>();
-    registry.register_component<engine::physics::CircleCollider>();
-    registry.register_component<engine::physics::DynamicCollider>();
-    registry.register_component<engine::gameplay::PlayerController>();
-    registry.register_component<engine::gameplay::CameraFollower>();
+    // Register all engine components from the central list (EngineComponentList.h)
+    #define REGISTER_EDITOR(T) registry.register_component<T>();
+    ENGINE_COMPONENT_LIST(REGISTER_EDITOR)
+    #undef REGISTER_EDITOR
 }
 
-} // namespace editor
+void apply_component_order(
+    entt::registry& registry, entt::entity entity,
+    std::vector<const engine::reflection::TypeInfo*>& types)
+{
+    if (!registry.all_of<EntityInfo>(entity)) return;
+    const auto& info = registry.get<EntityInfo>(entity);
+    if (info.component_order.empty()) return;
+
+    // Build a map from type name -> TypeInfo* for O(1) lookup
+    std::unordered_map<std::string, const engine::reflection::TypeInfo*> type_map;
+    type_map.reserve(types.size());
+    for (const auto* ti : types) {
+        type_map[ti->name()] = ti;
+    }
+
+    std::vector<const engine::reflection::TypeInfo*> ordered;
+    ordered.reserve(types.size());
+
+    // Add types in stored order
+    for (const auto& type_name : info.component_order) {
+        auto it = type_map.find(type_name);
+        if (it != type_map.end()) {
+            ordered.push_back(it->second);
+            type_map.erase(it);
+        }
+    }
+    // Append any remaining types not in the stored order
+    for (const auto* ti : types) {
+        if (type_map.count(ti->name())) {
+            ordered.push_back(ti);
+        }
+    }
+    types = std::move(ordered);
+}
+
+}

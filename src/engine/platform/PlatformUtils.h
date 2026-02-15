@@ -30,15 +30,20 @@ std::string save_file_dialog(
 std::string folder_dialog(const std::string& title = "Select Folder");
 
 /// Launch a detached process (fire-and-forget).
+/// Each element in args is passed as a separate argument (no shell interpretation).
 /// @return true if the process was spawned successfully.
 bool launch_detached(
     const std::string& exe_path,
-    const std::string& args = "");
+    const std::vector<std::string>& args = {});
 
 /// Open the OS file manager showing the given folder.
 void open_folder_in_file_manager(const std::string& folder_path);
 
 /// Open the OS file manager and highlight/select a specific file.
 void reveal_in_file_manager(const std::string& file_path);
+
+/// Get the directory containing the currently running executable.
+/// More reliable than fs::current_path() which depends on the working directory.
+std::string executable_directory();
 
 } // namespace engine::platform

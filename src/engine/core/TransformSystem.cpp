@@ -1,18 +1,27 @@
 #include "TransformSystem.h"
 #include "Transform.h"
 #include "MathConstants.h"
+#include "engine/core/Logger.h"
 #include <algorithm>
 #include <cmath>
 
 namespace engine {
 
-void TransformSystem::update(entt::registry& registry) {
-    // Get all root entities and recursively update their transforms
-    auto roots = get_root_entities(registry);
+// Returns true if entity has no valid parent (i.e. it's a root).
+static bool is_root_entity(const entt::registry& registry, entt::entity entity) {
+    if (!registry.all_of<Hierarchy>(entity)) return true;
+    const auto& h = registry.get<Hierarchy>(entity);
+    return h.parent == entt::null || !registry.valid(h.parent);
+}
 
-    for (auto root : roots) {
-        // Root entities have no parent transform (identity)
-        update_recursive(registry, root, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f);
+void TransformSystem::update(entt::registry& registry) {
+    // Iterate all Transform entities inline to find roots, avoiding a
+    // temporary std::vector allocation every frame.
+    auto view = registry.view<Transform>();
+    for (auto entity : view) {
+        if (is_root_entity(registry, entity)) {
+            update_recursive(registry, entity, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f);
+        }
     }
 }
 
@@ -44,13 +53,19 @@ void TransformSystem::update_recursive(
 
     // Recursively update all children using Hierarchy component
     if (registry.all_of<Hierarchy>(entity)) {
-        for (auto child : registry.get<Hierarchy>(entity).children) {
-            if (registry.valid(child)) {
-                update_recursive(registry, child,
-                    transform.world_x, transform.world_y,
-                    transform.world_rotation,
-                    transform.world_scale_x, transform.world_scale_y);
-            }
+        auto& children = registry.get<Hierarchy>(entity).children;
+
+        // Remove dead entities from children list
+        children.erase(
+            std::remove_if(children.begin(), children.end(),
+                [&](entt::entity child) { return !registry.valid(child); }),
+            children.end());
+
+        for (auto child : children) {
+            update_recursive(registry, child,
+                transform.world_x, transform.world_y,
+                transform.world_rotation,
+                transform.world_scale_x, transform.world_scale_y);
         }
     }
 }
@@ -62,6 +77,24 @@ void TransformSystem::set_parent(
 {
     // Prevent self-parenting
     if (child == parent) return;
+
+    // Cycle detection: walk up from parent to ensure child is not an ancestor
+    if (parent != entt::null) {
+        entt::entity cursor = parent;
+        while (cursor != entt::null && registry.valid(cursor)) {
+            if (cursor == child) {
+                Logger::instance().warning("TransformSystem",
+                    "set_parent rejected: would create cycle (entity %u is ancestor of %u)",
+                    static_cast<unsigned>(child), static_cast<unsigned>(parent));
+                return;
+            }
+            if (registry.all_of<Hierarchy>(cursor)) {
+                cursor = registry.get<Hierarchy>(cursor).parent;
+            } else {
+                break;
+            }
+        }
+    }
 
     auto& child_h = registry.get_or_emplace<Hierarchy>(child);
 
@@ -78,10 +111,12 @@ void TransformSystem::set_parent(
     // Set new parent
     child_h.parent = parent;
 
-    // Add to new parent's children
+    // Add to new parent's children (guard against duplicates)
     if (parent != entt::null) {
         auto& parent_h = registry.get_or_emplace<Hierarchy>(parent);
-        parent_h.children.push_back(child);
+        if (std::find(parent_h.children.begin(), parent_h.children.end(), child) == parent_h.children.end()) {
+            parent_h.children.push_back(child);
+        }
     }
 }
 
@@ -123,18 +158,11 @@ std::vector<entt::entity> TransformSystem::get_root_entities(
 
     // All entities with Transform are potential roots
     auto view = registry.view<Transform>();
+    roots.reserve(registry.storage<Transform>().size());
 
     for (auto entity : view) {
-        // Entity is a root if:
-        // 1. It doesn't have a Hierarchy component, OR
-        // 2. It has a Hierarchy but parent is null or invalid
-        if (!registry.all_of<Hierarchy>(entity)) {
+        if (is_root_entity(registry, entity)) {
             roots.push_back(entity);
-        } else {
-            const auto& h = registry.get<Hierarchy>(entity);
-            if (h.parent == entt::null || !registry.valid(h.parent)) {
-                roots.push_back(entity);
-            }
         }
     }
 

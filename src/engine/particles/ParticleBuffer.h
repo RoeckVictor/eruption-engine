@@ -46,7 +46,11 @@ public:
     bool init(int max_particles = 65536);
     void shutdown();
 
+    /// Maximum pending spawn requests before new spawns are dropped.
+    static constexpr int MAX_PENDING_SPAWNS = 10000;
+
     /// Queue a particle spawn request (processed during flush_spawns).
+    /// Drops the request if the queue exceeds MAX_PENDING_SPAWNS.
     void spawn(const SpawnRequest& req);
 
     /// Read back dead particle indices from GPU and reclaim their slots.

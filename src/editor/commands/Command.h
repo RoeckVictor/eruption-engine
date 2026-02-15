@@ -6,44 +6,37 @@
 
 namespace editor {
 
-/// Base class for undoable/redoable commands.
-/// Commands encapsulate an action that can be executed, undone, and redone.
+// Commands encapsulate an action that can be executed, undone, and redone
 class Command {
 public:
     virtual ~Command() = default;
 
-    /// Execute the command.
     virtual void execute() = 0;
 
-    /// Undo the command.
     virtual void undo() = 0;
 
-    /// Get a human-readable name for this command (for undo menu).
     virtual std::string name() const = 0;
 
-    /// Try to merge with a newer command of the same type.
-    /// Returns true if merged (newer command will be deleted).
-    /// This is used to combine consecutive similar actions (e.g., typing, dragging).
+    // Try to merge with a newer command of the same type
+    // Returns true if merged (newer command will be deleted)
+    // This is used to combine consecutive similar actions (e.g., typing, dragging)
     virtual bool try_merge(const Command* newer) {
         (void)newer;
         return false;
     }
 
-    /// Check if this command can be merged with others.
     virtual bool is_mergeable() const { return false; }
 
-    /// Get the timestamp when this command was created.
     double timestamp() const { return m_timestamp; }
 
-    /// Set the timestamp.
     void set_timestamp(double t) { m_timestamp = t; }
 
 protected:
     double m_timestamp = 0.0;
 };
 
-/// A composite command that groups multiple commands together.
-/// Executing/undoing affects all contained commands.
+// A composite command that groups multiple commands together
+// Executing/undoing affects all contained commands
 class CompositeCommand : public Command {
 public:
     CompositeCommand(const std::string& name)
@@ -76,4 +69,4 @@ private:
     std::vector<std::unique_ptr<Command>> m_commands;
 };
 
-} // namespace editor
+}

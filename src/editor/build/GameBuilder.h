@@ -4,16 +4,17 @@
 #include <vector>
 #include <functional>
 #include <future>
+#include <atomic>
 
 namespace editor {
 
 /// Build configuration for exporting a standalone game.
 struct BuildConfig {
-    std::string output_path;          // Output directory for the build
-    std::string product_name;         // Name of the executable
-    std::string default_scene;        // Scene to load on startup
-    bool debug_build = false;         // Include debug symbols
-    bool include_editor_scenes = false; // Include all scenes, not just default
+    std::string output_path;
+    std::string product_name;
+    std::string default_scene;
+    bool debug_build = false;
+    bool include_editor_scenes = false;
 };
 
 /// Status of the game build process.
@@ -25,6 +26,7 @@ enum class GameBuildStatus {
     CopyingRuntime,
     CreatingLauncher,
     Complete,
+    Cancelled,
     Failed
 };
 
@@ -34,41 +36,39 @@ public:
     GameBuilder();
     ~GameBuilder();
 
-    /// Set the project path.
     void set_project_path(const std::string& path) { m_project_path = path; }
 
-    /// Set the engine source path.
     void set_engine_paths(const std::string& src_path, const std::string& build_path) {
         m_engine_src_path = src_path;
         m_engine_build_path = build_path;
     }
 
-    /// Start an asynchronous build with the given configuration.
     void start_build(const BuildConfig& config);
 
-    /// Reset the builder to idle state for a new build.
+    void request_cancel();
+
     void reset();
 
-    /// Check if a build is currently in progress.
-    bool is_building() const { return m_status != GameBuildStatus::Idle && m_status != GameBuildStatus::Complete && m_status != GameBuildStatus::Failed; }
+    bool is_building() const {
+        return m_status != GameBuildStatus::Idle &&
+               m_status != GameBuildStatus::Complete &&
+               m_status != GameBuildStatus::Cancelled &&
+               m_status != GameBuildStatus::Failed;
+    }
 
-    /// Get the current build status.
     GameBuildStatus status() const { return m_status; }
 
-    /// Get the current build step description.
     const std::string& current_step() const { return m_current_step; }
 
-    /// Get build progress (0.0 - 1.0).
     float progress() const { return m_progress; }
 
-    /// Get any error message from a failed build.
     const std::string& error() const { return m_error; }
 
-    /// Set callback for build completion.
+    const std::string& actual_output_path() const { return m_actual_output_path; }
+
     using BuildCompleteCallback = std::function<void(bool success)>;
     void set_build_complete_callback(BuildCompleteCallback callback) { m_complete_callback = std::move(callback); }
 
-    /// Update the builder (call each frame to check for completion).
     void update();
 
 private:
@@ -87,9 +87,11 @@ private:
     std::string m_current_step;
     float m_progress = 0.0f;
     std::string m_error;
+    std::string m_actual_output_path;
 
     std::future<bool> m_build_future;
     BuildCompleteCallback m_complete_callback;
+    std::atomic<bool> m_cancel_requested{false};
 };
 
-} // namespace editor
+}

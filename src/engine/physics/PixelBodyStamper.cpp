@@ -73,7 +73,14 @@ void PixelBodyStamper::stamp_all(const std::vector<PixelBody*>& bodies,
 
         int region_w = max_wx - min_wx + 1;
         int region_h = max_wy - min_wy + 1;
-        int region_bytes = region_w * region_h * 4;
+
+        // Guard against integer overflow in region byte count
+        size_t region_pixels = static_cast<size_t>(region_w) * static_cast<size_t>(region_h);
+        if (region_pixels > static_cast<size_t>(INT_MAX / 4)) {
+            ENGINE_ERR("PixelBodyStamper: region too large (%dx%d), skipping body", region_w, region_h);
+            continue;
+        }
+        int region_bytes = static_cast<int>(region_pixels * 4);
 
         // Single readback for the entire body AABB
         BodyStamp stamp_rec;

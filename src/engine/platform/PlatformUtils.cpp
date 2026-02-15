@@ -23,20 +23,57 @@ namespace engine::platform {
 
 #ifdef _WIN32
 
-/// Build the double-null-terminated filter string for OPENFILENAME.
-static std::string build_win32_filter(const std::vector<FileFilter>& filters) {
-    std::string result;
+/// Convert a UTF-8 std::string to a wide std::wstring.
+static std::wstring utf8_to_wide(const std::string& str) {
+    if (str.empty()) return {};
+    int len = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, nullptr, 0);
+    if (len <= 0) return {};
+    std::wstring wide(len, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, wide.data(), len);
+    wide.resize(len - 1);  // Remove the null terminator from string length
+    return wide;
+}
+
+/// Convert a wide std::wstring to a UTF-8 std::string.
+static std::string wide_to_utf8(const std::wstring& wide) {
+    if (wide.empty()) return {};
+    int len = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (len <= 0) return {};
+    std::string str(len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, str.data(), len, nullptr, nullptr);
+    str.resize(len - 1);  // Remove the null terminator from string length
+    return str;
+}
+
+/// Build the double-null-terminated wide filter string for OPENFILENAMEW.
+static std::wstring build_win32_filter(const std::vector<FileFilter>& filters) {
+    std::wstring result;
     for (const auto& f : filters) {
-        result += f.description;
-        result += '\0';
-        result += f.pattern;
-        result += '\0';
+        result += utf8_to_wide(f.description);
+        result += L'\0';
+        result += utf8_to_wide(f.pattern);
+        result += L'\0';
     }
-    result += '\0';
+    result += L'\0';
     return result;
 }
 
 #else
+
+/// Escape a string for safe use inside single quotes in shell commands.
+/// Replaces each ' with '\'' (end quote, escaped quote, start quote).
+static std::string shell_escape(const std::string& s) {
+    std::string result = "'";
+    for (char c : s) {
+        if (c == '\'') {
+            result += "'\\''";
+        } else {
+            result += c;
+        }
+    }
+    result += "'";
+    return result;
+}
 
 /// Run a shell command and capture its stdout. Returns empty on failure/cancel.
 static std::string run_command_capture(const std::string& cmd) {
@@ -44,9 +81,14 @@ static std::string run_command_capture(const std::string& cmd) {
     if (!pipe) return {};
 
     std::string result;
-    char buffer[256];
-    while (fgets(buffer, sizeof(buffer), pipe)) {
-        result += buffer;
+    try {
+        char buffer[256];
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            result += buffer;
+        }
+    } catch (...) {
+        pclose(pipe);
+        return {};
     }
 
     int status = pclose(pipe);
@@ -60,7 +102,14 @@ static std::string run_command_capture(const std::string& cmd) {
 }
 
 /// Check if a command-line tool is available.
+/// Only accepts simple command names (alphanumeric, hyphens, underscores).
 static bool has_command(const std::string& cmd) {
+    if (cmd.empty()) return false;
+    for (char c : cmd) {
+        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-' && c != '_') {
+            return false;
+        }
+    }
     std::string check = "which " + cmd + " > /dev/null 2>&1";
     return system(check.c_str()) == 0;
 }
@@ -69,7 +118,7 @@ static bool has_command(const std::string& cmd) {
 static std::string build_zenity_filters(const std::vector<FileFilter>& filters) {
     std::string result;
     for (const auto& f : filters) {
-        result += " --file-filter=\"" + f.description + " | " + f.pattern + "\"";
+        result += " --file-filter=" + shell_escape(f.description + " | " + f.pattern);
     }
     return result;
 }
@@ -85,25 +134,26 @@ std::string open_file_dialog(
     const std::vector<FileFilter>& filters)
 {
 #ifdef _WIN32
-    std::string filter_str = build_win32_filter(filters);
+    std::wstring filter_str = build_win32_filter(filters);
+    std::wstring wide_title = utf8_to_wide(title);
 
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
+    wchar_t filename[MAX_PATH] = {};
+    OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFilter = filter_str.c_str();
     ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrTitle = title.c_str();
+    ofn.lpstrTitle = wide_title.c_str();
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
 
-    if (GetOpenFileNameA(&ofn)) {
-        return std::string(filename);
+    if (GetOpenFileNameW(&ofn)) {
+        return wide_to_utf8(filename);
     }
     return {};
 
 #else
     if (has_command("zenity")) {
-        std::string cmd = "zenity --file-selection --title=\"" + title + "\"";
+        std::string cmd = "zenity --file-selection --title=" + shell_escape(title);
         cmd += build_zenity_filters(filters);
         return run_command_capture(cmd);
     }
@@ -113,7 +163,7 @@ std::string open_file_dialog(
             if (!filter.empty()) filter += " ";
             filter += f.pattern;
         }
-        std::string cmd = "kdialog --getopenfilename . \"" + filter + "\" --title \"" + title + "\"";
+        std::string cmd = "kdialog --getopenfilename . " + shell_escape(filter) + " --title " + shell_escape(title);
         return run_command_capture(cmd);
     }
     return {};
@@ -131,35 +181,43 @@ std::string save_file_dialog(
     const std::string& initial_dir)
 {
 #ifdef _WIN32
-    std::string filter_str = build_win32_filter(filters);
+    std::wstring filter_str = build_win32_filter(filters);
+    std::wstring wide_title = utf8_to_wide(title);
 
-    char filename[MAX_PATH] = {};
-    OPENFILENAMEA ofn = {};
+    wchar_t filename[MAX_PATH] = {};
+    OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFilter = filter_str.c_str();
     ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrTitle = title.c_str();
+    ofn.lpstrTitle = wide_title.c_str();
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
 
-    if (!default_ext.empty()) {
-        ofn.lpstrDefExt = default_ext.c_str();
+    // Windows lpstrDefExt must not include a leading dot
+    std::string ext_no_dot = default_ext;
+    if (!ext_no_dot.empty() && ext_no_dot[0] == '.') {
+        ext_no_dot = ext_no_dot.substr(1);
     }
-    if (!initial_dir.empty()) {
-        ofn.lpstrInitialDir = initial_dir.c_str();
+    std::wstring wide_ext = utf8_to_wide(ext_no_dot);
+    std::wstring wide_initial_dir = utf8_to_wide(initial_dir);
+    if (!wide_ext.empty()) {
+        ofn.lpstrDefExt = wide_ext.c_str();
+    }
+    if (!wide_initial_dir.empty()) {
+        ofn.lpstrInitialDir = wide_initial_dir.c_str();
     }
 
-    if (GetSaveFileNameA(&ofn)) {
-        return std::string(filename);
+    if (GetSaveFileNameW(&ofn)) {
+        return wide_to_utf8(filename);
     }
     return {};
 
 #else
     if (has_command("zenity")) {
-        std::string cmd = "zenity --file-selection --save --confirm-overwrite --title=\"" + title + "\"";
+        std::string cmd = "zenity --file-selection --save --confirm-overwrite --title=" + shell_escape(title);
         cmd += build_zenity_filters(filters);
         if (!initial_dir.empty()) {
-            cmd += " --filename=\"" + initial_dir + "/\"";
+            cmd += " --filename=" + shell_escape(initial_dir + "/");
         }
         std::string result = run_command_capture(cmd);
         // Append default extension if user didn't provide one
@@ -178,7 +236,7 @@ std::string save_file_dialog(
             filter += f.pattern;
         }
         std::string start = initial_dir.empty() ? "." : initial_dir;
-        std::string cmd = "kdialog --getsavefilename \"" + start + "\" \"" + filter + "\" --title \"" + title + "\"";
+        std::string cmd = "kdialog --getsavefilename " + shell_escape(start) + " " + shell_escape(filter) + " --title " + shell_escape(title);
         std::string result = run_command_capture(cmd);
         if (!result.empty() && !default_ext.empty()) {
             std::filesystem::path p(result);
@@ -200,12 +258,13 @@ std::string folder_dialog(const std::string& title) {
 #ifdef _WIN32
     std::string result;
 
-    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    bool com_initialized = SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE;
+    HRESULT com_hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    bool we_initialized_com = SUCCEEDED(com_hr);
+    bool com_available = we_initialized_com || com_hr == RPC_E_CHANGED_MODE;
 
-    if (com_initialized) {
+    if (com_available) {
         IFileDialog* pDialog = nullptr;
-        hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL,
+        HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL,
                               IID_IFileDialog, reinterpret_cast<void**>(&pDialog));
 
         if (SUCCEEDED(hr)) {
@@ -214,10 +273,8 @@ std::string folder_dialog(const std::string& title) {
             pDialog->SetOptions(options | FOS_PICKFOLDERS);
 
             // Set title
-            int wide_len = MultiByteToWideChar(CP_UTF8, 0, title.c_str(), -1, nullptr, 0);
-            if (wide_len > 0) {
-                std::wstring wide_title(wide_len, 0);
-                MultiByteToWideChar(CP_UTF8, 0, title.c_str(), -1, wide_title.data(), wide_len);
+            std::wstring wide_title = utf8_to_wide(title);
+            if (!wide_title.empty()) {
                 pDialog->SetTitle(wide_title.c_str());
             }
 
@@ -229,11 +286,7 @@ std::string folder_dialog(const std::string& title) {
                     PWSTR pszPath = nullptr;
                     hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszPath);
                     if (SUCCEEDED(hr)) {
-                        int utf8_len = WideCharToMultiByte(CP_UTF8, 0, pszPath, -1, nullptr, 0, nullptr, nullptr);
-                        if (utf8_len > 0) {
-                            result.resize(utf8_len - 1);
-                            WideCharToMultiByte(CP_UTF8, 0, pszPath, -1, result.data(), utf8_len, nullptr, nullptr);
-                        }
+                        result = wide_to_utf8(pszPath);
                         CoTaskMemFree(pszPath);
                     }
                     pItem->Release();
@@ -242,8 +295,8 @@ std::string folder_dialog(const std::string& title) {
             pDialog->Release();
         }
 
-        // Only uninitialize if we initialized it
-        if (SUCCEEDED(hr) || hr != RPC_E_CHANGED_MODE) {
+        // Only uninitialize if we were the ones who initialized COM
+        if (we_initialized_com) {
             CoUninitialize();
         }
     }
@@ -252,11 +305,11 @@ std::string folder_dialog(const std::string& title) {
 
 #else
     if (has_command("zenity")) {
-        std::string cmd = "zenity --file-selection --directory --title=\"" + title + "\"";
+        std::string cmd = "zenity --file-selection --directory --title=" + shell_escape(title);
         return run_command_capture(cmd);
     }
     if (has_command("kdialog")) {
-        std::string cmd = "kdialog --getexistingdirectory . --title \"" + title + "\"";
+        std::string cmd = "kdialog --getexistingdirectory . --title " + shell_escape(title);
         return run_command_capture(cmd);
     }
     return {};
@@ -267,18 +320,20 @@ std::string folder_dialog(const std::string& title) {
 // launch_detached
 // =============================================================================
 
-bool launch_detached(const std::string& exe_path, const std::string& args) {
+bool launch_detached(const std::string& exe_path, const std::vector<std::string>& args) {
 #ifdef _WIN32
-    std::string cmd_line = "\"" + exe_path + "\"";
-    if (!args.empty()) {
-        cmd_line += " " + args;
+    // Build a properly quoted command line for Windows.
+    // Each argument is individually quoted to handle spaces safely.
+    std::wstring cmd_line = L"\"" + utf8_to_wide(exe_path) + L"\"";
+    for (const auto& arg : args) {
+        cmd_line += L" \"" + utf8_to_wide(arg) + L"\"";
     }
 
-    STARTUPINFOA si = {};
+    STARTUPINFOW si = {};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi = {};
 
-    BOOL success = CreateProcessA(
+    BOOL success = CreateProcessW(
         nullptr,
         cmd_line.data(),
         nullptr, nullptr,
@@ -301,14 +356,15 @@ bool launch_detached(const std::string& exe_path, const std::string& args) {
         return false;
     }
     if (pid == 0) {
-        // Child process
+        // Child process — use execvp with a proper argv array (no shell).
         setsid();
-        if (args.empty()) {
-            execl(exe_path.c_str(), exe_path.c_str(), nullptr);
-        } else {
-            execl("/bin/sh", "sh", "-c",
-                  (exe_path + " " + args).c_str(), nullptr);
+        std::vector<const char*> argv;
+        argv.push_back(exe_path.c_str());
+        for (const auto& arg : args) {
+            argv.push_back(arg.c_str());
         }
+        argv.push_back(nullptr);
+        execvp(exe_path.c_str(), const_cast<char* const*>(argv.data()));
         _exit(1);
     }
     // Parent - don't wait
@@ -322,7 +378,8 @@ bool launch_detached(const std::string& exe_path, const std::string& args) {
 
 void open_folder_in_file_manager(const std::string& folder_path) {
 #ifdef _WIN32
-    ShellExecuteA(nullptr, "open", folder_path.c_str(), nullptr, nullptr, SW_SHOW);
+    std::wstring wide_path = utf8_to_wide(folder_path);
+    ShellExecuteW(nullptr, L"open", wide_path.c_str(), nullptr, nullptr, SW_SHOW);
 #else
     pid_t pid = fork();
     if (pid == 0) {
@@ -338,8 +395,8 @@ void open_folder_in_file_manager(const std::string& folder_path) {
 
 void reveal_in_file_manager(const std::string& file_path) {
 #ifdef _WIN32
-    std::string param = "/select,\"" + file_path + "\"";
-    ShellExecuteA(nullptr, "open", "explorer.exe", param.c_str(), nullptr, SW_SHOW);
+    std::wstring wide_param = L"/select,\"" + utf8_to_wide(file_path) + L"\"";
+    ShellExecuteW(nullptr, L"open", L"explorer.exe", wide_param.c_str(), nullptr, SW_SHOW);
 #else
     // Try to open the parent directory with xdg-open
     std::filesystem::path parent = std::filesystem::path(file_path).parent_path();
@@ -348,6 +405,30 @@ void reveal_in_file_manager(const std::string& file_path) {
         execlp("xdg-open", "xdg-open", parent.string().c_str(), nullptr);
         _exit(1);
     }
+#endif
+}
+
+// =============================================================================
+// executable_directory
+// =============================================================================
+
+std::string executable_directory() {
+#ifdef _WIN32
+    wchar_t path[MAX_PATH] = {};
+    DWORD len = GetModuleFileNameW(nullptr, path, MAX_PATH);
+    if (len > 0 && len < MAX_PATH) {
+        return std::filesystem::path(path).parent_path().string();
+    }
+    // Fallback to current directory
+    return std::filesystem::current_path().string();
+#else
+    char path[4096] = {};
+    ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (len > 0) {
+        path[len] = '\0';
+        return std::filesystem::path(path).parent_path().string();
+    }
+    return std::filesystem::current_path().string();
 #endif
 }
 

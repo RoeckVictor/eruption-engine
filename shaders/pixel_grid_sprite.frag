@@ -11,7 +11,6 @@ out vec4 frag_color;
 void main() {
     vec4 base_color = texture(u_grid, v_uv);
 
-    // Apply tint and opacity
     frag_color = base_color * u_tint * vec4(1.0, 1.0, 1.0, u_opacity);
 
     // Discard fully transparent pixels

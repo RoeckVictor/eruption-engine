@@ -8,7 +8,13 @@
 
 namespace pixart {
 
-void Document::create(int w, int h) {
+bool Document::create(int w, int h) {
+    if (w <= 0 || h <= 0) return false;
+
+    // Guard against integer overflow: w * h * 4 must fit in size_t
+    auto pixel_count = static_cast<size_t>(w) * static_cast<size_t>(h);
+    if (pixel_count > SIZE_MAX / 4) return false;
+
     m_width = w;
     m_height = h;
     m_origin_x = 0;
@@ -34,10 +40,15 @@ void Document::create(int w, int h) {
                            "lava", "ice", "steam", "fire", "explosive"};
     material.engine_required = true;
     m_layers.push_back(std::move(material));
+    return true;
 }
 
-void Document::resize(int new_w, int new_h) {
-    if (new_w <= 0 || new_h <= 0) return;
+bool Document::resize(int new_w, int new_h) {
+    if (new_w <= 0 || new_h <= 0) return false;
+
+    // Guard against integer overflow: new_w * new_h * 4 must fit in size_t
+    auto pixel_count = static_cast<size_t>(new_w) * static_cast<size_t>(new_h);
+    if (pixel_count > SIZE_MAX / 4) return false;
 
     int copy_w = std::min(m_width, new_w);
     int copy_h = std::min(m_height, new_h);
@@ -58,6 +69,7 @@ void Document::resize(int new_w, int new_h) {
 
     m_width = new_w;
     m_height = new_h;
+    return true;
 }
 
 int Document::add_layer(const std::string& name, LayerType type,
@@ -118,7 +130,8 @@ void Document::set_pixel(int layer_idx, int x, int y, const uint8_t* values) {
 
 void Document::get_pixel(int layer_idx, int x, int y, uint8_t* out) const {
     if (layer_idx < 0 || layer_idx >= static_cast<int>(m_layers.size())) {
-        // Invalid layer - can't determine channel count, just return
+        // Invalid layer - zero the maximum possible output (4 bytes for Color) as safe default
+        std::memset(out, 0, 4);
         return;
     }
     const auto& layer = m_layers[layer_idx];
@@ -214,6 +227,9 @@ bool Document::save(const std::string& path) const {
                 lj["values"] = layer.enum_names;
                 break;
         }
+        if (layer.engine_required) {
+            lj["engine_required"] = true;
+        }
         meta["layers"].push_back(lj);
     }
     std::string metadata_str = meta.dump();
@@ -249,7 +265,7 @@ bool Document::load(const std::string& path) {
             auto meta = nlohmann::json::parse(meta_str);
 
             // Parse origin point
-            if (meta.contains("origin")) {
+            if (meta.contains("origin") && meta["origin"].is_object()) {
                 m_origin_x = meta["origin"].value("x", 0);
                 m_origin_y = meta["origin"].value("y", 0);
             }
@@ -275,12 +291,13 @@ bool Document::load(const std::string& path) {
                     }
                     layer.opacity = lj.value("opacity", 1.0f);
                     layer.visible = lj.value("visible", true);
+                    layer.engine_required = lj.value("engine_required", false);
                     layer.data.resize(static_cast<size_t>(w) * h * layer.channels, 0);
                     m_layers.push_back(std::move(layer));
                 }
                 has_metadata = true;
             }
-        } catch (...) {
+        } catch (const std::exception&) {
             // Metadata parse failed, fall through to fallback
         }
     }

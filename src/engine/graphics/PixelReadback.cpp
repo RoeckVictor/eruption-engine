@@ -56,6 +56,12 @@ void PixelReadback::begin(const Texture& tex, int x, int y, int w, int h) {
                          x, y, 0, w, h, 1,
                          fi.pixel_format, fi.pixel_type,
                          m_max_bytes, nullptr);
+#ifndef NDEBUG
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        ENGINE_ERR("glGetTextureSubImage failed (GL error=0x%X)", err);
+    }
+#endif
     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 
     m_has_data[m_write_idx] = true;
@@ -86,12 +92,13 @@ void PixelReadback::begin_split(const Texture& tex,
                          fi.pixel_format, fi.pixel_type,
                          m_max_bytes, nullptr);
 
-    // Second region immediately after
+    // Second region immediately after the first in the PBO.
+    // When a PBO is bound, the pointer argument is treated as a byte offset into the buffer.
     glGetTextureSubImage(tex.handle(), 0,
                          x2, y2, 0, w2, h2, 1,
                          fi.pixel_format, fi.pixel_type,
                          m_max_bytes - bytes1,
-                         reinterpret_cast<void*>(static_cast<intptr_t>(bytes1)));
+                         reinterpret_cast<void*>(static_cast<uintptr_t>(bytes1)));
 
     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 
@@ -113,8 +120,14 @@ bool PixelReadback::read(void* dst, int dst_size) {
     if (ptr) {
         memcpy(dst, ptr, copy_size);
         glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+    } else {
+        GLenum err = glGetError();
+        ENGINE_ERR("PBO map failed (size=%d, GL error=0x%X)", copy_size, err);
     }
     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+
+    // Mark as consumed so stale data isn't returned on subsequent reads
+    m_has_data[read_idx] = false;
 
     return ptr != nullptr;
 }

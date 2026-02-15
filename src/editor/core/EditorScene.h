@@ -4,8 +4,6 @@
 
 namespace editor {
 
-/// Minimal scene for the editor.
-/// Handles the editor's empty state before a project is loaded.
 class EditorScene : public engine::scene::Scene {
 public:
     EditorScene() = default;
@@ -16,4 +14,4 @@ public:
     void on_exit(engine::Engine& engine) override;
 };
 
-} // namespace editor
+}

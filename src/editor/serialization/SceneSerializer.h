@@ -22,6 +22,9 @@ struct SceneSettings {
     int physics_substeps = 4;
 };
 
+/// Current scene format version. Increment when making breaking changes.
+static constexpr int SCENE_FORMAT_VERSION = 1;
+
 /// Serializes and deserializes scenes to/from JSON files.
 class SceneSerializer {
 public:

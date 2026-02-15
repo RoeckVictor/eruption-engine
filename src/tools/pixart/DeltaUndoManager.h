@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Document.h"
+#include <deque>
+#include <optional>
 #include <vector>
 #include <cstdint>
 #include <unordered_map>
@@ -18,8 +20,22 @@ struct DeltaSnapshot {
     };
     std::unordered_map<int, LayerDelta> layer_deltas;
 
+    /// Document dimensions at the time of capture.
+    /// Used to correctly decode linear pixel indices during undo/redo,
+    /// even if the document has been resized since.
+    int doc_width = 0;
+    int doc_height = 0;
+
+    /// Optional structural changes (origin, layer swap) recorded alongside pixel deltas.
+    struct OriginChange { int old_x, old_y; };
+    std::optional<OriginChange> origin_change;
+
+    struct LayerSwap { int index_a, index_b; };
+    std::optional<LayerSwap> layer_swap;
+
     /// Check if this snapshot has any changes.
     bool empty() const {
+        if (origin_change.has_value() || layer_swap.has_value()) return false;
         for (const auto& [layer_idx, delta] : layer_deltas) {
             if (!delta.changed_pixels.empty()) return false;
         }
@@ -42,12 +58,18 @@ struct DeltaSnapshot {
 /// Builder for creating delta snapshots.
 /// Call begin_capture() before making changes, then capture_pixel() for each
 /// pixel that will be modified, then end_capture() when done.
+/// LIFETIME: The Document passed to begin_capture() must remain valid and
+/// unmodified (no create/resize) until end_capture() is called.
 class DeltaCapturer {
 public:
     /// Start capturing changes for a document.
     void begin_capture(const Document& doc) {
         m_doc = &doc;
+        m_expected_width = doc.width();
+        m_expected_height = doc.height();
         m_snapshot = DeltaSnapshot{};
+        m_snapshot.doc_width = doc.width();
+        m_snapshot.doc_height = doc.height();
         m_capturing = true;
     }
 
@@ -55,6 +77,13 @@ public:
     /// Must be called BEFORE the pixel is modified.
     void capture_pixel(int layer_idx, int x, int y) {
         if (!m_capturing || !m_doc || !m_doc->valid()) return;
+        // Guard: if the document was replaced or resized since begin_capture,
+        // the pointer may be stale — abort safely.
+        if (m_doc->width() != m_expected_width || m_doc->height() != m_expected_height) {
+            m_capturing = false;
+            m_doc = nullptr;
+            return;
+        }
         if (layer_idx < 0 || layer_idx >= m_doc->layer_count()) return;
         if (x < 0 || x >= m_doc->width() || y < 0 || y >= m_doc->height()) return;
 
@@ -104,6 +133,8 @@ public:
 
 private:
     const Document* m_doc = nullptr;
+    int m_expected_width = 0;
+    int m_expected_height = 0;
     DeltaSnapshot m_snapshot;
     bool m_capturing = false;
 };
@@ -151,12 +182,30 @@ public:
                m_current_memory > m_max_memory) {
             if (m_undo_stack.empty()) break;
             m_current_memory -= m_undo_stack.front().memory_usage();
-            m_undo_stack.erase(m_undo_stack.begin());
+            m_undo_stack.pop_front();
         }
 
         // Clear redo stack on new action
         m_current_memory -= redo_memory();
         m_redo_stack.clear();
+    }
+
+    /// Push a standalone structural undo step (origin change or layer swap).
+    /// These don't require begin/end_operation since they don't involve pixel captures.
+    void push_origin_change(const Document& doc, int old_x, int old_y) {
+        DeltaSnapshot snapshot;
+        snapshot.doc_width = doc.width();
+        snapshot.doc_height = doc.height();
+        snapshot.origin_change = DeltaSnapshot::OriginChange{old_x, old_y};
+        push_snapshot(std::move(snapshot));
+    }
+
+    void push_layer_swap(const Document& doc, int index_a, int index_b) {
+        DeltaSnapshot snapshot;
+        snapshot.doc_width = doc.width();
+        snapshot.doc_height = doc.height();
+        snapshot.layer_swap = DeltaSnapshot::LayerSwap{index_a, index_b};
+        push_snapshot(std::move(snapshot));
     }
 
     /// Cancel the current operation without pushing to undo stack.
@@ -167,29 +216,53 @@ public:
     }
 
     /// Undo the last operation.
-    /// @return True if undo was performed.
-    bool undo(Document& doc) {
-        if (m_undo_stack.empty() || !doc.valid()) return false;
+    /// @return True if undo was performed. Sets active_layer if a layer swap was undone.
+    bool undo(Document& doc, int* active_layer = nullptr) {
+        if (m_undo_stack.empty() || !doc.valid() || doc.width() == 0) return false;
 
         auto& snapshot = m_undo_stack.back();
 
+        // Use the snapshot's stored dimensions to decode pixel indices
+        int snap_w = snapshot.doc_width > 0 ? snapshot.doc_width : doc.width();
+
         // Capture current state for redo
         DeltaSnapshot redo_snapshot;
+        redo_snapshot.doc_width = doc.width();
+        redo_snapshot.doc_height = doc.height();
+
+        // Handle structural changes
+        if (snapshot.origin_change) {
+            redo_snapshot.origin_change = DeltaSnapshot::OriginChange{doc.origin_x(), doc.origin_y()};
+            doc.set_origin(snapshot.origin_change->old_x, snapshot.origin_change->old_y);
+        }
+        if (snapshot.layer_swap) {
+            // Reverse the swap
+            redo_snapshot.layer_swap = snapshot.layer_swap;
+            int a = snapshot.layer_swap->index_a;
+            int b = snapshot.layer_swap->index_b;
+            doc.swap_layers(a, b);
+            if (active_layer) {
+                if (*active_layer == a) *active_layer = b;
+                else if (*active_layer == b) *active_layer = a;
+            }
+        }
+
+        // Handle pixel deltas
         for (const auto& [layer_idx, layer_delta] : snapshot.layer_deltas) {
             if (layer_idx >= doc.layer_count()) continue;
             const auto& layer = doc.layer(layer_idx);
 
             auto& redo_layer = redo_snapshot.layer_deltas[layer_idx];
             for (const auto& [pixel_idx, old_data] : layer_delta.changed_pixels) {
-                int x = pixel_idx % doc.width();
-                int y = pixel_idx / doc.width();
+                int x = pixel_idx % snap_w;
+                int y = pixel_idx / snap_w;
 
-                // Save current value for redo
+                if (x >= doc.width() || y >= doc.height()) continue;
+
                 std::vector<uint8_t> current_data(layer.channels);
                 doc.get_pixel(layer_idx, x, y, current_data.data());
                 redo_layer.changed_pixels[pixel_idx] = std::move(current_data);
 
-                // Restore old value
                 doc.set_pixel(layer_idx, x, y, old_data.data());
             }
         }
@@ -204,29 +277,52 @@ public:
     }
 
     /// Redo the last undone operation.
-    /// @return True if redo was performed.
-    bool redo(Document& doc) {
-        if (m_redo_stack.empty() || !doc.valid()) return false;
+    /// @return True if redo was performed. Sets active_layer if a layer swap was redone.
+    bool redo(Document& doc, int* active_layer = nullptr) {
+        if (m_redo_stack.empty() || !doc.valid() || doc.width() == 0) return false;
 
         auto& snapshot = m_redo_stack.back();
 
+        // Use the snapshot's stored dimensions to decode pixel indices
+        int snap_w = snapshot.doc_width > 0 ? snapshot.doc_width : doc.width();
+
         // Capture current state for undo
         DeltaSnapshot undo_snapshot;
+        undo_snapshot.doc_width = doc.width();
+        undo_snapshot.doc_height = doc.height();
+
+        // Handle structural changes
+        if (snapshot.origin_change) {
+            undo_snapshot.origin_change = DeltaSnapshot::OriginChange{doc.origin_x(), doc.origin_y()};
+            doc.set_origin(snapshot.origin_change->old_x, snapshot.origin_change->old_y);
+        }
+        if (snapshot.layer_swap) {
+            undo_snapshot.layer_swap = snapshot.layer_swap;
+            int a = snapshot.layer_swap->index_a;
+            int b = snapshot.layer_swap->index_b;
+            doc.swap_layers(a, b);
+            if (active_layer) {
+                if (*active_layer == a) *active_layer = b;
+                else if (*active_layer == b) *active_layer = a;
+            }
+        }
+
+        // Handle pixel deltas
         for (const auto& [layer_idx, layer_delta] : snapshot.layer_deltas) {
             if (layer_idx >= doc.layer_count()) continue;
             const auto& layer = doc.layer(layer_idx);
 
             auto& undo_layer = undo_snapshot.layer_deltas[layer_idx];
             for (const auto& [pixel_idx, old_data] : layer_delta.changed_pixels) {
-                int x = pixel_idx % doc.width();
-                int y = pixel_idx / doc.width();
+                int x = pixel_idx % snap_w;
+                int y = pixel_idx / snap_w;
 
-                // Save current value for undo
+                if (x >= doc.width() || y >= doc.height()) continue;
+
                 std::vector<uint8_t> current_data(layer.channels);
                 doc.get_pixel(layer_idx, x, y, current_data.data());
                 undo_layer.changed_pixels[pixel_idx] = std::move(current_data);
 
-                // Apply redo value
                 doc.set_pixel(layer_idx, x, y, old_data.data());
             }
         }
@@ -260,14 +356,29 @@ public:
     int redo_count() const { return static_cast<int>(m_redo_stack.size()); }
 
 private:
+    void push_snapshot(DeltaSnapshot snapshot) {
+        m_undo_stack.push_back(std::move(snapshot));
+        m_current_memory += m_undo_stack.back().memory_usage();
+
+        while (static_cast<int>(m_undo_stack.size()) > m_max_steps ||
+               m_current_memory > m_max_memory) {
+            if (m_undo_stack.empty()) break;
+            m_current_memory -= m_undo_stack.front().memory_usage();
+            m_undo_stack.pop_front();
+        }
+
+        m_current_memory -= redo_memory();
+        m_redo_stack.clear();
+    }
+
     size_t redo_memory() const {
         size_t total = 0;
         for (const auto& s : m_redo_stack) total += s.memory_usage();
         return total;
     }
 
-    std::vector<DeltaSnapshot> m_undo_stack;
-    std::vector<DeltaSnapshot> m_redo_stack;
+    std::deque<DeltaSnapshot> m_undo_stack;
+    std::deque<DeltaSnapshot> m_redo_stack;
     DeltaCapturer m_capturer;
     int m_max_steps;
     size_t m_max_memory;

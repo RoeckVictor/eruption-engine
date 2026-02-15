@@ -79,16 +79,18 @@ void InspectorPanel::render_entity_inspector(entt::entity entity) {
         }
         ImGui::SameLine();
 
-        // Entity name
-        static char name_buffer[128];
+        // Entity name (use entity ID for unique ImGui state per entity)
+        char name_buffer[128];
         strncpy(name_buffer, info.name.c_str(), sizeof(name_buffer) - 1);
         name_buffer[sizeof(name_buffer) - 1] = '\0';
 
+        ImGui::PushID(static_cast<int>(entt::to_integral(entity)));
         ImGui::SetNextItemWidth(-1);
         if (ImGui::InputText("##EntityName", name_buffer, sizeof(name_buffer))) {
             info.name = name_buffer;
             m_context.mark_dirty();
         }
+        ImGui::PopID();
 
         // Show entity ID in tooltip
         if (ImGui::IsItemHovered()) {
@@ -110,7 +112,7 @@ void InspectorPanel::render_entity_inspector(entt::entity entity) {
 
     // Render all components dynamically using reflection
     auto& type_registry = engine::reflection::TypeRegistry::instance();
-    auto all_types = type_registry.get_all_types();
+    const auto& all_types = type_registry.all_types();
 
     if (all_types.empty()) {
         ImGui::TextDisabled("No reflected types registered");
@@ -119,50 +121,45 @@ void InspectorPanel::render_entity_inspector(entt::entity entity) {
     // Use ComponentTypeRegistry for dynamic component access
     auto& component_registry = ComponentTypeRegistry::instance();
 
-    // Build ordered list of components this entity has
-    std::vector<const engine::reflection::TypeInfo*> present_components;
+    // Build ordered list of components this entity has, caching the void* pointers
+    // to avoid a second get_component() round-trip during rendering.
+    struct ComponentEntry {
+        const engine::reflection::TypeInfo* type_info;
+        void* ptr;
+    };
+    std::vector<ComponentEntry> present_components;
     for (const auto* type_info_ptr : all_types) {
         if (!type_info_ptr) continue;
         void* component_ptr = component_registry.get_component(*registry, entity, type_info_ptr->type_index());
         if (component_ptr) {
-            present_components.push_back(type_info_ptr);
+            present_components.push_back({type_info_ptr, component_ptr});
         }
     }
 
     // Apply custom component order if available
-    if (registry->all_of<EntityInfo>(entity)) {
-        auto& info = registry->get<EntityInfo>(entity);
-        if (!info.component_order.empty()) {
-            // Sort present_components according to stored order
-            std::vector<const engine::reflection::TypeInfo*> ordered;
-            ordered.reserve(present_components.size());
-
-            // First add components in the stored order
-            for (const auto& type_name : info.component_order) {
-                for (auto it = present_components.begin(); it != present_components.end(); ++it) {
-                    if ((*it)->name() == type_name) {
-                        ordered.push_back(*it);
-                        present_components.erase(it);
-                        break;
-                    }
+    {
+        std::vector<const engine::reflection::TypeInfo*> order_vec;
+        order_vec.reserve(present_components.size());
+        for (auto& entry : present_components) order_vec.push_back(entry.type_info);
+        apply_component_order(*registry, entity, order_vec);
+        // Reorder present_components to match the sorted order
+        std::vector<ComponentEntry> reordered;
+        reordered.reserve(order_vec.size());
+        for (const auto* ti : order_vec) {
+            for (auto& entry : present_components) {
+                if (entry.type_info == ti) {
+                    reordered.push_back(entry);
+                    break;
                 }
             }
-            // Then add any remaining components not in the stored order
-            for (const auto* ti : present_components) {
-                ordered.push_back(ti);
-            }
-            present_components = std::move(ordered);
         }
+        present_components = std::move(reordered);
     }
 
     // Render components in order, with drag-and-drop reordering
     for (size_t i = 0; i < present_components.size(); ++i) {
-        const auto& type_info = *present_components[i];
-        void* component_ptr = component_registry.get_component(*registry, entity, type_info.type_index());
-
-        if (component_ptr) {
-            render_component_inspector(entity, type_info, component_ptr, i, present_components.size());
-        }
+        auto& entry = present_components[i];
+        render_component_inspector(entity, *entry.type_info, entry.ptr, i, present_components.size());
     }
 
     // Render script components (same visual style as engine components)
@@ -418,7 +415,7 @@ void InspectorPanel::render_add_component_button(entt::entity entity) {
 
         // Get all reflected types from TypeRegistry
         auto& type_registry = engine::reflection::TypeRegistry::instance();
-        auto all_types = type_registry.get_all_types();
+        const auto& all_types = type_registry.all_types();
 
         // Group types by category
         std::map<std::string, std::vector<const engine::reflection::TypeInfo*>> categories;
@@ -440,9 +437,9 @@ void InspectorPanel::render_add_component_button(entt::entity entity) {
 
             // Filter by search text
             std::string lower_name = type_info->name();
-            std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+            std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
             std::string lower_search = search;
-            std::transform(lower_search.begin(), lower_search.end(), lower_search.begin(), ::tolower);
+            std::transform(lower_search.begin(), lower_search.end(), lower_search.begin(), [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
 
             if (strlen(search) > 0 && lower_name.find(lower_search) == std::string::npos) {
                 continue;
@@ -497,9 +494,9 @@ void InspectorPanel::render_add_component_button(entt::entity entity) {
 
                 // Filter by search text
                 std::string lower_name = type_info.name;
-                std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), ::tolower);
+                std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(), [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
                 std::string lower_search = search;
-                std::transform(lower_search.begin(), lower_search.end(), lower_search.begin(), ::tolower);
+                std::transform(lower_search.begin(), lower_search.end(), lower_search.begin(), [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
 
                 if (strlen(search) > 0 && lower_name.find(lower_search) == std::string::npos) {
                     continue;
@@ -611,7 +608,7 @@ void InspectorPanel::add_component_to_entity(entt::entity entity, std::type_inde
             auto& info = registry->get<EntityInfo>(entity);
             // Find type name from TypeRegistry
             auto& type_reg = engine::reflection::TypeRegistry::instance();
-            for (const auto* ti : type_reg.get_all_types()) {
+            for (const auto* ti : type_reg.all_types()) {
                 if (ti && ti->type_index() == type) {
                     // Only add if order list is already populated (otherwise it will be built on next render)
                     if (!info.component_order.empty()) {
@@ -645,7 +642,7 @@ void InspectorPanel::remove_component_from_entity(entt::entity entity, std::type
     if (registry->all_of<EntityInfo>(entity)) {
         auto& info = registry->get<EntityInfo>(entity);
         auto& type_reg = engine::reflection::TypeRegistry::instance();
-        for (const auto* ti : type_reg.get_all_types()) {
+        for (const auto* ti : type_reg.all_types()) {
             if (ti && ti->type_index() == type) {
                 auto it = std::find(info.component_order.begin(), info.component_order.end(), ti->name());
                 if (it != info.component_order.end()) {
@@ -710,7 +707,7 @@ void InspectorPanel::ensure_component_order(entt::entity entity) {
     // Initialize component_order from current component list
     auto& type_registry = engine::reflection::TypeRegistry::instance();
     auto& component_registry = ComponentTypeRegistry::instance();
-    auto all_types = type_registry.get_all_types();
+    const auto& all_types = type_registry.all_types();
 
     for (const auto* type_info_ptr : all_types) {
         if (!type_info_ptr) continue;

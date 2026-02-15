@@ -1,8 +1,10 @@
 #include "engine/asset/VFS.h"
 #include "engine/core/Log.h"
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <unordered_set>
 
 namespace engine::asset {
 
@@ -36,26 +38,52 @@ Result<void, ErrorInfo> VFS::mount_directory(const std::string& disk_path,
     return Ok();
 }
 
+/// Normalize path separators: replace backslashes with forward slashes
+/// and apply lexically_normal to collapse redundant separators and . / .. segments.
+static std::string normalize_vpath(const std::string& path) {
+    std::string normalized = path;
+    std::replace(normalized.begin(), normalized.end(), '\\', '/');
+    return fs::path(normalized).lexically_normal().generic_string();
+}
+
+/// Case-insensitive prefix match on Windows, case-sensitive elsewhere.
+static bool starts_with_prefix(const std::string& path, const std::string& prefix) {
+    if (path.size() < prefix.size()) return false;
+#ifdef _WIN32
+    return std::equal(prefix.begin(), prefix.end(), path.begin(),
+                      [](char a, char b) { return std::tolower(static_cast<unsigned char>(a))
+                                                == std::tolower(static_cast<unsigned char>(b)); });
+#else
+    return path.compare(0, prefix.size(), prefix) == 0;
+#endif
+}
+
+std::optional<std::string> VFS::strip_prefix(const std::string& norm_path,
+                                              const std::string& norm_prefix) {
+    if (norm_prefix.empty()) {
+        return norm_path;
+    }
+    if (norm_path.size() <= norm_prefix.size()) return std::nullopt;
+    if (!starts_with_prefix(norm_path, norm_prefix)) return std::nullopt;
+
+    char separator = norm_path[norm_prefix.size()];
+    if (separator != '/' && separator != '\\') return std::nullopt;
+
+    return norm_path.substr(norm_prefix.size() + 1);
+}
+
 Result<std::string, ErrorInfo> VFS::resolve(const std::string& virtual_path) const {
+    std::string norm_path = normalize_vpath(virtual_path);
+
     // Search mounts in reverse order (latest mount = highest priority)
     for (auto it = m_mounts.rbegin(); it != m_mounts.rend(); ++it) {
         const auto& mp = *it;
+        std::string norm_prefix = normalize_vpath(mp.virtual_prefix);
 
-        std::string relative_path;
-        if (mp.virtual_prefix.empty()) {
-            relative_path = virtual_path;
-        } else {
-            // Check if the virtual path starts with the mount prefix
-            if (virtual_path.size() <= mp.virtual_prefix.size()) continue;
-            if (virtual_path.compare(0, mp.virtual_prefix.size(), mp.virtual_prefix) != 0) continue;
+        auto relative = strip_prefix(norm_path, norm_prefix);
+        if (!relative) continue;
 
-            char separator = virtual_path[mp.virtual_prefix.size()];
-            if (separator != '/' && separator != '\\') continue;
-
-            relative_path = virtual_path.substr(mp.virtual_prefix.size() + 1);
-        }
-
-        fs::path candidate = fs::path(mp.disk_path) / relative_path;
+        fs::path candidate = fs::path(mp.disk_path) / *relative;
 
         std::error_code ec;
         if (fs::exists(candidate, ec)) {
@@ -121,27 +149,23 @@ bool VFS::exists(const std::string& virtual_path) const {
 std::vector<std::string> VFS::list_files(const std::string& virtual_dir,
                                           const std::string& extension) const {
     std::vector<std::string> results;
+    std::unordered_set<std::string> seen; // O(1) dedup instead of O(n) linear search
 
     for (auto it = m_mounts.rbegin(); it != m_mounts.rend(); ++it) {
         const auto& mp = *it;
 
-        fs::path dir_path;
+        // For list_files, also accept exact prefix match (virtual_dir == prefix)
+        std::optional<std::string> relative;
         if (mp.virtual_prefix.empty()) {
-            dir_path = fs::path(mp.disk_path) / virtual_dir;
+            relative = virtual_dir;
+        } else if (virtual_dir == mp.virtual_prefix) {
+            relative = "";
         } else {
-            if (virtual_dir.size() < mp.virtual_prefix.size()) continue;
-            if (virtual_dir.compare(0, mp.virtual_prefix.size(), mp.virtual_prefix) != 0) continue;
-
-            std::string relative;
-            if (virtual_dir.size() == mp.virtual_prefix.size()) {
-                relative = "";
-            } else {
-                char sep = virtual_dir[mp.virtual_prefix.size()];
-                if (sep != '/' && sep != '\\') continue;
-                relative = virtual_dir.substr(mp.virtual_prefix.size() + 1);
-            }
-            dir_path = fs::path(mp.disk_path) / relative;
+            relative = strip_prefix(virtual_dir, mp.virtual_prefix);
         }
+        if (!relative) continue;
+
+        fs::path dir_path = fs::path(mp.disk_path) / *relative;
 
         std::error_code ec;
         if (!fs::is_directory(dir_path, ec)) continue;
@@ -164,8 +188,7 @@ std::vector<std::string> VFS::list_files(const std::string& virtual_dir,
                 vpath = mp.virtual_prefix + "/" + rel.generic_string();
             }
 
-            // Avoid duplicates
-            if (std::find(results.begin(), results.end(), vpath) == results.end()) {
+            if (seen.insert(vpath).second) {
                 results.push_back(std::move(vpath));
             }
         }

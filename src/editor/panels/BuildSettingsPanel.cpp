@@ -3,7 +3,9 @@
 
 #include <imgui.h>
 #include <filesystem>
+#include <fstream>
 #include <cstring>
+#include <nlohmann/json.hpp>
 
 #include "engine/platform/PlatformUtils.h"
 
@@ -15,7 +17,8 @@ BuildSettingsPanel::BuildSettingsPanel()
     : Panel("Build Settings")
 {
     // Default product name
-    std::strcpy(m_product_name_buffer, "MyGame");
+    std::strncpy(m_product_name_buffer, "MyGame", sizeof(m_product_name_buffer) - 1);
+    m_product_name_buffer[sizeof(m_product_name_buffer) - 1] = '\0';
 }
 
 void BuildSettingsPanel::on_open() {
@@ -32,7 +35,9 @@ void BuildSettingsPanel::on_gui() {
 
     if (m_builder.is_building()) {
         render_build_progress();
-    } else if (m_builder.status() == GameBuildStatus::Complete || m_builder.status() == GameBuildStatus::Failed) {
+    } else if (m_builder.status() == GameBuildStatus::Complete ||
+               m_builder.status() == GameBuildStatus::Cancelled ||
+               m_builder.status() == GameBuildStatus::Failed) {
         render_build_complete();
     } else {
         render_build_settings();
@@ -49,12 +54,23 @@ void BuildSettingsPanel::set_project_path(const std::string& path) {
 
     // Try to get project name from project.eruption
     fs::path project_file = fs::path(path) / "project.eruption";
+    std::string product_name;
     if (fs::exists(project_file)) {
-        // TODO: Parse project file to get name
-        // For now, use folder name
-        std::string folder_name = fs::path(path).filename().string();
-        std::strncpy(m_product_name_buffer, folder_name.c_str(), sizeof(m_product_name_buffer) - 1);
+        std::ifstream file(project_file);
+        if (file.is_open()) {
+            try {
+                nlohmann::json j;
+                file >> j;
+                product_name = j.value("name", "");
+            } catch (const std::exception&) {
+                // Fall through to folder name fallback
+            }
+        }
     }
+    if (product_name.empty()) {
+        product_name = fs::path(path).filename().string();
+    }
+    std::strncpy(m_product_name_buffer, product_name.c_str(), sizeof(m_product_name_buffer) - 1);
 }
 
 void BuildSettingsPanel::set_engine_paths(const std::string& src_path, const std::string& build_path) {
@@ -176,20 +192,21 @@ void BuildSettingsPanel::render_build_progress() {
     ImGui::Separator();
     ImGui::Spacing();
 
-    // Cancel button (disabled for now - async build can't be cancelled easily)
-    ImGui::BeginDisabled();
     if (ImGui::Button("Cancel", ImVec2(-1, 30))) {
-        // TODO: Implement build cancellation
+        m_builder.request_cancel();
     }
-    ImGui::EndDisabled();
 }
 
 void BuildSettingsPanel::render_build_complete() {
-    bool success = (m_builder.status() == GameBuildStatus::Complete);
+    auto status = m_builder.status();
 
-    if (success) {
+    if (status == GameBuildStatus::Complete) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 0.8f, 0.2f, 1.0f));
         ImGui::Text("Build Completed Successfully!");
+        ImGui::PopStyleColor();
+    } else if (status == GameBuildStatus::Cancelled) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.7f, 0.1f, 1.0f));
+        ImGui::Text("Build Cancelled");
         ImGui::PopStyleColor();
     } else {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.2f, 0.2f, 1.0f));
@@ -205,15 +222,17 @@ void BuildSettingsPanel::render_build_complete() {
     ImGui::Separator();
     ImGui::Spacing();
 
-    // Show output path
-    ImGui::Text("Output: %s", m_output_path_buffer);
+    // Show output path (includes Debug/Release subfolder)
+    const auto& actual_path = m_builder.actual_output_path();
+    ImGui::Text("Output: %s", actual_path.empty() ? m_output_path_buffer : actual_path.c_str());
 
     ImGui::Spacing();
 
     // Buttons
-    if (success) {
+    if (status == GameBuildStatus::Complete) {
         if (ImGui::Button("Open Output Folder", ImVec2(-1, 30))) {
-            engine::platform::open_folder_in_file_manager(m_output_path_buffer);
+            engine::platform::open_folder_in_file_manager(
+                actual_path.empty() ? m_output_path_buffer : actual_path.c_str());
         }
     }
 

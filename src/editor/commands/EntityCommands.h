@@ -27,7 +27,6 @@ public:
 
     std::string name() const override { return "Add Entity"; }
 
-    /// Get the created entity (valid after execute).
     entt::entity created_entity() const { return m_entity; }
 
 private:
@@ -37,11 +36,9 @@ private:
     entt::entity m_parent;
     entt::entity m_entity = entt::null;
 
-    // Stored state for undo
     bool m_was_executed = false;
 };
 
-/// Command for deleting an entity and its children.
 class DeleteEntityCommand : public Command {
 public:
     DeleteEntityCommand(entt::registry* registry, EditorContext* context,
@@ -68,7 +65,6 @@ private:
     };
 
     void store_entity_recursive(entt::entity entity, entt::entity parent);
-    entt::entity restore_entity(const StoredEntity& stored);
 
     entt::registry* m_registry;
     EditorContext* m_context;
@@ -78,7 +74,6 @@ private:
     bool m_was_selected = false;
 };
 
-/// Command for renaming an entity.
 class RenameEntityCommand : public Command {
 public:
     RenameEntityCommand(entt::registry* registry, entt::entity entity,
@@ -110,7 +105,6 @@ private:
     std::string m_new_name;
 };
 
-/// Command for reparenting an entity.
 class ReparentCommand : public Command {
 public:
     ReparentCommand(entt::registry* registry, entt::entity entity,
@@ -142,4 +136,28 @@ private:
     entt::entity m_new_parent;
 };
 
-} // namespace editor
+class PasteEntitiesCommand : public Command {
+public:
+    PasteEntitiesCommand(entt::registry* registry, EditorContext* context,
+                         const std::string& clipboard_data)
+        : m_registry(registry)
+        , m_context(context)
+        , m_clipboard_data(clipboard_data)
+    {}
+
+    void execute() override;
+    void undo() override;
+
+    std::string name() const override { return "Paste"; }
+
+    const std::vector<entt::entity>& pasted_entities() const { return m_pasted_entities; }
+
+private:
+    entt::registry* m_registry;
+    EditorContext* m_context;
+    std::string m_clipboard_data;
+    std::vector<entt::entity> m_pasted_entities;
+    std::vector<entt::entity> m_previous_selection;
+};
+
+}

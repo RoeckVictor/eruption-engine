@@ -212,7 +212,7 @@ void FileBrowserPanel::render_file_list() {
     handle_keyboard_shortcuts();
 
     std::string filter_lower(m_filter);
-    std::transform(filter_lower.begin(), filter_lower.end(), filter_lower.begin(), ::tolower);
+    std::transform(filter_lower.begin(), filter_lower.end(), filter_lower.begin(), [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
 
     // Deferred actions (don't modify state while iterating)
     std::string deferred_navigate_path;
@@ -223,7 +223,7 @@ void FileBrowserPanel::render_file_list() {
         // Apply filter
         if (!filter_lower.empty()) {
             std::string name_lower = entry.name;
-            std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
+            std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
             if (name_lower.find(filter_lower) == std::string::npos) {
                 continue;
             }

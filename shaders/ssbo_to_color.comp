@@ -18,29 +18,19 @@ layout(rgba8, binding = 0) writeonly uniform image2D u_color_texture;
 uniform int u_grid_width;
 uniform int u_grid_height;
 uniform uint u_pixel_size;
+uniform uint u_palette_size;  // Number of entries in the palette (max 256)
+
+#include "include/pixel_access.glsl"
 
 void main() {
     ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
     if (pos.x >= u_grid_width || pos.y >= u_grid_height) return;
 
-    // Calculate byte offset into SSBO
-    uint pixel_idx = uint(pos.y) * uint(u_grid_width) + uint(pos.x);
-    uint byte_offset = pixel_idx * u_pixel_size;
-    uint word_offset = byte_offset / 4u;
-    uint byte_in_word = byte_offset % 4u;
+    uint packed = readPackedPixel(pixel_data, pos);
 
-    // Read the uint32 containing this pixel's first 4 bytes
-    uint packed = pixel_data[word_offset];
-
-    // Handle misaligned access
-    if (byte_in_word != 0u) {
-        uint next_word = pixel_data[word_offset + 1u];
-        uint shift_bits = byte_in_word * 8u;
-        packed = (packed >> shift_bits) | (next_word << (32u - shift_bits));
-    }
-
-    // Extract material ID (byte 0)
+    // Extract material ID (byte 0), clamped to valid palette range
     uint material = packed & 0xFFu;
+    material = min(material, u_palette_size - 1u);
 
     // Look up color from palette
     uint color_packed = palette[material];

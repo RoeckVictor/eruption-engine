@@ -34,6 +34,9 @@ private:
 
     // Track which systems were successfully initialized for safe shutdown
     std::vector<System*> m_initialized;
+
+    // Guard against double initialization
+    bool m_is_initialized = false;
 };
 
 } // namespace engine

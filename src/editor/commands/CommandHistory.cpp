@@ -6,7 +6,6 @@ namespace editor {
 void CommandHistory::execute(std::unique_ptr<Command> cmd) {
     if (!cmd) return;
 
-    // Set timestamp
     cmd->set_timestamp(current_time());
 
     // Try to merge with the last command if both are mergeable
@@ -19,16 +18,12 @@ void CommandHistory::execute(std::unique_ptr<Command> cmd) {
         }
     }
 
-    // Execute the command
     cmd->execute();
 
-    // Add to undo stack
     m_undo_stack.push_back(std::move(cmd));
 
-    // Clear redo stack (new action invalidates redo history)
     m_redo_stack.clear();
 
-    // Trim if we exceed max history
     trim_history();
 
     notify_change();
@@ -37,7 +32,6 @@ void CommandHistory::execute(std::unique_ptr<Command> cmd) {
 void CommandHistory::add_executed(std::unique_ptr<Command> cmd) {
     if (!cmd) return;
 
-    // Set timestamp
     cmd->set_timestamp(current_time());
 
     // Try to merge with the last command if both are mergeable
@@ -54,10 +48,8 @@ void CommandHistory::add_executed(std::unique_ptr<Command> cmd) {
     // Just add to undo stack
     m_undo_stack.push_back(std::move(cmd));
 
-    // Clear redo stack (new action invalidates redo history)
     m_redo_stack.clear();
 
-    // Trim if we exceed max history
     trim_history();
 
     notify_change();
@@ -140,4 +132,4 @@ void CommandHistory::trim_history() {
     }
 }
 
-} // namespace editor
+}

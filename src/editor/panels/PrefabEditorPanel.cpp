@@ -3,6 +3,8 @@
 #include "editor/core/EditorComponents.h"
 #include "editor/serialization/SceneSerializer.h"
 #include "editor/icons/IconsFontAwesome6.h"
+#include "editor/ui/UnsavedDialog.h"
+#include "editor/render/SceneRenderUtils.h"
 #include "engine/core/MathConstants.h"
 #include "engine/core/Transform.h"
 #include "engine/core/TransformSystem.h"
@@ -29,11 +31,6 @@ PrefabEditorPanel::PrefabEditorPanel(EditorContext& main_context)
 }
 
 PrefabEditorPanel::~PrefabEditorPanel() {
-    for (auto& [entity, cached] : m_grid_textures) {
-        if (cached.texture_id) {
-            glDeleteTextures(1, &cached.texture_id);
-        }
-    }
     m_grid_textures.clear();
 }
 
@@ -43,13 +40,6 @@ void PrefabEditorPanel::on_open() {
 void PrefabEditorPanel::on_close() {
     // Revert to scene context if we had the override active
     deactivate_editing_override();
-
-    // Clean up textures
-    for (auto& [entity, cached] : m_grid_textures) {
-        if (cached.texture_id) {
-            glDeleteTextures(1, &cached.texture_id);
-        }
-    }
     m_grid_textures.clear();
 }
 
@@ -77,49 +67,22 @@ void PrefabEditorPanel::render_unsaved_dialog() {
         m_show_unsaved_dialog = false;
     }
 
-    if (ImGui::BeginPopupModal("Prefab Unsaved Changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        std::string filename = std::filesystem::path(m_prefab_path).filename().string();
-        ImGui::Text("The prefab '%s' has unsaved changes.", filename.c_str());
-        ImGui::Text("Do you want to save before continuing?");
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
+    std::string filename = std::filesystem::path(m_prefab_path).filename().string();
+    std::string message = "The prefab '" + filename + "' has unsaved changes.";
 
-        if (ImGui::Button("Save", ImVec2(100, 0))) {
+    auto result = ui::render_unsaved_popup("Prefab Unsaved Changes", message.c_str());
+    switch (result) {
+        case ui::UnsavedAction::Save:
             save_prefab_file();
-            if (m_pending_action) {
-                auto action = std::move(m_pending_action);
-                m_pending_action = nullptr;
-                ImGui::CloseCurrentPopup();
-                ImGui::EndPopup();
-                action();
-                return;
-            }
-            ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::SameLine();
-
-        if (ImGui::Button("Don't Save", ImVec2(100, 0))) {
-            if (m_pending_action) {
-                auto action = std::move(m_pending_action);
-                m_pending_action = nullptr;
-                ImGui::CloseCurrentPopup();
-                ImGui::EndPopup();
-                action();
-                return;
-            }
-            ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::SameLine();
-
-        if (ImGui::Button("Cancel", ImVec2(100, 0))) {
+            if (m_pending_action) { auto a = std::move(m_pending_action); m_pending_action = nullptr; a(); }
+            break;
+        case ui::UnsavedAction::DontSave:
+            if (m_pending_action) { auto a = std::move(m_pending_action); m_pending_action = nullptr; a(); }
+            break;
+        case ui::UnsavedAction::Cancel:
             m_pending_action = nullptr;
-            ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::EndPopup();
+            break;
+        default: break;
     }
 }
 
@@ -128,11 +91,6 @@ void PrefabEditorPanel::open_prefab(const std::string& path) {
         // Clear existing state
         m_prefab_registry.clear();
         m_selection.clear();
-        for (auto& [entity, cached] : m_grid_textures) {
-            if (cached.texture_id) {
-                glDeleteTextures(1, &cached.texture_id);
-            }
-        }
         m_grid_textures.clear();
 
         if (load_prefab_file(path)) {
@@ -257,18 +215,11 @@ void PrefabEditorPanel::render_viewport() {
     // Draw background
     draw_list->AddRectFilled(m_viewport_pos, clip_max, IM_COL32(30, 30, 35, 255));
 
-    float screen_cx = m_viewport_pos.x + m_viewport_size.x * 0.5f;
-    float screen_cy = m_viewport_pos.y + m_viewport_size.y * 0.5f;
-
-    auto world_to_screen = [&](float wx, float wy) -> ImVec2 {
-        float sx = screen_cx + (wx - m_camera.x) * m_camera.zoom;
-        float sy = screen_cy - (wy - m_camera.y) * m_camera.zoom;
-        return ImVec2(sx, sy);
-    };
+    WorldToScreen wts(m_viewport_pos, m_viewport_size, m_camera.x, m_camera.y, m_camera.zoom);
 
     // Draw origin crosshair
     {
-        ImVec2 origin = world_to_screen(0, 0);
+        ImVec2 origin = wts(0, 0);
         float arm = 20.0f;
         draw_list->AddLine(ImVec2(origin.x - arm, origin.y), ImVec2(origin.x + arm, origin.y),
                            IM_COL32(180, 80, 80, 150), 1.0f);
@@ -289,57 +240,16 @@ void PrefabEditorPanel::render_viewport() {
 
             if (!renderer.enabled) continue;
 
-            float w = grid_comp.width > 0 ? static_cast<float>(grid_comp.width) : 32.0f;
-            float h = grid_comp.height > 0 ? static_cast<float>(grid_comp.height) : 32.0f;
-            float ox = static_cast<float>(grid_comp.origin_x);
-            float oy = static_cast<float>(grid_comp.origin_y);
-            float sx = transform.world_scale_x;
-            float sy = transform.world_scale_y;
-            float rot_rad = transform.world_rotation * engine::DEG_TO_RAD;
-            float cos_r = std::cos(rot_rad);
-            float sin_r = std::sin(rot_rad);
+            auto quad = compute_pixel_grid_quad(transform, grid_comp, renderer, wts);
+            GLuint grid_tex = m_grid_textures.get(entity, grid_comp.pixel_grid_path);
+            draw_pixel_grid_quad(draw_list, quad, grid_tex);
 
-            float lx0 = -ox * sx,       ly0 = (h - oy) * sy;
-            float lx1 = (w - ox) * sx,  ly1 = (h - oy) * sy;
-            float lx2 = (w - ox) * sx,  ly2 = -oy * sy;
-            float lx3 = -ox * sx,       ly3 = -oy * sy;
-
-            auto rotate_to_screen = [&](float lx, float ly) -> ImVec2 {
-                float wx = transform.world_x + lx * cos_r - ly * sin_r;
-                float wy = transform.world_y + lx * sin_r + ly * cos_r;
-                return world_to_screen(wx, wy);
-            };
-
-            ImVec2 p0 = rotate_to_screen(lx0, ly0);
-            ImVec2 p1 = rotate_to_screen(lx1, ly1);
-            ImVec2 p2 = rotate_to_screen(lx2, ly2);
-            ImVec2 p3 = rotate_to_screen(lx3, ly3);
-
-            GLuint grid_tex = get_pixel_grid_texture(entity, grid_comp.pixel_grid_path);
-            if (grid_tex != 0) {
-                uint8_t tr = static_cast<uint8_t>(renderer.tint_r * renderer.opacity * 255.0f);
-                uint8_t tg = static_cast<uint8_t>(renderer.tint_g * renderer.opacity * 255.0f);
-                uint8_t tb = static_cast<uint8_t>(renderer.tint_b * renderer.opacity * 255.0f);
-                uint8_t ta = static_cast<uint8_t>(renderer.tint_a * renderer.opacity * 255.0f);
-                ImU32 tint = IM_COL32(tr, tg, tb, ta);
-
-                draw_list->AddImageQuad(
-                    (ImTextureID)(uintptr_t)grid_tex,
-                    p0, p1, p2, p3,
-                    ImVec2(0, 0), ImVec2(1, 0), ImVec2(1, 1), ImVec2(0, 1),
-                    tint
-                );
-            } else {
-                draw_list->AddQuad(p0, p1, p2, p3, IM_COL32(200, 80, 80, 180), 1.5f);
-            }
-
-            // Selection outline
             if (m_main_context.is_selected(entity)) {
-                draw_list->AddQuad(p0, p1, p2, p3, IM_COL32(255, 200, 50, 220), 2.0f);
+                draw_selection_outline(draw_list, quad);
             }
         } else {
             // Non-sprite entity: draw a labeled marker
-            ImVec2 screen_pos = world_to_screen(transform.world_x, transform.world_y);
+            ImVec2 screen_pos = wts(transform.world_x, transform.world_y);
             float marker_size = 6.0f;
 
             ImU32 marker_color = m_main_context.is_selected(entity) ? IM_COL32(255, 200, 50, 220) : IM_COL32(200, 200, 200, 180);
@@ -351,7 +261,6 @@ void PrefabEditorPanel::render_viewport() {
                 marker_color
             );
 
-            // Draw entity name
             if (m_prefab_registry.all_of<EntityInfo>(entity)) {
                 const auto& info = m_prefab_registry.get<EntityInfo>(entity);
                 draw_list->AddText(ImVec2(screen_pos.x + marker_size + 4, screen_pos.y - 7),
@@ -360,7 +269,7 @@ void PrefabEditorPanel::render_viewport() {
         }
     }
 
-    cleanup_texture_cache();
+    m_grid_textures.cleanup(&m_prefab_registry);
 
     // Draw camera info
     char info[128];
@@ -439,45 +348,7 @@ void PrefabEditorPanel::render_gizmos(ImDrawList* draw_list, ImVec2 vp_pos, ImVe
 // ---------------------------------------------------------------------------
 
 void PrefabEditorPanel::handle_viewport_input() {
-    ImGuiIO& io = ImGui::GetIO();
-
-    // Zoom with scroll wheel
-    if (io.MouseWheel != 0.0f) {
-        float zoom_factor = 1.1f;
-        if (io.MouseWheel > 0) {
-            m_camera.zoom *= zoom_factor;
-        } else {
-            m_camera.zoom /= zoom_factor;
-        }
-        m_camera.zoom = std::clamp(m_camera.zoom, 0.1f, 20.0f);
-    }
-
-    // Pan with middle mouse button
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
-        m_is_panning = true;
-        m_pan_start_x = io.MousePos.x;
-        m_pan_start_y = io.MousePos.y;
-    }
-
-    if (m_is_panning) {
-        if (ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
-            float dx = io.MousePos.x - m_pan_start_x;
-            float dy = io.MousePos.y - m_pan_start_y;
-            m_camera.x -= dx / m_camera.zoom;
-            m_camera.y += dy / m_camera.zoom;
-            m_pan_start_x = io.MousePos.x;
-            m_pan_start_y = io.MousePos.y;
-        } else {
-            m_is_panning = false;
-        }
-    }
-
-    // Reset camera
-    if (ImGui::IsKeyPressed(ImGuiKey_Home)) {
-        m_camera.x = 0.0f;
-        m_camera.y = 0.0f;
-        m_camera.zoom = 2.0f;
-    }
+    m_camera.handle_input();
 }
 
 void PrefabEditorPanel::select_entity_at(float screen_x, float screen_y) {
@@ -588,9 +459,8 @@ bool PrefabEditorPanel::save_prefab_file() {
     // Find the root entity (first entity with EntityInfo)
     entt::entity root = entt::null;
     auto view = m_prefab_registry.view<EntityInfo>();
-    for (auto entity : view) {
-        root = entity;
-        break;
+    if (view.begin() != view.end()) {
+        root = *view.begin();
     }
 
     if (root == entt::null) {
@@ -606,86 +476,6 @@ bool PrefabEditorPanel::save_prefab_file() {
     }
 
     return false;
-}
-
-// ---------------------------------------------------------------------------
-// Texture Cache
-// ---------------------------------------------------------------------------
-
-GLuint PrefabEditorPanel::get_pixel_grid_texture(entt::entity entity, const std::string& path) {
-    if (path.empty()) return 0;
-
-    auto it = m_grid_textures.find(entity);
-    if (it != m_grid_textures.end()) {
-        if (it->second.source_path == path) {
-            return it->second.texture_id;
-        }
-        if (it->second.texture_id) {
-            glDeleteTextures(1, &it->second.texture_id);
-        }
-        m_grid_textures.erase(it);
-    }
-
-    auto pxg_file = engine::asset::pxg_load(path);
-    if (!pxg_file) return 0;
-
-    auto parsed = engine::asset::parse_pxg(*pxg_file);
-    if (parsed.width <= 0 || parsed.height <= 0) return 0;
-
-    std::vector<uint8_t> rgba;
-    if (parsed.has_color_layer && !parsed.color_rgba.empty()) {
-        rgba = std::move(parsed.color_rgba);
-    } else {
-        auto* lib = engine::simulation::MaterialLibraryRegistry::instance().get_library("default");
-        std::vector<uint32_t> palette(256, 0x00000000);
-        if (lib) palette = lib->build_color_palette();
-
-        int pixel_count = parsed.width * parsed.height;
-        rgba.resize(pixel_count * 4);
-        for (int i = 0; i < pixel_count; i++) {
-            uint8_t mat_id = parsed.material_ids.empty() ? 0 : parsed.material_ids[i];
-            if (mat_id == 0) {
-                rgba[i * 4 + 0] = 0; rgba[i * 4 + 1] = 0;
-                rgba[i * 4 + 2] = 0; rgba[i * 4 + 3] = 0;
-            } else {
-                uint32_t color = palette[mat_id];
-                rgba[i * 4 + 0] = (color >> 24) & 0xFF;
-                rgba[i * 4 + 1] = (color >> 16) & 0xFF;
-                rgba[i * 4 + 2] = (color >> 8)  & 0xFF;
-                rgba[i * 4 + 3] = (color >> 0)  & 0xFF;
-            }
-        }
-    }
-
-    GLuint tex = 0;
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, parsed.width, parsed.height, 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    m_grid_textures[entity] = CachedGridTexture{tex, path, parsed.width, parsed.height};
-    return tex;
-}
-
-void PrefabEditorPanel::cleanup_texture_cache() {
-    std::vector<entt::entity> to_remove;
-    for (auto& [entity, cached] : m_grid_textures) {
-        if (!m_prefab_registry.valid(entity) ||
-            !m_prefab_registry.all_of<engine::simulation::PixelGridComponent,
-                                       engine::render::PixelGridRenderer>(entity)) {
-            to_remove.push_back(entity);
-        }
-    }
-    for (auto entity : to_remove) {
-        auto& cached = m_grid_textures[entity];
-        if (cached.texture_id) glDeleteTextures(1, &cached.texture_id);
-        m_grid_textures.erase(entity);
-    }
 }
 
 } // namespace editor

@@ -8,16 +8,21 @@
 namespace engine::particles {
 
 bool ParticleSimulation::init(int grid_width, int grid_height) {
+    if (grid_width <= 0 || grid_height <= 0) {
+        ENGINE_ERR("ParticleSimulation::init() - Invalid grid dimensions (%dx%d)", grid_width, grid_height);
+        return false;
+    }
+
     m_grid_width = grid_width;
     m_grid_height = grid_height;
 
     if (!m_update_shader.load_compute("shaders/particle_update.comp")) {
-        ENGINE_ERR("Failed to load particle update shader");
+        ENGINE_ERR("ParticleSimulation: Failed to load particle_update.comp");
         return false;
     }
 
     if (!m_reintegrate_shader.load_compute("shaders/particle_reintegrate.comp")) {
-        ENGINE_ERR("Failed to load particle reintegrate shader");
+        ENGINE_ERR("ParticleSimulation: Failed to load particle_reintegrate.comp");
         return false;
     }
 

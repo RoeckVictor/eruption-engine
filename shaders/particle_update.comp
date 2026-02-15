@@ -2,15 +2,7 @@
 
 layout(local_size_x = 256) in;
 
-// Must match engine::particles::GpuParticle (32 bytes, std430)
-struct Particle {
-    vec2 pos;           // world pixel position
-    vec2 vel;           // pixels/sec
-    uint material;      // CA material ID
-    float lifetime;     // seconds remaining
-    uint flags;         // 0=dead, 1=alive, 2=reintegrate
-    float _pad;
-};
+#include "include/particle.glsl"
 
 layout(std430, binding = 3) buffer ParticleBuffer {
     Particle particles[];
@@ -34,27 +26,16 @@ uniform int   u_grid_height;
 uniform uint  u_max_particles;
 uniform uint  u_pixel_size;  // bytes per pixel
 
+#include "include/pixel_access.glsl"
+
 // Collision parameters
 const float BOUNCE_FACTOR    = 0.3;
 const float SETTLE_SPEED     = 10.0;  // pixels/sec — below this, particle settles
 const float MAX_SPEED        = 800.0; // pixels/sec clamp
 
-// Load pixel from SSBO and extract material ID (byte 0)
+// Load material ID (byte 0) from pixel at grid position
 uint loadMaterial(int wx, int wy) {
-    uint idx = uint(wy) * uint(u_grid_width) + uint(wx);
-    uint byte_offset = idx * u_pixel_size;
-    uint word_offset = byte_offset / 4u;
-    uint byte_in_word = byte_offset % 4u;
-
-    uint packed = pixels_read[word_offset];
-    if (byte_in_word != 0u) {
-        uint next_word = pixels_read[word_offset + 1u];
-        uint shift_bits = byte_in_word * 8u;
-        packed = (packed >> shift_bits) | (next_word << (32u - shift_bits));
-    }
-
-    // Material is in the first byte (byte 0)
-    return packed & 0xFFu;
+    return readPackedPixel(pixels_read, ivec2(wx, wy)) & 0xFFu;
 }
 
 bool is_solid(int wx, int wy) {
@@ -150,7 +131,9 @@ void main() {
 
             // Bounce
             p.pos = pre_hit_pos;
-            p.vel = reflect(p.vel, normalize(normal)) * BOUNCE_FACTOR;
+            float nlen = length(normal);
+            vec2 safe_normal = nlen > 0.001 ? normal / nlen : vec2(0.0, -1.0);
+            p.vel = reflect(p.vel, safe_normal) * BOUNCE_FACTOR;
 
             // If speed is low enough, settle (reintegrate into grid)
             if (length(p.vel) < SETTLE_SPEED) {

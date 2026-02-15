@@ -2,6 +2,7 @@
 
 #include "Panel.h"
 #include <entt/entt.hpp>
+#include <string>
 
 namespace editor {
 
@@ -21,6 +22,7 @@ private:
 
     EditorContext& m_context;
     char m_filter[128] = "";
+    std::string m_filter_lower;  // Cached lowercase filter, updated once per frame
     entt::entity m_renaming_entity = entt::null;
     char m_rename_buffer[128] = "";
     bool m_focus_rename = false;  // Flag to set focus on next frame

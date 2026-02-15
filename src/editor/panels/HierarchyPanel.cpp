@@ -66,6 +66,11 @@ void HierarchyPanel::render_entity_tree() {
         return;
     }
 
+    // Pre-compute lowercase filter once per frame (used by render_entity_node)
+    m_filter_lower.assign(m_filter);
+    std::transform(m_filter_lower.begin(), m_filter_lower.end(), m_filter_lower.begin(),
+                   [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+
     // Get all root entities (entities without parents)
     auto roots = get_root_entities(*registry);
 
@@ -115,13 +120,12 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth) {
         enabled = info.enabled_in_hierarchy;  // Use effective state (includes parent hierarchy)
     }
 
-    // Apply filter
-    std::string filter_str(m_filter);
-    if (!filter_str.empty()) {
+    // Apply filter (m_filter_lower is pre-computed once per frame in render_entity_tree)
+    if (!m_filter_lower.empty()) {
         std::string name_lower = name;
-        std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
-        std::transform(filter_str.begin(), filter_str.end(), filter_str.begin(), ::tolower);
-        if (name_lower.find(filter_str) == std::string::npos) {
+        std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
+                       [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+        if (name_lower.find(m_filter_lower) == std::string::npos) {
             // Check children too
             if (registry->all_of<Hierarchy>(entity)) {
                 const auto& hierarchy = registry->get<Hierarchy>(entity);
@@ -241,6 +245,7 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth) {
 
     if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ENTITY")) {
+            if (payload->DataSize != sizeof(entt::entity)) { ImGui::EndDragDropTarget(); return; }
             entt::entity dragged = *static_cast<entt::entity*>(payload->Data);
             if (dragged != entity) {
                 set_parent(*registry, dragged, entity);

@@ -71,6 +71,9 @@ struct Rigidbody {
 
     /// Box2D body handle (managed by physics system, not serialized)
     b2BodyId body_id = b2_nullBodyId;
+
+    /// Whether mass override has been applied (reset when body is recreated)
+    bool mass_applied = false;
 };
 
 } // namespace engine::physics

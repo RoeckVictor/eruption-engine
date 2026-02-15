@@ -13,15 +13,21 @@ EditorContext::EditorContext() = default;
 EditorContext::~EditorContext() = default;
 
 bool EditorContext::is_selected(entt::entity entity) const {
-    const auto& sel = m_editing_override.selection ? *m_editing_override.selection : m_selection;
-    return std::find(sel.begin(), sel.end(), entity) != sel.end();
+    if (m_editing_override.selection) {
+        // Override path: no set mirror, fall back to linear search
+        const auto& sel = *m_editing_override.selection;
+        return std::find(sel.begin(), sel.end(), entity) != sel.end();
+    }
+    return m_selection_set.count(entity) > 0;
 }
 
 void EditorContext::select(entt::entity entity) {
     auto& sel = m_editing_override.selection ? *m_editing_override.selection : m_selection;
     sel.clear();
+    if (!m_editing_override.selection) m_selection_set.clear();
     if (entity != entt::null) {
         sel.push_back(entity);
+        if (!m_editing_override.selection) m_selection_set.insert(entity);
     }
     notify_selection_changed();
 }
@@ -30,6 +36,7 @@ void EditorContext::add_to_selection(entt::entity entity) {
     auto& sel = m_editing_override.selection ? *m_editing_override.selection : m_selection;
     if (entity != entt::null && !is_selected(entity)) {
         sel.push_back(entity);
+        if (!m_editing_override.selection) m_selection_set.insert(entity);
         notify_selection_changed();
     }
 }
@@ -39,6 +46,7 @@ void EditorContext::remove_from_selection(entt::entity entity) {
     auto it = std::find(sel.begin(), sel.end(), entity);
     if (it != sel.end()) {
         sel.erase(it);
+        if (!m_editing_override.selection) m_selection_set.erase(entity);
         notify_selection_changed();
     }
 }
@@ -47,6 +55,7 @@ void EditorContext::clear_selection() {
     auto& sel = m_editing_override.selection ? *m_editing_override.selection : m_selection;
     if (!sel.empty()) {
         sel.clear();
+        if (!m_editing_override.selection) m_selection_set.clear();
         notify_selection_changed();
     }
 }
@@ -59,6 +68,10 @@ void EditorContext::select_multiple(const std::vector<entt::entity>& entities) {
         std::remove(sel.begin(), sel.end(), entt::null),
         sel.end()
     );
+    if (!m_editing_override.selection) {
+        m_selection_set.clear();
+        m_selection_set.insert(sel.begin(), sel.end());
+    }
     notify_selection_changed();
 }
 
@@ -147,37 +160,8 @@ void EditorContext::paste() {
         return;
     }
 
-    try {
-        nlohmann::json json = nlohmann::json::parse(m_clipboard);
-        SceneSerializer serializer(*reg);
-        auto new_entities = serializer.deserialize_entities(json);
-
-        if (!new_entities.empty()) {
-            // Offset pasted entities slightly so they don't overlap with originals
-            for (auto entity : new_entities) {
-                if (reg->all_of<engine::Transform>(entity)) {
-                    auto& transform = reg->get<engine::Transform>(entity);
-                    transform.x += 20.0f;
-                    transform.y += 20.0f;
-                }
-
-                // Generate new GUIDs for pasted entities
-                if (reg->all_of<EntityInfo>(entity)) {
-                    auto& info = reg->get<EntityInfo>(entity);
-                    // Simple GUID: timestamp + random
-                    info.guid = "pasted_" + std::to_string(reinterpret_cast<uintptr_t>(&entity));
-                }
-            }
-
-            // Select the newly pasted entities
-            select_multiple(new_entities);
-            mark_dirty();
-
-            engine::Logger::instance().info("Editor", "Pasted %zu entities", new_entities.size());
-        }
-    } catch (const std::exception& e) {
-        engine::Logger::instance().error("Editor", "Failed to paste: %s", e.what());
-    }
+    auto cmd = std::make_unique<PasteEntitiesCommand>(reg, this, m_clipboard);
+    execute_command(std::move(cmd));
 }
 
 void EditorContext::set_component_clipboard(const std::string& data, std::type_index type) {
@@ -193,10 +177,7 @@ void EditorContext::duplicate_selection() {
         return;
     }
 
-    // Copy current selection
     copy_selection();
-
-    // Paste immediately
     paste();
 }
 
@@ -242,4 +223,4 @@ float EditorContext::snap_to_grid(float value) const {
     return std::round(value / m_grid_size) * m_grid_size;
 }
 
-} // namespace editor
+}

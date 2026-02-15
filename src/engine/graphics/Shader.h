@@ -29,7 +29,12 @@ public:
     void set_int(const char* name, int value) const;
     void set_uint(const char* name, uint32_t value) const;
     void set_float(const char* name, float value) const;
+    void set_bool(const char* name, bool value) const;
     void set_vec2(const char* name, float x, float y) const;
+    void set_vec3(const char* name, float x, float y, float z) const;
+    void set_vec4(const char* name, float x, float y, float z, float w) const;
+    void set_mat3(const char* name, const float* value, bool transpose = false) const;
+    void set_mat4(const char* name, const float* value, bool transpose = false) const;
 
     uint32_t handle() const { return m_program; }
     bool valid() const { return m_program != 0; }

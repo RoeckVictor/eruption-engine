@@ -3,6 +3,7 @@
 #include "Document.h"
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <queue>
 #include <utility>
 #include <vector>
@@ -96,20 +97,26 @@ public:
 
     /// Apply bucket fill at a point.
     void apply_bucket(Document& doc, int layer_idx, int px, int py) {
+        apply_bucket(doc, layer_idx, px, py, [](int, int) {});
+    }
+
+    /// Apply bucket fill at a point, calling pre_pixel(x, y) before each pixel is modified.
+    template<typename Func>
+    void apply_bucket(Document& doc, int layer_idx, int px, int py, Func&& pre_pixel) {
         if (!doc.valid()) return;
         if (layer_idx < 0 || layer_idx >= doc.layer_count()) return;
+        if (px < 0 || px >= doc.width() || py < 0 || py >= doc.height()) return;
 
         auto& layer = doc.layer(layer_idx);
         int ch = layer.channels;
         int w = doc.width();
         int h = doc.height();
 
-        // Get the target color/value at click position
-        std::vector<uint8_t> target(ch);
-        doc.get_pixel(layer_idx, px, py, target.data());
+        // Stack-allocated buffers (max 4 channels for Color type)
+        uint8_t target[4] = {};
+        uint8_t fill[4] = {};
+        doc.get_pixel(layer_idx, px, py, target);
 
-        // Get the fill color/value
-        std::vector<uint8_t> fill(ch);
         if (layer.type == LayerType::Color) {
             fill[0] = static_cast<uint8_t>(draw_state.color[0] * 255.0f);
             fill[1] = static_cast<uint8_t>(draw_state.color[1] * 255.0f);
@@ -122,7 +129,7 @@ public:
         }
 
         // Don't fill if target == fill
-        if (target == fill) return;
+        if (std::memcmp(target, fill, ch) == 0) return;
 
         // BFS flood fill (4-connectivity)
         std::vector<bool> visited(static_cast<size_t>(w) * h, false);
@@ -134,7 +141,8 @@ public:
             auto [cx, cy] = queue.front();
             queue.pop();
 
-            doc.set_pixel(layer_idx, cx, cy, fill.data());
+            pre_pixel(cx, cy);
+            doc.set_pixel(layer_idx, cx, cy, fill);
 
             const int dx[] = {0, 0, -1, 1};
             const int dy[] = {-1, 1, 0, 0};
@@ -144,9 +152,9 @@ public:
                 if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
                 if (visited[ny * w + nx]) continue;
 
-                std::vector<uint8_t> neighbor(ch);
-                doc.get_pixel(layer_idx, nx, ny, neighbor.data());
-                if (neighbor == target) {
+                uint8_t neighbor[4] = {};
+                doc.get_pixel(layer_idx, nx, ny, neighbor);
+                if (std::memcmp(neighbor, target, ch) == 0) {
                     visited[ny * w + nx] = true;
                     queue.push({nx, ny});
                 }

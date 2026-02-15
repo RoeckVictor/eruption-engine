@@ -2,6 +2,7 @@
 #include "engine/core/Error.h"
 #include "engine/core/Log.h"
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 
@@ -76,22 +77,50 @@ Result<EngineConfig, ErrorInfo> EngineConfig::load_from_json(const std::string& 
         if (assets.contains("hot_reload_poll_interval")) config.hot_reload_poll_interval = assets["hot_reload_poll_interval"].get<double>();
     }
 
-    // Validate critical values
-    if (config.fixed_timestep <= 0.0) {
-        ENGINE_ERR("Invalid fixed_timestep (%f) in config, using default", config.fixed_timestep);
-        config.fixed_timestep = defaults().fixed_timestep;
-    }
-    if (config.max_fixed_steps <= 0) {
-        ENGINE_ERR("Invalid max_fixed_steps (%d) in config, using default", config.max_fixed_steps);
-        config.max_fixed_steps = defaults().max_fixed_steps;
-    }
+    // Validate all numeric fields
+    auto def = defaults();
+
+    auto validate_positive_double = [&](double& val, double fallback, const char* name) {
+        if (val <= 0.0) {
+            ENGINE_ERR("Invalid %s (%f) in config, using default", name, val);
+            val = fallback;
+        }
+    };
+    auto validate_positive_int = [&](int& val, int fallback, const char* name) {
+        if (val <= 0) {
+            ENGINE_ERR("Invalid %s (%d) in config, using default", name, val);
+            val = fallback;
+        }
+    };
+    auto validate_float_range = [&](float& val, float lo, float hi, float fallback, const char* name) {
+        if (val < lo || val > hi) {
+            ENGINE_ERR("Invalid %s (%f) in config, clamping to [%f, %f]", name, val, lo, hi);
+            val = std::clamp(val, lo, hi);
+        }
+    };
+
+    validate_positive_double(config.fixed_timestep, def.fixed_timestep, "fixed_timestep");
+    validate_positive_double(config.max_delta_time, def.max_delta_time, "max_delta_time");
+    validate_positive_int(config.max_fixed_steps, def.max_fixed_steps, "max_fixed_steps");
+    validate_positive_int(config.physics_substeps, def.physics_substeps, "physics_substeps");
+    validate_positive_int(config.terrain_chunk_size, def.terrain_chunk_size, "terrain_chunk_size");
+    validate_positive_int(config.min_body_pixels, def.min_body_pixels, "min_body_pixels");
+    validate_positive_int(config.max_material_slots, def.max_material_slots, "max_material_slots");
+    validate_positive_int(config.sim_workgroup_size, def.sim_workgroup_size, "sim_workgroup_size");
+    validate_positive_int(config.max_scene_stack_depth, def.max_scene_stack_depth, "max_scene_stack_depth");
+
     if (config.pixels_per_meter <= 0.0f) {
         ENGINE_ERR("Invalid pixels_per_meter (%f) in config, using default", config.pixels_per_meter);
-        config.pixels_per_meter = defaults().pixels_per_meter;
+        config.pixels_per_meter = def.pixels_per_meter;
     }
-    if (config.physics_substeps <= 0) {
-        ENGINE_ERR("Invalid physics_substeps (%d) in config, using default", config.physics_substeps);
-        config.physics_substeps = defaults().physics_substeps;
+
+    validate_float_range(config.clear_color_r, 0.0f, 1.0f, def.clear_color_r, "clear_color_r");
+    validate_float_range(config.clear_color_g, 0.0f, 1.0f, def.clear_color_g, "clear_color_g");
+    validate_float_range(config.clear_color_b, 0.0f, 1.0f, def.clear_color_b, "clear_color_b");
+
+    if (config.hot_reload_poll_interval < 0.0) {
+        ENGINE_ERR("Invalid hot_reload_poll_interval (%f) in config, using default", config.hot_reload_poll_interval);
+        config.hot_reload_poll_interval = def.hot_reload_poll_interval;
     }
 
     ENGINE_LOG("Loaded engine config from '%s'", file_path.c_str());

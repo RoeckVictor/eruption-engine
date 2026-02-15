@@ -1,9 +1,10 @@
 #include "EntityCommands.h"
 #include "editor/core/EditorContext.h"
+#include "editor/serialization/SceneSerializer.h"
+#include "engine/core/Logger.h"
+#include <atomic>
 
 namespace editor {
-
-// --- AddEntityCommand ---
 
 void AddEntityCommand::execute() {
     if (!m_registry) return;
@@ -37,11 +38,8 @@ void AddEntityCommand::undo() {
         m_context->remove_from_selection(m_entity);
     }
 
-    // Destroy the entity
     destroy_entity_recursive(*m_registry, m_entity);
 }
-
-// --- DeleteEntityCommand ---
 
 void DeleteEntityCommand::execute() {
     if (!m_registry || m_entity == entt::null || !m_registry->valid(m_entity)) return;
@@ -65,7 +63,6 @@ void DeleteEntityCommand::execute() {
 
     store_entity_recursive(m_entity, parent);
 
-    // Now delete
     destroy_entity_recursive(*m_registry, m_entity);
 }
 
@@ -94,7 +91,6 @@ void DeleteEntityCommand::undo() {
     for (const auto& stored : m_stored_entities) {
         entt::entity new_entity = old_to_new[stored.entity];
 
-        // Set parent
         if (stored.parent != entt::null) {
             auto it = old_to_new.find(stored.parent);
             if (it != old_to_new.end()) {
@@ -153,10 +149,57 @@ void DeleteEntityCommand::store_entity_recursive(entt::entity entity, entt::enti
     }
 }
 
-entt::entity DeleteEntityCommand::restore_entity(const StoredEntity& stored) {
-    // This method is not used in current implementation
-    // Keeping for potential future use
-    return entt::null;
+void PasteEntitiesCommand::execute() {
+    if (!m_registry || m_clipboard_data.empty()) return;
+
+    try {
+        nlohmann::json json = nlohmann::json::parse(m_clipboard_data);
+        SceneSerializer serializer(*m_registry);
+        m_pasted_entities = serializer.deserialize_entities(json);
+
+        for (auto entity : m_pasted_entities) {
+            if (m_registry->all_of<engine::Transform>(entity)) {
+                auto& transform = m_registry->get<engine::Transform>(entity);
+                transform.x += 20.0f;
+                transform.y += 20.0f;
+            }
+
+            // Generate new GUIDs for pasted entities
+            if (m_registry->all_of<EntityInfo>(entity)) {
+                auto& info = m_registry->get<EntityInfo>(entity);
+                static std::atomic<uint64_t> s_guid_counter{0};
+                info.guid = "e_" + std::to_string(++s_guid_counter);
+            }
+        }
+
+        // Save previous selection for undo, then select pasted entities
+        if (m_context) {
+            m_previous_selection = std::vector<entt::entity>(
+                m_context->selection().begin(), m_context->selection().end());
+            m_context->select_multiple(m_pasted_entities);
+        }
+
+        engine::Logger::instance().info("Editor", "Pasted %zu entities", m_pasted_entities.size());
+    } catch (const std::exception& e) {
+        engine::Logger::instance().error("Editor", "Failed to paste: %s", e.what());
+    }
 }
 
-} // namespace editor
+void PasteEntitiesCommand::undo() {
+    if (!m_registry) return;
+
+    // Destroy all pasted entities
+    for (auto entity : m_pasted_entities) {
+        if (m_registry->valid(entity)) {
+            destroy_entity_recursive(*m_registry, entity);
+        }
+    }
+    m_pasted_entities.clear();
+
+    // Restore previous selection
+    if (m_context) {
+        m_context->select_multiple(m_previous_selection);
+    }
+}
+
+}

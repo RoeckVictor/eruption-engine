@@ -107,7 +107,7 @@ void AssetPreviewPanel::set_asset(const std::string& path) {
     // Determine asset type by extension
     fs::path file_path(path);
     std::string ext = file_path.extension().string();
-    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
 
     if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga") {
         m_asset_type = "texture";

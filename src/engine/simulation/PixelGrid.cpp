@@ -40,7 +40,6 @@ bool PixelGrid::init(int width, int height, size_t pixel_size) {
 
     // Load the SSBO-to-texture copy shader
     if (!m_copy_shader.load_compute("shaders/ssbo_to_texture.comp")) {
-        ENGINE_ERR("Failed to load SSBO-to-texture copy shader");
         return false;
     }
 

@@ -3,8 +3,6 @@
 layout(local_size_x = 16, local_size_y = 16) in;
 
 // Pixel data SSBOs (ping-pong arrangement)
-// Each pixel is stored as contiguous bytes: [material, category, temperature, flags, ...]
-// For basic 4-byte pixels, we can pack/unpack to uint
 layout(std430, binding = 0) readonly buffer PixelBufferRead {
     uint pixels_read[];
 };
@@ -14,10 +12,6 @@ layout(std430, binding = 1) writeonly buffer PixelBufferWrite {
 };
 
 // Material properties SSBO - 2 uints per material
-// Engine packing: Word 0 = density(8) | category(4) | user_data_low(20)
-//                 Word 1 = user_data_high(32)
-// Game packing:   user_data_low  = melt_point(8) | melt_into(8) | (unused 4)
-//                 user_data_high = boil_point(8) | boil_into(8) | default_temp(8) | flags(8)
 layout(std430, binding = 2) readonly buffer MaterialTable {
     uint mat_props[512];
 };
@@ -34,72 +28,28 @@ uniform uint u_mat_lava;
 uniform uint u_mat_ice;
 uniform uint u_mat_steam;
 
-// ---- Property accessors (2 uints per entry) ----
-uint getDensity(uint id)     { return (mat_props[id * 2u] >>  0) & 0xFFu; }
-uint getCategory(uint id)    { return (mat_props[id * 2u] >>  8) & 0x0Fu; }
-uint getMeltPoint(uint id)   { return (mat_props[id * 2u] >> 12) & 0xFFu; }
-uint getMeltInto(uint id)    { return (mat_props[id * 2u] >> 20) & 0xFFu; }
-uint getBoilPoint(uint id)   { return (mat_props[id * 2u + 1u] >>  0) & 0xFFu; }
-uint getBoilInto(uint id)    { return (mat_props[id * 2u + 1u] >>  8) & 0xFFu; }
-uint getDefaultTemp(uint id) { return (mat_props[id * 2u + 1u] >> 16) & 0xFFu; }
-uint getFlags(uint id)       { return (mat_props[id * 2u + 1u] >> 24) & 0xFFu; }
+#include "include/pixel_access.glsl"
+#include "include/material_props.glsl"
 
-const uint CAT_EMPTY  = 0u;
-const uint CAT_STATIC = 1u;
-const uint CAT_POWDER = 2u;
-const uint CAT_LIQUID = 3u;
-const uint CAT_GAS    = 4u;
-
-// Pack pixel fields into uvec4 for shader manipulation
-// r=material, g=category, b=temperature, a=flags
-uvec4 unpackPixel(uint packed) {
-    return uvec4(
-        (packed >>  0) & 0xFFu,
-        (packed >>  8) & 0xFFu,
-        (packed >> 16) & 0xFFu,
-        (packed >> 24) & 0xFFu
-    );
-}
-
-uint packPixel(uvec4 p) {
-    return (p.r & 0xFFu) | ((p.g & 0xFFu) << 8) | ((p.b & 0xFFu) << 16) | ((p.a & 0xFFu) << 24);
-}
-
-// Load pixel from SSBO at grid position
+// Load pixel from read SSBO at grid position
 uvec4 loadPixel(ivec2 pos) {
-    uint idx = uint(pos.y) * uint(u_grid_width) + uint(pos.x);
-    // For pixel_size > 4, we only read the first 4 bytes (core engine data)
-    uint byte_offset = idx * u_pixel_size;
-    uint word_offset = byte_offset / 4u;
-    uint byte_in_word = byte_offset % 4u;
-
-    uint packed = pixels_read[word_offset];
-    if (byte_in_word != 0u) {
-        uint next_word = pixels_read[word_offset + 1u];
-        uint shift_bits = byte_in_word * 8u;
-        packed = (packed >> shift_bits) | (next_word << (32u - shift_bits));
-    }
-    return unpackPixel(packed);
+    return unpackPixel(readPackedPixel(pixels_read, pos));
 }
 
-// Store pixel to SSBO at grid position
+// Store pixel to write SSBO at grid position.
+// SAFETY: The Margolus scheme guarantees each 2x2 block is processed by exactly
+// one invocation with no overlap, so concurrent writes to different positions
+// are safe without atomics for the aligned 4-byte case.
 void storePixel(ivec2 pos, uvec4 pixel) {
     uint idx = uint(pos.y) * uint(u_grid_width) + uint(pos.x);
     uint byte_offset = idx * u_pixel_size;
     uint word_offset = byte_offset / 4u;
-    uint byte_in_word = byte_offset % 4u;
 
     uint packed = packPixel(pixel);
 
-    if (byte_in_word == 0u && u_pixel_size == 4u) {
-        // Aligned 4-byte pixel: simple write
-        pixels_write[word_offset] = packed;
-    } else {
-        // Misaligned or larger pixel: need atomic read-modify-write
-        // For now, assume aligned 4-byte pixels (common case)
-        // TODO: Handle misaligned/larger pixels with atomics if needed
-        pixels_write[word_offset] = packed;
-    }
+    // Only the aligned 4-byte path is supported. The engine always uses
+    // u_pixel_size == 4, so this is the only active code path.
+    pixels_write[word_offset] = packed;
 }
 
 // Helper to update material and sync category in G channel
@@ -113,10 +63,6 @@ uint hash(uvec3 v) {
     h = (h ^ (h >> 16)) * 0x45d9f3bu;
     h = (h ^ (h >> 16)) * 0x45d9f3bu;
     return h ^ (h >> 16);
-}
-
-bool isMobile(uint cat) {
-    return cat == CAT_POWDER || cat == CAT_LIQUID || cat == CAT_GAS;
 }
 
 // ---- Direct contact reaction for specific material pairs ----

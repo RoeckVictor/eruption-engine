@@ -73,6 +73,7 @@ private:
 
     DLLHandle m_handle = nullptr;
     std::string m_dll_path;
+    std::string m_temp_path;  // Path to temp DLL copy (Windows only)
     std::string m_last_error;
 
     std::vector<ScriptTypeInfo> m_script_types;

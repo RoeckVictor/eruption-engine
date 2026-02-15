@@ -10,6 +10,14 @@ namespace engine {
 /// Result type for error handling (similar to Rust's Result or C++23's std::expected).
 /// Holds either a success value of type T or an error of type E.
 ///
+/// Error handling convention:
+///   - Use Result<T, ErrorInfo> when callers need structured error details
+///     (file I/O, parsing, scene loading, config). Examples: VFS, SceneSerializer.
+///   - Use bool + internal ENGINE_ERR for init-time operations where pass/fail
+///     is sufficient (shader loading, texture creation, renderer init).
+///   - Leaf functions (Shader, Texture) own detailed error logging via ENGINE_ERR.
+///     Callers check the bool return and propagate, but do NOT re-log.
+///
 /// Usage:
 ///   Result<int, EngineError> divide(int a, int b) {
 ///       if (b == 0) return Err(EngineError::InvalidArgument);
@@ -96,19 +104,19 @@ public:
     }
 
     /// Unwrap the value (for use when you know it's Ok).
-    /// Throws std::runtime_error if called on an Err value.
+    /// Throws std::runtime_error with error details if called on an Err value.
     T& unwrap() & {
         if (is_err()) {
-            throw std::runtime_error("Called unwrap() on an Err value");
+            throw std::runtime_error("Called unwrap() on Err: " + error().full_message());
         }
         return value();
     }
 
     /// Unwrap the value (for use when you know it's Ok).
-    /// Throws std::runtime_error if called on an Err value.
+    /// Throws std::runtime_error with error details if called on an Err value.
     T&& unwrap() && {
         if (is_err()) {
-            throw std::runtime_error("Called unwrap() on an Err value");
+            throw std::runtime_error("Called unwrap() on Err: " + error().full_message());
         }
         return std::move(value());
     }

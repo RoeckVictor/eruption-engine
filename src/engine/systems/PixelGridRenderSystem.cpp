@@ -12,6 +12,7 @@
 #include "editor/core/EditorComponents.h"
 #include <glad/gl.h>
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace engine {
@@ -24,7 +25,6 @@ bool PixelGridRenderSystem::init(Engine& engine) {
     // Load shaders
     if (!m_sprite_shader.load_graphics("shaders/textured_sprite.vert",
                                         "shaders/pixel_grid_sprite.frag")) {
-        Logger::instance().error("PixelGridRender", "Failed to load pixel grid sprite shaders");
         return false;
     }
 
@@ -61,6 +61,9 @@ bool PixelGridRenderSystem::init(Engine& engine) {
     glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(4 * sizeof(float)));
 
     glBindVertexArray(0);
+
+    // Cache material library pointer for legacy palette fallback
+    m_material_lib = simulation::MaterialLibraryRegistry::instance().get_library("default");
 
     Logger::instance().info("PixelGridRender", "PixelGridRenderSystem initialized");
     return true;
@@ -110,17 +113,18 @@ void PixelGridRenderSystem::ensure_texture_for_entity(entt::entity entity, const
 
     if (grid_data->has_color_layer && !grid_data->color_rgba.empty()) {
         // New format: direct RGBA color from the .pxg color layer
-        texture.create_2d(grid_data->width, grid_data->height,
-                          graphics::TextureFormat::RGBA8,
-                          graphics::TextureFilter::Nearest,
-                          graphics::TextureWrap::ClampToEdge,
-                          grid_data->color_rgba.data());
+        if (!texture.create_2d(grid_data->width, grid_data->height,
+                               graphics::TextureFormat::RGBA8,
+                               graphics::TextureFilter::Nearest,
+                               graphics::TextureWrap::ClampToEdge,
+                               grid_data->color_rgba.data())) {
+            return;
+        }
     } else {
         // Legacy fallback: build RGBA from material palette
-        auto* lib = simulation::MaterialLibraryRegistry::instance().get_library("default");
         std::vector<uint32_t> palette(256, 0);
-        if (lib) {
-            palette = lib->build_color_palette();
+        if (m_material_lib) {
+            palette = m_material_lib->build_color_palette();
         }
 
         int pixel_count = grid_data->width * grid_data->height;
@@ -141,11 +145,13 @@ void PixelGridRenderSystem::ensure_texture_for_entity(entt::entity entity, const
             }
         }
 
-        texture.create_2d(grid_data->width, grid_data->height,
-                          graphics::TextureFormat::RGBA8,
-                          graphics::TextureFilter::Nearest,
-                          graphics::TextureWrap::ClampToEdge,
-                          rgba.data());
+        if (!texture.create_2d(grid_data->width, grid_data->height,
+                               graphics::TextureFormat::RGBA8,
+                               graphics::TextureFilter::Nearest,
+                               graphics::TextureWrap::ClampToEdge,
+                               rgba.data())) {
+            return;
+        }
     }
 
     m_cached_textures[entity] = std::move(texture);
@@ -154,8 +160,29 @@ void PixelGridRenderSystem::ensure_texture_for_entity(entt::entity entity, const
                             grid_data->has_color_layer ? "direct" : "palette");
 }
 
+void PixelGridRenderSystem::purge_stale_textures() {
+    for (auto it = m_cached_textures.begin(); it != m_cached_textures.end(); ) {
+        if (!m_registry || !m_registry->valid(it->first)) {
+            it->second.destroy();
+            it = m_cached_textures.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto it = m_texture_overrides.begin(); it != m_texture_overrides.end(); ) {
+        if (!m_registry || !m_registry->valid(it->first)) {
+            it = m_texture_overrides.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 void PixelGridRenderSystem::render(Engine& engine) {
     auto& window = engine.window();
+
+    // Clean up textures for destroyed entities
+    purge_stale_textures();
 
     // Collect all renderable entities
     struct RenderItem {
@@ -213,36 +240,66 @@ void PixelGridRenderSystem::render(Engine& engine) {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     for (const auto& item : items) {
-        // Get cached texture
-        auto it = m_cached_textures.find(item.entity);
-        if (it == m_cached_textures.end()) {
-            continue;
+        // Check for texture override (e.g. live simulation texture)
+        auto override_it = m_texture_overrides.find(item.entity);
+        if (override_it != m_texture_overrides.end()) {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, override_it->second);
+        } else {
+            // Get cached texture from loader
+            auto it = m_cached_textures.find(item.entity);
+            if (it == m_cached_textures.end()) {
+                continue;
+            }
+            it->second.bind(0);
         }
-
-        it->second.bind(0);
 
         // Set per-sprite uniforms
         m_sprite_shader.set_float("u_opacity", item.renderer->opacity);
-        glUniform4f(glGetUniformLocation(m_sprite_shader.handle(), "u_tint"),
+        m_sprite_shader.set_vec4("u_tint",
                     item.renderer->tint_r, item.renderer->tint_g,
                     item.renderer->tint_b, item.renderer->tint_a);
 
-        // Update quad vertices to match entity position and size
-        float x = item.transform->x;
-        float y = item.transform->y;
-        float w = static_cast<float>(item.grid_comp->width);
-        float h = static_cast<float>(item.grid_comp->height);
+        // Compute world-space quad corners with origin, scale, and rotation
+        constexpr float DEFAULT_GRID_SIZE = 32.0f;
+        constexpr float DEG_TO_RAD = 3.14159265358979323846f / 180.0f;
+        float w = item.grid_comp->width > 0 ? static_cast<float>(item.grid_comp->width) : DEFAULT_GRID_SIZE;
+        float h = item.grid_comp->height > 0 ? static_cast<float>(item.grid_comp->height) : DEFAULT_GRID_SIZE;
+        float ox = static_cast<float>(item.grid_comp->origin_x);
+        float oy = static_cast<float>(item.grid_comp->origin_y);
+        float sx = item.transform->world_scale_x;
+        float sy = item.transform->world_scale_y;
+        float rot_rad = item.transform->world_rotation * DEG_TO_RAD;
+        float cos_r = std::cos(rot_rad);
+        float sin_r = std::sin(rot_rad);
 
-        // Update VBO with transformed quad
+        // Local-space corners (origin-adjusted, scaled)
+        float lx0 = -ox * sx,       ly0 = (h - oy) * sy;
+        float lx1 = (w - ox) * sx,  ly1 = (h - oy) * sy;
+        float lx2 = (w - ox) * sx,  ly2 = -oy * sy;
+        float lx3 = -ox * sx,       ly3 = -oy * sy;
+
+        // Rotate and translate to world position
+        auto to_world = [&](float lx, float ly, float& wx, float& wy) {
+            wx = item.transform->world_x + lx * cos_r - ly * sin_r;
+            wy = item.transform->world_y + lx * sin_r + ly * cos_r;
+        };
+
+        float p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y;
+        to_world(lx0, ly0, p0x, p0y);  // top-left
+        to_world(lx1, ly1, p1x, p1y);  // top-right
+        to_world(lx2, ly2, p2x, p2y);  // bottom-right
+        to_world(lx3, ly3, p3x, p3y);  // bottom-left
+
         float quad_vertices[] = {
-            // pos         // uv       // color
-            x,     y,     0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f,  // Bottom-left
-            x + w, y,     1.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f,  // Bottom-right
-            x + w, y + h, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,  // Top-right
+            // pos          // uv       // color
+            p0x, p0y,      0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+            p1x, p1y,      1.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+            p2x, p2y,      1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
 
-            x,     y,     0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f,  // Bottom-left
-            x + w, y + h, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,  // Top-right
-            x,     y + h, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f   // Top-left
+            p0x, p0y,      0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+            p2x, p2y,      1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+            p3x, p3y,      0.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
         };
 
         glBindBuffer(GL_ARRAY_BUFFER, m_quad_vbo);

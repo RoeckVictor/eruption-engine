@@ -16,6 +16,8 @@ TexturedSpriteRenderer::TexturedSpriteRenderer(TexturedSpriteRenderer&& other) n
     , m_ebo(other.m_ebo)
     , m_vertices(std::move(other.m_vertices))
     , m_indices(std::move(other.m_indices))
+    , m_vbo_capacity(other.m_vbo_capacity)
+    , m_ebo_capacity(other.m_ebo_capacity)
     , m_cam_x(other.m_cam_x)
     , m_cam_y(other.m_cam_y)
     , m_zoom(other.m_zoom)
@@ -26,6 +28,8 @@ TexturedSpriteRenderer::TexturedSpriteRenderer(TexturedSpriteRenderer&& other) n
     other.m_vao = 0;
     other.m_vbo = 0;
     other.m_ebo = 0;
+    other.m_vbo_capacity = 0;
+    other.m_ebo_capacity = 0;
     other.m_bound_texture = nullptr;
 }
 
@@ -38,6 +42,8 @@ TexturedSpriteRenderer& TexturedSpriteRenderer::operator=(TexturedSpriteRenderer
         m_ebo = other.m_ebo;
         m_vertices = std::move(other.m_vertices);
         m_indices = std::move(other.m_indices);
+        m_vbo_capacity = other.m_vbo_capacity;
+        m_ebo_capacity = other.m_ebo_capacity;
         m_cam_x = other.m_cam_x;
         m_cam_y = other.m_cam_y;
         m_zoom = other.m_zoom;
@@ -47,6 +53,8 @@ TexturedSpriteRenderer& TexturedSpriteRenderer::operator=(TexturedSpriteRenderer
         other.m_vao = 0;
         other.m_vbo = 0;
         other.m_ebo = 0;
+        other.m_vbo_capacity = 0;
+        other.m_ebo_capacity = 0;
         other.m_bound_texture = nullptr;
     }
     return *this;
@@ -54,7 +62,6 @@ TexturedSpriteRenderer& TexturedSpriteRenderer::operator=(TexturedSpriteRenderer
 
 bool TexturedSpriteRenderer::init(const char* vert_path, const char* frag_path) {
     if (!m_shader.load_graphics(vert_path, frag_path)) {
-        ENGINE_ERR("Failed to load textured sprite shaders");
         return false;
     }
 
@@ -91,6 +98,8 @@ void TexturedSpriteRenderer::shutdown() {
     if (m_ebo) { glDeleteBuffers(1, &m_ebo); m_ebo = 0; }
     if (m_vbo) { glDeleteBuffers(1, &m_vbo); m_vbo = 0; }
     if (m_vao) { glDeleteVertexArrays(1, &m_vao); m_vao = 0; }
+    m_vbo_capacity = 0;
+    m_ebo_capacity = 0;
     m_shader.destroy();
 }
 
@@ -140,15 +149,28 @@ void TexturedSpriteRenderer::end() {
 
     glBindVertexArray(m_vao);
 
+    size_t vbo_size = m_vertices.size() * sizeof(Vertex);
+    size_t ebo_size = m_indices.size() * sizeof(uint32_t);
+
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER,
-                 static_cast<GLsizeiptr>(m_vertices.size() * sizeof(Vertex)),
-                 m_vertices.data(), GL_DYNAMIC_DRAW);
+    if (vbo_size > m_vbo_capacity) {
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vbo_size),
+                     m_vertices.data(), GL_DYNAMIC_DRAW);
+        m_vbo_capacity = vbo_size;
+    } else {
+        glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vbo_size),
+                        m_vertices.data());
+    }
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                 static_cast<GLsizeiptr>(m_indices.size() * sizeof(uint32_t)),
-                 m_indices.data(), GL_DYNAMIC_DRAW);
+    if (ebo_size > m_ebo_capacity) {
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(ebo_size),
+                     m_indices.data(), GL_DYNAMIC_DRAW);
+        m_ebo_capacity = ebo_size;
+    } else {
+        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(ebo_size),
+                        m_indices.data());
+    }
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -157,6 +179,7 @@ void TexturedSpriteRenderer::end() {
                    GL_UNSIGNED_INT, nullptr);
 
     glDisable(GL_BLEND);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
 
     m_bound_texture = nullptr;

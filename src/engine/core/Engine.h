@@ -11,7 +11,8 @@
 #include "engine/scene/SceneManager.h"
 #include "engine/core/Logger.h"
 #include <any>
-#include <cstdlib>
+#include <optional>
+#include <stdexcept>
 
 namespace engine {
 
@@ -66,10 +67,16 @@ public:
     T& app_context() const {
         auto* ptr = std::any_cast<T*>(&m_app_ctx);
         if (!ptr || !*ptr) {
-            Logger::instance().error("Engine", "App context not set or type mismatch — aborting");
-            std::abort();
+            throw std::runtime_error("Engine::app_context<T>() - context not set or type mismatch");
         }
         return **ptr;
+    }
+
+    /// Try to get the app context, returning nullptr if not set or wrong type.
+    template<typename T>
+    T* try_app_context() const {
+        auto* ptr = std::any_cast<T*>(&m_app_ctx);
+        return (ptr && *ptr) ? *ptr : nullptr;
     }
 
     /// Set the framebuffer clear color (called before render systems each frame).

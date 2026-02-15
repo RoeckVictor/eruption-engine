@@ -21,9 +21,17 @@ namespace runtime {
 struct Vec2 { float x, y; };
 
 /// Shared API struct passed from host (editor EXE) to scripts.
-/// Contains per-frame state values and function pointers for host-side services.
-/// One instance is created by RuntimeContext and shared by all scripts.
+/// Contains per-frame state values, host context pointers, and function pointers
+/// for host-side services.  One instance is created by RuntimeContext and shared
+/// by all scripts.
+///
+/// Every callback receives a pointer back to this struct so it can recover the
+/// host context (Engine, RuntimeContext) without relying on global state.
 struct ScriptHostAPI {
+    // --- Host Context (opaque pointers set by RuntimeContext) ---
+    void* engine_ctx  = nullptr;  // engine::Engine*
+    void* runtime_ctx = nullptr;  // editor::RuntimeContext*
+
     // --- Frame State (updated by host each frame) ---
     float delta_time = 0.0f;
     float fixed_delta_time = 1.0f / 60.0f;
@@ -31,38 +39,38 @@ struct ScriptHostAPI {
     uint64_t frame_count = 0;
 
     // --- Input ---
-    bool (*is_key_held)(int key) = nullptr;
-    bool (*is_key_pressed)(int key) = nullptr;
-    bool (*is_key_released)(int key) = nullptr;
-    bool (*is_mouse_held)(int button) = nullptr;
-    bool (*is_mouse_pressed)(int button) = nullptr;
-    double (*get_mouse_x)() = nullptr;
-    double (*get_mouse_y)() = nullptr;
+    bool (*is_key_held)(ScriptHostAPI*, int key) = nullptr;
+    bool (*is_key_pressed)(ScriptHostAPI*, int key) = nullptr;
+    bool (*is_key_released)(ScriptHostAPI*, int key) = nullptr;
+    bool (*is_mouse_held)(ScriptHostAPI*, int button) = nullptr;
+    bool (*is_mouse_pressed)(ScriptHostAPI*, int button) = nullptr;
+    double (*get_mouse_x)(ScriptHostAPI*) = nullptr;
+    double (*get_mouse_y)(ScriptHostAPI*) = nullptr;
 
     // --- Logging ---
-    void (*log_info)(const char* msg) = nullptr;
-    void (*log_warning)(const char* msg) = nullptr;
-    void (*log_error)(const char* msg) = nullptr;
+    void (*log_info)(ScriptHostAPI*, const char* msg) = nullptr;
+    void (*log_warning)(ScriptHostAPI*, const char* msg) = nullptr;
+    void (*log_error)(ScriptHostAPI*, const char* msg) = nullptr;
 
     // --- Physics (registry + entity so host finds Rigidbody internally) ---
-    void (*get_velocity)(entt::registry*, entt::entity, float* vx, float* vy) = nullptr;
-    void (*set_velocity)(entt::registry*, entt::entity, float vx, float vy) = nullptr;
-    void (*add_force)(entt::registry*, entt::entity, float fx, float fy) = nullptr;
-    void (*add_impulse)(entt::registry*, entt::entity, float ix, float iy) = nullptr;
+    void (*get_velocity)(ScriptHostAPI*, entt::registry*, entt::entity, float* vx, float* vy) = nullptr;
+    void (*set_velocity)(ScriptHostAPI*, entt::registry*, entt::entity, float vx, float vy) = nullptr;
+    void (*add_force)(ScriptHostAPI*, entt::registry*, entt::entity, float fx, float fy) = nullptr;
+    void (*add_impulse)(ScriptHostAPI*, entt::registry*, entt::entity, float ix, float iy) = nullptr;
 
     // --- Entity Operations ---
-    entt::entity (*find_entity_by_name)(entt::registry*, const char* name) = nullptr;
-    void (*destroy_entity)(entt::registry*, entt::entity) = nullptr;
+    entt::entity (*find_entity_by_name)(ScriptHostAPI*, entt::registry*, const char* name) = nullptr;
+    void (*destroy_entity)(ScriptHostAPI*, entt::registry*, entt::entity) = nullptr;
 
     // --- Component Access ---
-    void* (*get_component)(entt::registry*, entt::entity, entt::id_type) = nullptr;
+    void* (*get_component)(ScriptHostAPI*, entt::registry*, entt::entity, entt::id_type) = nullptr;
 
     // --- Component Manipulation ---
-    void* (*add_component)(entt::registry*, entt::entity, entt::id_type) = nullptr;
-    void (*remove_component)(entt::registry*, entt::entity, entt::id_type) = nullptr;
+    void* (*add_component)(ScriptHostAPI*, entt::registry*, entt::entity, entt::id_type) = nullptr;
+    void (*remove_component)(ScriptHostAPI*, entt::registry*, entt::entity, entt::id_type) = nullptr;
 
     // --- Prefab Instantiation ---
-    entt::entity (*instantiate_prefab)(entt::registry*, const char* prefab_name) = nullptr;
+    entt::entity (*instantiate_prefab)(ScriptHostAPI*, entt::registry*, const char* prefab_name) = nullptr;
 };
 
 /// Base class for user-defined component scripts.
@@ -140,37 +148,42 @@ public:
 
     /// Check if a key is currently held down.
     bool is_key_held(engine::platform::KeyCode key) const {
-        return m_host_api && m_host_api->is_key_held && m_host_api->is_key_held(static_cast<int>(key));
+        return m_host_api && m_host_api->is_key_held &&
+               m_host_api->is_key_held(m_host_api, static_cast<int>(key));
     }
 
     /// Check if a key was just pressed this frame.
     bool is_key_pressed(engine::platform::KeyCode key) const {
-        return m_host_api && m_host_api->is_key_pressed && m_host_api->is_key_pressed(static_cast<int>(key));
+        return m_host_api && m_host_api->is_key_pressed &&
+               m_host_api->is_key_pressed(m_host_api, static_cast<int>(key));
     }
 
     /// Check if a key was just released this frame.
     bool is_key_released(engine::platform::KeyCode key) const {
-        return m_host_api && m_host_api->is_key_released && m_host_api->is_key_released(static_cast<int>(key));
+        return m_host_api && m_host_api->is_key_released &&
+               m_host_api->is_key_released(m_host_api, static_cast<int>(key));
     }
 
     /// Check if a mouse button is currently held down.
     bool is_mouse_held(engine::platform::MouseButton btn) const {
-        return m_host_api && m_host_api->is_mouse_held && m_host_api->is_mouse_held(static_cast<int>(btn));
+        return m_host_api && m_host_api->is_mouse_held &&
+               m_host_api->is_mouse_held(m_host_api, static_cast<int>(btn));
     }
 
     /// Check if a mouse button was just pressed this frame.
     bool is_mouse_pressed(engine::platform::MouseButton btn) const {
-        return m_host_api && m_host_api->is_mouse_pressed && m_host_api->is_mouse_pressed(static_cast<int>(btn));
+        return m_host_api && m_host_api->is_mouse_pressed &&
+               m_host_api->is_mouse_pressed(m_host_api, static_cast<int>(btn));
     }
 
     /// Get the mouse X position in screen coordinates.
     double mouse_x() const {
-        return (m_host_api && m_host_api->get_mouse_x) ? m_host_api->get_mouse_x() : 0.0;
+        return (m_host_api && m_host_api->get_mouse_x) ? m_host_api->get_mouse_x(m_host_api) : 0.0;
     }
 
     /// Get the mouse Y position in screen coordinates.
     double mouse_y() const {
-        return (m_host_api && m_host_api->get_mouse_y) ? m_host_api->get_mouse_y() : 0.0;
+        return (m_host_api && m_host_api->get_mouse_y) ? m_host_api->get_mouse_y(m_host_api) : 0.0;
     }
 
     // =====================================================================
@@ -226,17 +239,17 @@ public:
 
     /// Log an info message to the editor Console.
     void log(const char* msg) {
-        if (m_host_api && m_host_api->log_info) m_host_api->log_info(msg);
+        if (m_host_api && m_host_api->log_info) m_host_api->log_info(m_host_api, msg);
     }
 
     /// Log a warning message to the editor Console.
     void log_warning(const char* msg) {
-        if (m_host_api && m_host_api->log_warning) m_host_api->log_warning(msg);
+        if (m_host_api && m_host_api->log_warning) m_host_api->log_warning(m_host_api, msg);
     }
 
     /// Log an error message to the editor Console.
     void log_error(const char* msg) {
-        if (m_host_api && m_host_api->log_error) m_host_api->log_error(msg);
+        if (m_host_api && m_host_api->log_error) m_host_api->log_error(m_host_api, msg);
     }
 
     // =====================================================================
@@ -247,26 +260,26 @@ public:
     Vec2 get_velocity() {
         Vec2 v{0.0f, 0.0f};
         if (m_host_api && m_host_api->get_velocity)
-            m_host_api->get_velocity(m_registry, m_entity, &v.x, &v.y);
+            m_host_api->get_velocity(m_host_api, m_registry, m_entity, &v.x, &v.y);
         return v;
     }
 
     /// Set the entity's linear velocity in pixels/sec (requires Rigidbody).
     void set_velocity(float vx, float vy) {
         if (m_host_api && m_host_api->set_velocity)
-            m_host_api->set_velocity(m_registry, m_entity, vx, vy);
+            m_host_api->set_velocity(m_host_api, m_registry, m_entity, vx, vy);
     }
 
     /// Apply a force in pixels/sec^2 (requires Rigidbody, applied over time).
     void add_force(float fx, float fy) {
         if (m_host_api && m_host_api->add_force)
-            m_host_api->add_force(m_registry, m_entity, fx, fy);
+            m_host_api->add_force(m_host_api, m_registry, m_entity, fx, fy);
     }
 
     /// Apply an instantaneous impulse in pixels/sec (requires Rigidbody).
     void add_impulse(float ix, float iy) {
         if (m_host_api && m_host_api->add_impulse)
-            m_host_api->add_impulse(m_registry, m_entity, ix, iy);
+            m_host_api->add_impulse(m_host_api, m_registry, m_entity, ix, iy);
     }
 
     // =====================================================================
@@ -276,20 +289,20 @@ public:
     /// Find an entity by name. Returns entt::null if not found.
     entt::entity find_entity(const char* name) {
         if (m_host_api && m_host_api->find_entity_by_name)
-            return m_host_api->find_entity_by_name(m_registry, name);
+            return m_host_api->find_entity_by_name(m_host_api, m_registry, name);
         return entt::null;
     }
 
     /// Destroy this entity (deferred to end of frame).
     void destroy_self() {
         if (m_host_api && m_host_api->destroy_entity)
-            m_host_api->destroy_entity(m_registry, m_entity);
+            m_host_api->destroy_entity(m_host_api, m_registry, m_entity);
     }
 
     /// Destroy another entity (deferred to end of frame).
     void destroy_entity(entt::entity target) {
         if (m_host_api && m_host_api->destroy_entity)
-            m_host_api->destroy_entity(m_registry, target);
+            m_host_api->destroy_entity(m_host_api, m_registry, target);
     }
 
     // =====================================================================
@@ -321,7 +334,7 @@ public:
     T* get_component() {
         if (!m_host_api || !m_host_api->get_component || !m_registry) return nullptr;
         return static_cast<T*>(m_host_api->get_component(
-            m_registry, m_entity, entt::type_hash<std::remove_const_t<T>>::value()));
+            m_host_api, m_registry, m_entity, entt::type_hash<std::remove_const_t<T>>::value()));
     }
 
     /// Get a component from this entity (const version).
@@ -329,7 +342,7 @@ public:
     const T* get_component() const {
         if (!m_host_api || !m_host_api->get_component || !m_registry) return nullptr;
         return static_cast<const T*>(m_host_api->get_component(
-            m_registry, m_entity, entt::type_hash<std::remove_const_t<T>>::value()));
+            m_host_api, m_registry, m_entity, entt::type_hash<std::remove_const_t<T>>::value()));
     }
 
     /// Check if this entity has a component.
@@ -344,7 +357,7 @@ public:
     T* add_component() {
         if (!m_host_api || !m_host_api->add_component || !m_registry) return nullptr;
         return static_cast<T*>(m_host_api->add_component(
-            m_registry, m_entity, entt::type_hash<std::remove_const_t<T>>::value()));
+            m_host_api, m_registry, m_entity, entt::type_hash<std::remove_const_t<T>>::value()));
     }
 
     /// Remove a component from this entity. No-op if the component doesn't exist.
@@ -352,7 +365,7 @@ public:
     void remove_component() {
         if (!m_host_api || !m_host_api->remove_component || !m_registry) return;
         m_host_api->remove_component(
-            m_registry, m_entity, entt::type_hash<std::remove_const_t<T>>::value());
+            m_host_api, m_registry, m_entity, entt::type_hash<std::remove_const_t<T>>::value());
     }
 
     // =====================================================================
@@ -364,7 +377,7 @@ public:
     /// Returns the new entity, or entt::null on failure.
     entt::entity instantiate(const char* prefab_name) {
         if (!m_host_api || !m_host_api->instantiate_prefab || !m_registry) return entt::null;
-        return m_host_api->instantiate_prefab(m_registry, prefab_name);
+        return m_host_api->instantiate_prefab(m_host_api, m_registry, prefab_name);
     }
 
 protected:

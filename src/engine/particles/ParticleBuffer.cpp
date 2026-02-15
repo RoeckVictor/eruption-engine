@@ -50,6 +50,10 @@ void ParticleBuffer::shutdown() {
 }
 
 void ParticleBuffer::spawn(const SpawnRequest& req) {
+    if (static_cast<int>(m_spawn_queue.size()) >= MAX_PENDING_SPAWNS) {
+        ENGINE_LOG_WARN("ParticleBuffer: spawn queue full (%d), dropping spawn request", MAX_PENDING_SPAWNS);
+        return;
+    }
     m_spawn_queue.push_back(req);
 }
 
@@ -60,6 +64,17 @@ void ParticleBuffer::reclaim_dead() {
     uint32_t dead_count = 0;
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_dead_list_ssbo.handle());
     glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(uint32_t), &dead_count);
+
+#ifndef NDEBUG
+    {
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            ENGINE_ERR("GL error 0x%X reading dead count from SSBO", err);
+            glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+            return;
+        }
+    }
+#endif
 
     if (dead_count > 0) {
         // Clamp to avoid buffer overrun

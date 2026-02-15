@@ -52,7 +52,7 @@ void RigidbodySyncSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
         float angle_rad = m_physics_world->get_body_angle(rb.body_id);
         float angle_deg = angle_rad * RAD_TO_DEG;
 
-        // Apply position locks if specified
+        // Apply position locks: keep the transform value, reset the body back
         if (!rb.lock_position_x) {
             transform.x = pos.x;
         }
@@ -63,18 +63,24 @@ void RigidbodySyncSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
             transform.rotation = angle_deg;
         }
 
-        // Handle position locks by zeroing out velocity on locked axes
-        if (rb.lock_position_x || rb.lock_position_y) {
-            // get_body_linear_velocity returns pixels/sec
-            b2Vec2 vel = m_physics_world->get_body_linear_velocity(rb.body_id);
-            if (rb.lock_position_x) {
-                vel.x = 0.0f;
+        // Enforce position/rotation locks by resetting the body to the locked transform
+        // and zeroing velocity on locked axes. This prevents drift that would occur
+        // if we only zeroed velocity (body already moved during the step).
+        if (rb.lock_position_x || rb.lock_position_y || rb.lock_rotation) {
+            float corrected_x = rb.lock_position_x ? transform.x : pos.x;
+            float corrected_y = rb.lock_position_y ? transform.y : pos.y;
+            float corrected_angle = rb.lock_rotation ? transform.rotation * DEG_TO_RAD : angle_rad;
+            m_physics_world->set_body_transform(rb.body_id, corrected_x, corrected_y, corrected_angle);
+
+            if (rb.lock_position_x || rb.lock_position_y) {
+                b2Vec2 vel = m_physics_world->get_body_linear_velocity(rb.body_id);
+                if (rb.lock_position_x) vel.x = 0.0f;
+                if (rb.lock_position_y) vel.y = 0.0f;
+                m_physics_world->set_body_linear_velocity(rb.body_id, vel.x, vel.y);
             }
-            if (rb.lock_position_y) {
-                vel.y = 0.0f;
+            if (rb.lock_rotation) {
+                m_physics_world->set_body_angular_velocity(rb.body_id, 0.0f);
             }
-            // set_body_linear_velocity expects pixels/sec (converts internally to meters)
-            m_physics_world->set_body_linear_velocity(rb.body_id, vel.x, vel.y);
         }
     }
 }

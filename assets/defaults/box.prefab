@@ -1,5 +1,16 @@
 {
-    "sprite": "defaults/box.pxg",
-    "type": "rigidbody",
-    "dynamic": true
+    "name": "box",
+    "components": [
+        {
+            "type": "engine::Transform",
+            "data": { "x": 0.0, "y": 0.0 }
+        },
+        {
+            "type": "engine::physics::Rigidbody",
+            "data": {
+                "body_type": 2,
+                "mass": 1.0
+            }
+        }
+    ]
 }

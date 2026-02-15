@@ -2,7 +2,7 @@
 #include "editor/core/EditorComponents.h"
 #include "editor/core/ComponentTypeRegistry.h"
 #include "engine/core/Logger.h"
-#include "engine/reflection/TypeRegistry.h"
+#include "engine/reflection/ReflectionSerializer.h"
 #include "runtime/ScriptComponent.h"
 #include <fstream>
 
@@ -83,7 +83,7 @@ nlohmann::json SceneSerializer::serialize() const {
     nlohmann::json json;
 
     // Scene metadata
-    json["version"] = "1.0";
+    json["version"] = SCENE_FORMAT_VERSION;
 
     // Scene settings
     json["settings"] = {
@@ -108,43 +108,86 @@ nlohmann::json SceneSerializer::serialize() const {
 
 bool SceneSerializer::deserialize(const nlohmann::json& json) {
     try {
-        // Clear existing entities
-        m_registry.clear();
+        // Check scene format version
+        if (json.contains("version")) {
+            auto& ver = json["version"];
+            int file_version = 0;
+            if (ver.is_number_integer()) {
+                file_version = ver.get<int>();
+            } else if (ver.is_string()) {
+                // Handle legacy string versions like "1.0"
+                file_version = static_cast<int>(std::stof(ver.get<std::string>()));
+            }
+            if (file_version > SCENE_FORMAT_VERSION) {
+                engine::Logger::instance().warning("SceneSerializer",
+                    "Scene file version %d is newer than supported version %d; "
+                    "some data may not load correctly",
+                    file_version, SCENE_FORMAT_VERSION);
+            }
+        } else {
+            engine::Logger::instance().warning("SceneSerializer",
+                "Scene file has no version field; assuming version %d", SCENE_FORMAT_VERSION);
+        }
 
-        // Load settings
+        // Validate that the reflection system is initialized
+        {
+            auto& type_registry = engine::reflection::TypeRegistry::instance();
+            if (type_registry.all_types().empty()) {
+                m_last_error = "TypeRegistry is empty — init_engine_reflections() may not have been called";
+                engine::Logger::instance().error("SceneSerializer", "%s", m_last_error.c_str());
+                return false;
+            }
+        }
+
+        // --- Validation pass ---
+        // Parse settings and walk entity JSON to catch structural errors
+        // BEFORE clearing the registry. This prevents data loss on corrupt files.
+        SceneSettings new_settings = m_settings;
         if (json.contains("settings")) {
             const auto& settings = json["settings"];
 
             if (settings.contains("gravity") && settings["gravity"].is_array()) {
                 auto& gravity = settings["gravity"];
                 if (gravity.size() >= 2) {
-                    m_settings.gravity_x = gravity[0].get<float>();
-                    m_settings.gravity_y = gravity[1].get<float>();
+                    new_settings.gravity_x = gravity[0].get<float>();
+                    new_settings.gravity_y = gravity[1].get<float>();
                 }
             }
             if (settings.contains("pixelsPerMeter")) {
-                m_settings.pixels_per_meter = settings["pixelsPerMeter"].get<float>();
+                new_settings.pixels_per_meter = settings["pixelsPerMeter"].get<float>();
             }
             if (settings.contains("physicsSubsteps")) {
-                m_settings.physics_substeps = settings["physicsSubsteps"].get<int>();
+                new_settings.physics_substeps = settings["physicsSubsteps"].get<int>();
             }
             if (settings.contains("backgroundColor") && settings["backgroundColor"].is_array()) {
                 auto& bg = settings["backgroundColor"];
                 for (size_t i = 0; i < std::min(bg.size(), size_t(4)); ++i) {
-                    m_settings.bg_color[i] = bg[i].get<float>();
+                    new_settings.bg_color[i] = bg[i].get<float>();
                 }
             }
         }
 
-        // Validate that the reflection system is initialized
-        {
-            auto& type_registry = engine::reflection::TypeRegistry::instance();
-            if (type_registry.get_all_types().empty()) {
-                engine::Logger::instance().error("SceneSerializer",
-                    "TypeRegistry is empty — init_engine_reflections() may not have been called. "
-                    "Components will not be deserialized.");
+        // Validate entity array is structurally sound before committing
+        if (json.contains("entities")) {
+            if (!json["entities"].is_array()) {
+                m_last_error = "Scene 'entities' field is not an array";
+                engine::Logger::instance().error("SceneSerializer", "%s", m_last_error.c_str());
+                return false;
+            }
+            // Walk each entity to ensure basic JSON access won't throw
+            for (const auto& entity_json : json["entities"]) {
+                if (!entity_json.is_object()) {
+                    m_last_error = "Scene contains a non-object entity entry";
+                    engine::Logger::instance().error("SceneSerializer", "%s", m_last_error.c_str());
+                    return false;
+                }
             }
         }
+
+        // --- Commit pass ---
+        // Validation passed; now safe to clear and rebuild.
+        m_registry.clear();
+        m_settings = new_settings;
 
         // Load entities
         if (json.contains("entities") && json["entities"].is_array()) {
@@ -190,7 +233,7 @@ nlohmann::json SceneSerializer::serialize_entity(entt::entity entity) const {
     // Use TypeRegistry to dynamically serialize all components
     auto& type_registry = engine::reflection::TypeRegistry::instance();
     auto& component_registry = ComponentTypeRegistry::instance();
-    auto all_types = type_registry.get_all_types();
+    const auto& all_types = type_registry.all_types();
 
     // Build ordered list of present components (respecting component_order)
     std::vector<const engine::reflection::TypeInfo*> present_types;
@@ -203,26 +246,7 @@ nlohmann::json SceneSerializer::serialize_entity(entt::entity entity) const {
     }
 
     // Apply custom component order if available
-    if (m_registry.all_of<EntityInfo>(entity)) {
-        const auto& info = m_registry.get<EntityInfo>(entity);
-        if (!info.component_order.empty()) {
-            std::vector<const engine::reflection::TypeInfo*> ordered;
-            ordered.reserve(present_types.size());
-            for (const auto& type_name : info.component_order) {
-                for (auto it = present_types.begin(); it != present_types.end(); ++it) {
-                    if ((*it)->name() == type_name) {
-                        ordered.push_back(*it);
-                        present_types.erase(it);
-                        break;
-                    }
-                }
-            }
-            for (const auto* ti : present_types) {
-                ordered.push_back(ti);
-            }
-            present_types = std::move(ordered);
-        }
-    }
+    apply_component_order(m_registry, entity, present_types);
 
     for (const auto* type_info_ptr : present_types) {
         const auto& type_info = *type_info_ptr;
@@ -233,40 +257,7 @@ nlohmann::json SceneSerializer::serialize_entity(entt::entity entity) const {
         nlohmann::json comp_json;
         comp_json["type"] = type_info.name();
         comp_json["data"] = nlohmann::json::object();
-
-        // Serialize each property using reflection
-        for (const auto& prop : type_info.properties()) {
-            // Skip read-only properties
-            if (engine::reflection::has_flag(prop.flags, engine::reflection::PropertyFlags::ReadOnly)) {
-                continue;
-            }
-
-            // Serialize property based on its type
-            void* prop_ptr = static_cast<char*>(component_ptr) + prop.offset;
-
-            switch (prop.type) {
-                case engine::reflection::PropertyType::Bool:
-                    comp_json["data"][prop.name] = *reinterpret_cast<bool*>(prop_ptr);
-                    break;
-                case engine::reflection::PropertyType::Int:
-                    comp_json["data"][prop.name] = *reinterpret_cast<int*>(prop_ptr);
-                    break;
-                case engine::reflection::PropertyType::Float:
-                    comp_json["data"][prop.name] = *reinterpret_cast<float*>(prop_ptr);
-                    break;
-                case engine::reflection::PropertyType::Double:
-                    comp_json["data"][prop.name] = *reinterpret_cast<double*>(prop_ptr);
-                    break;
-                case engine::reflection::PropertyType::String:
-                    comp_json["data"][prop.name] = *reinterpret_cast<std::string*>(prop_ptr);
-                    break;
-                // TODO: Add Vec2, Vec3, Vec4, Color, etc. when needed
-                default:
-                    // Skip unknown types
-                    break;
-            }
-        }
-
+        engine::reflection::serialize_properties(type_info, component_ptr, comp_json["data"]);
         json["components"].push_back(comp_json);
     }
 
@@ -300,7 +291,7 @@ nlohmann::json SceneSerializer::serialize_entity(entt::entity entity) const {
 nlohmann::json SceneSerializer::serialize_entities(const std::vector<entt::entity>& entities) const {
     nlohmann::json json;
     json["type"] = "clipboard";
-    json["version"] = "1.0";
+    json["version"] = SCENE_FORMAT_VERSION;
     json["entities"] = nlohmann::json::array();
 
     for (auto entity : entities) {
@@ -380,63 +371,27 @@ entt::entity SceneSerializer::deserialize_entity(const nlohmann::json& json, ent
             std::string type = comp.value("type", "");
             const auto& data = comp.value("data", nlohmann::json::object());
 
-            // Find TypeInfo for this component type
-            const engine::reflection::TypeInfo* type_info = nullptr;
-            auto all_types = type_registry.get_all_types();
-            for (const auto* ti : all_types) {
-                if (ti && ti->name() == type) {
-                    type_info = ti;
-                    break;
-                }
-            }
-
+            const auto* type_info = type_registry.get_by_name(type);
             if (!type_info) {
-                // Unknown component type, skip
+                if (!type.empty()) {
+                    engine::Logger::instance().warning("SceneSerializer",
+                        "Unknown component type '%s' on entity '%s', skipping",
+                        type.c_str(), info.name.c_str());
+                }
                 continue;
             }
 
             // Create component dynamically using ComponentTypeRegistry
             void* component_ptr = component_registry.create_component(m_registry, entity, type_info->type_index());
 
-            // Deserialize properties if we created the component
-            if (component_ptr && type_info) {
-                for (const auto& prop : type_info->properties()) {
-                    // Skip read-only properties
-                    if (engine::reflection::has_flag(prop.flags, engine::reflection::PropertyFlags::ReadOnly)) {
-                        continue;
-                    }
-
-                    // Skip if property not in JSON
-                    if (!data.contains(prop.name)) {
-                        continue;
-                    }
-
-                    // Deserialize property based on type
-                    void* prop_ptr = static_cast<char*>(component_ptr) + prop.offset;
-
-                    switch (prop.type) {
-                        case engine::reflection::PropertyType::Bool:
-                            *reinterpret_cast<bool*>(prop_ptr) = data[prop.name].get<bool>();
-                            break;
-                        case engine::reflection::PropertyType::Int:
-                            *reinterpret_cast<int*>(prop_ptr) = data[prop.name].get<int>();
-                            break;
-                        case engine::reflection::PropertyType::Float:
-                            *reinterpret_cast<float*>(prop_ptr) = data[prop.name].get<float>();
-                            break;
-                        case engine::reflection::PropertyType::Double:
-                            *reinterpret_cast<double*>(prop_ptr) = data[prop.name].get<double>();
-                            break;
-                        case engine::reflection::PropertyType::String:
-                            *reinterpret_cast<std::string*>(prop_ptr) = data[prop.name].get<std::string>();
-                            break;
-                        // TODO: Add Vec2, Vec3, Vec4, Color, etc. when needed
-                        default:
-                            // Skip unknown types
-                            break;
-                    }
-                }
+            if (!component_ptr) {
+                engine::Logger::instance().error("SceneSerializer",
+                    "Failed to create component '%s' on entity '%s' — type may not be registered in ComponentTypeRegistry",
+                    type.c_str(), info.name.c_str());
+                continue;
             }
+
+            engine::reflection::deserialize_properties(*type_info, component_ptr, data);
         }
     }
 
@@ -469,39 +424,7 @@ nlohmann::json SceneSerializer::serialize_component(entt::entity entity, const e
     nlohmann::json json;
     json["type"] = type_info.name();
     json["data"] = nlohmann::json::object();
-
-    // Serialize each property using reflection
-    for (const auto& prop : type_info.properties()) {
-        // Skip read-only properties
-        if (engine::reflection::has_flag(prop.flags, engine::reflection::PropertyFlags::ReadOnly)) {
-            continue;
-        }
-
-        // Serialize property based on its type
-        void* prop_ptr = static_cast<char*>(component_ptr) + prop.offset;
-
-        switch (prop.type) {
-            case engine::reflection::PropertyType::Bool:
-                json["data"][prop.name] = *reinterpret_cast<bool*>(prop_ptr);
-                break;
-            case engine::reflection::PropertyType::Int:
-                json["data"][prop.name] = *reinterpret_cast<int*>(prop_ptr);
-                break;
-            case engine::reflection::PropertyType::Float:
-                json["data"][prop.name] = *reinterpret_cast<float*>(prop_ptr);
-                break;
-            case engine::reflection::PropertyType::Double:
-                json["data"][prop.name] = *reinterpret_cast<double*>(prop_ptr);
-                break;
-            case engine::reflection::PropertyType::String:
-                json["data"][prop.name] = *reinterpret_cast<std::string*>(prop_ptr);
-                break;
-            default:
-                // Skip unknown types
-                break;
-        }
-    }
-
+    engine::reflection::serialize_properties(type_info, component_ptr, json["data"]);
     return json;
 }
 
@@ -513,68 +436,19 @@ bool SceneSerializer::deserialize_component(entt::entity entity, const nlohmann:
     std::string type_name = json["type"].get<std::string>();
     const auto& data = json["data"];
 
-    // Get component pointer and type info
-    void* component_ptr = nullptr;
-    const engine::reflection::TypeInfo* type_info = nullptr;
-
     auto& type_registry = engine::reflection::TypeRegistry::instance();
     auto& component_registry = ComponentTypeRegistry::instance();
-    auto all_types = type_registry.get_all_types();
 
-    // Find the type info for this component
-    for (const auto* ti : all_types) {
-        if (ti && ti->name() == type_name) {
-            type_info = ti;
-            break;
-        }
-    }
+    const auto* type_info = type_registry.get_by_name(type_name);
+    if (!type_info) return false;
 
-    if (!type_info) {
-        return false;  // Unknown component type
-    }
-
-    // Create or get component dynamically using ComponentTypeRegistry
-    component_ptr = component_registry.create_component(m_registry, entity, type_info->type_index());
+    void* component_ptr = component_registry.create_component(m_registry, entity, type_info->type_index());
 
     if (!component_ptr) {
         return false;  // Failed to get/create component
     }
 
-    // Deserialize properties
-    for (const auto& prop : type_info->properties()) {
-        // Skip read-only properties
-        if (engine::reflection::has_flag(prop.flags, engine::reflection::PropertyFlags::ReadOnly)) {
-            continue;
-        }
-
-        if (!data.contains(prop.name)) {
-            continue;  // Property not in data
-        }
-
-        void* prop_ptr = static_cast<char*>(component_ptr) + prop.offset;
-
-        switch (prop.type) {
-            case engine::reflection::PropertyType::Bool:
-                *reinterpret_cast<bool*>(prop_ptr) = data[prop.name].get<bool>();
-                break;
-            case engine::reflection::PropertyType::Int:
-                *reinterpret_cast<int*>(prop_ptr) = data[prop.name].get<int>();
-                break;
-            case engine::reflection::PropertyType::Float:
-                *reinterpret_cast<float*>(prop_ptr) = data[prop.name].get<float>();
-                break;
-            case engine::reflection::PropertyType::Double:
-                *reinterpret_cast<double*>(prop_ptr) = data[prop.name].get<double>();
-                break;
-            case engine::reflection::PropertyType::String:
-                *reinterpret_cast<std::string*>(prop_ptr) = data[prop.name].get<std::string>();
-                break;
-            default:
-                // Skip unknown types
-                break;
-        }
-    }
-
+    engine::reflection::deserialize_properties(*type_info, component_ptr, data);
     return true;
 }
 
@@ -638,7 +512,7 @@ bool SceneSerializer::save_prefab(const std::filesystem::path& path, entt::entit
 
         auto& type_registry = engine::reflection::TypeRegistry::instance();
         auto& component_registry = ComponentTypeRegistry::instance();
-        auto all_types = type_registry.get_all_types();
+        const auto& all_types = type_registry.all_types();
 
         // Respect component order if available
         std::vector<const engine::reflection::TypeInfo*> present_types;
@@ -650,26 +524,7 @@ bool SceneSerializer::save_prefab(const std::filesystem::path& path, entt::entit
             }
         }
 
-        if (m_registry.all_of<EntityInfo>(entity)) {
-            const auto& info = m_registry.get<EntityInfo>(entity);
-            if (!info.component_order.empty()) {
-                std::vector<const engine::reflection::TypeInfo*> ordered;
-                ordered.reserve(present_types.size());
-                for (const auto& type_name : info.component_order) {
-                    for (auto it = present_types.begin(); it != present_types.end(); ++it) {
-                        if ((*it)->name() == type_name) {
-                            ordered.push_back(*it);
-                            present_types.erase(it);
-                            break;
-                        }
-                    }
-                }
-                for (const auto* ti : present_types) {
-                    ordered.push_back(ti);
-                }
-                present_types = std::move(ordered);
-            }
-        }
+        apply_component_order(m_registry, entity, present_types);
 
         for (const auto* ti : present_types) {
             void* ptr = component_registry.get_component(m_registry, entity, ti->type_index());

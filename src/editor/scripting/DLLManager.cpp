@@ -41,8 +41,12 @@ bool DLLManager::load(const std::string& path) {
         DWORD error = GetLastError();
         m_last_error = "LoadLibrary failed with error code: " + std::to_string(error);
         engine::Logger::instance().error("DLLManager", "Failed to load DLL: %s (error %lu)", path.c_str(), error);
+        if (!DeleteFileA(temp_path.c_str())) {
+            engine::Logger::instance().warning("DLLManager", "Failed to clean up temp DLL copy: %s", temp_path.c_str());
+        }
         return false;
     }
+    m_temp_path = temp_path;  // Track temp path for cleanup
 #else
     m_handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!m_handle) {
@@ -90,8 +94,12 @@ void DLLManager::unload() {
     FreeLibrary(m_handle);
 
     // Delete the temp copy
-    std::string temp_path = m_dll_path + ".loaded";
-    DeleteFileA(temp_path.c_str());
+    if (!m_temp_path.empty()) {
+        if (!DeleteFileA(m_temp_path.c_str())) {
+            engine::Logger::instance().warning("DLLManager", "Failed to clean up temp DLL: %s", m_temp_path.c_str());
+        }
+        m_temp_path.clear();
+    }
 #else
     dlclose(m_handle);
 #endif

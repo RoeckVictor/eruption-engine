@@ -73,8 +73,15 @@ void ShaderStorageBuffer::bind_base(int binding_point) const {
 }
 
 void ShaderStorageBuffer::update(size_t offset, size_t size, const void* data) {
+    if (!m_handle || !data || offset + size > m_size) return;
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_handle);
     glBufferSubData(GL_SHADER_STORAGE_BUFFER, offset, size, data);
+#ifndef NDEBUG
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        ENGINE_ERR("GL error 0x%X in SSBO update (offset=%zu, size=%zu)", err, offset, size);
+    }
+#endif
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
 
@@ -86,6 +93,9 @@ bool ShaderStorageBuffer::readback(size_t offset, size_t size, void* dst) const 
     if (ptr) {
         memcpy(dst, ptr, size);
         glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+    } else {
+        GLenum err = glGetError();
+        ENGINE_ERR("SSBO map failed (offset=%zu, size=%zu, GL error=0x%X)", offset, size, err);
     }
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 

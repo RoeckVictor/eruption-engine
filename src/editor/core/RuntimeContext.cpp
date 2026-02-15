@@ -1,7 +1,8 @@
 #include "RuntimeContext.h"
+#include "PhysicsPlayback.h"
+#include "SimulationPlayback.h"
 #include "EditorComponents.h"
 #include "editor/serialization/SceneSerializer.h"
-#include "engine/core/MathConstants.h"
 #include "engine/core/Logger.h"
 #include "engine/core/Engine.h"
 #include "engine/platform/Input.h"
@@ -9,116 +10,107 @@
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
 #include "engine/animation/AnimationSystem.h"
-#include "engine/simulation/SimSurface.h"
-#include "engine/simulation/PixelGridComponent.h"
-#include "engine/simulation/MaterialLibrary.h"
-#include "engine/asset/PixelGridFile.h"
-#include "engine/asset/PxgDataParser.h"
 #include "editor/scripting/ScriptManager.h"
 #include "runtime/ScriptComponent.h"
 #include "engine/prefab/PrefabManager.h"
 #include "engine/prefab/ComponentRegistry.h"
 #include "engine/EngineComponentRegistry.h"
-#include <glad/gl.h>
 #include <cmath>
 #include <fstream>
 
 namespace editor {
 
-// =============================================================================
-// File-scoped state for host API callbacks (valid only during play mode)
-// =============================================================================
-static engine::Engine* s_host_engine = nullptr;
-static RuntimeContext* s_host_runtime = nullptr;
-
-// --- Input callbacks ---
-
-static bool host_is_key_held(int key) {
-    if (!s_host_engine) return false;
-    return s_host_engine->input().is_held(static_cast<engine::platform::KeyCode>(key));
+static bool host_is_key_held(runtime::ScriptHostAPI* api, int key) {
+    auto* eng = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!eng) return false;
+    return eng->input().is_held(static_cast<engine::platform::KeyCode>(key));
 }
 
-static bool host_is_key_pressed(int key) {
-    if (!s_host_engine) return false;
-    return s_host_engine->input().is_pressed(static_cast<engine::platform::KeyCode>(key));
+static bool host_is_key_pressed(runtime::ScriptHostAPI* api, int key) {
+    auto* eng = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!eng) return false;
+    return eng->input().is_pressed(static_cast<engine::platform::KeyCode>(key));
 }
 
-static bool host_is_key_released(int key) {
-    if (!s_host_engine) return false;
-    return s_host_engine->input().is_released(static_cast<engine::platform::KeyCode>(key));
+static bool host_is_key_released(runtime::ScriptHostAPI* api, int key) {
+    auto* eng = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!eng) return false;
+    return eng->input().is_released(static_cast<engine::platform::KeyCode>(key));
 }
 
-static bool host_is_mouse_held(int button) {
-    if (!s_host_engine) return false;
-    return s_host_engine->input().is_mouse_held(static_cast<engine::platform::MouseButton>(button));
+static bool host_is_mouse_held(runtime::ScriptHostAPI* api, int button) {
+    auto* eng = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!eng) return false;
+    return eng->input().is_mouse_held(static_cast<engine::platform::MouseButton>(button));
 }
 
-static bool host_is_mouse_pressed(int button) {
-    if (!s_host_engine) return false;
-    return s_host_engine->input().is_mouse_pressed(static_cast<engine::platform::MouseButton>(button));
+static bool host_is_mouse_pressed(runtime::ScriptHostAPI* api, int button) {
+    auto* eng = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!eng) return false;
+    return eng->input().is_mouse_pressed(static_cast<engine::platform::MouseButton>(button));
 }
 
-static double host_get_mouse_x() {
-    return s_host_engine ? s_host_engine->input().mouse_x() : 0.0;
+static double host_get_mouse_x(runtime::ScriptHostAPI* api) {
+    auto* eng = static_cast<engine::Engine*>(api->engine_ctx);
+    return eng ? eng->input().mouse_x() : 0.0;
 }
 
-static double host_get_mouse_y() {
-    return s_host_engine ? s_host_engine->input().mouse_y() : 0.0;
+static double host_get_mouse_y(runtime::ScriptHostAPI* api) {
+    auto* eng = static_cast<engine::Engine*>(api->engine_ctx);
+    return eng ? eng->input().mouse_y() : 0.0;
 }
 
-// --- Logging callbacks ---
-
-static void host_log_info(const char* msg) {
+static void host_log_info(runtime::ScriptHostAPI* /*api*/, const char* msg) {
     engine::Logger::instance().info("Script", "%s", msg);
 }
 
-static void host_log_warning(const char* msg) {
+static void host_log_warning(runtime::ScriptHostAPI* /*api*/, const char* msg) {
     engine::Logger::instance().warning("Script", "%s", msg);
 }
 
-static void host_log_error(const char* msg) {
+static void host_log_error(runtime::ScriptHostAPI* /*api*/, const char* msg) {
     engine::Logger::instance().error("Script", "%s", msg);
 }
 
-// --- Physics callbacks ---
-
-static void host_get_velocity(entt::registry* reg, entt::entity entity, float* vx, float* vy) {
+static void host_get_velocity(runtime::ScriptHostAPI* api, entt::registry* reg, entt::entity entity, float* vx, float* vy) {
     *vx = 0.0f; *vy = 0.0f;
-    if (!reg || !reg->valid(entity) || !s_host_runtime || !s_host_runtime->physics_world()) return;
+    auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
+    if (!reg || !reg->valid(entity) || !rt || !rt->physics_world()) return;
     if (!reg->all_of<engine::physics::Rigidbody>(entity)) return;
     auto& rb = reg->get<engine::physics::Rigidbody>(entity);
     if (!b2Body_IsValid(rb.body_id)) return;
-    b2Vec2 vel = s_host_runtime->physics_world()->get_body_linear_velocity(rb.body_id);
+    b2Vec2 vel = rt->physics_world()->get_body_linear_velocity(rb.body_id);
     *vx = vel.x; *vy = vel.y;
 }
 
-static void host_set_velocity(entt::registry* reg, entt::entity entity, float vx, float vy) {
-    if (!reg || !reg->valid(entity) || !s_host_runtime || !s_host_runtime->physics_world()) return;
+static void host_set_velocity(runtime::ScriptHostAPI* api, entt::registry* reg, entt::entity entity, float vx, float vy) {
+    auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
+    if (!reg || !reg->valid(entity) || !rt || !rt->physics_world()) return;
     if (!reg->all_of<engine::physics::Rigidbody>(entity)) return;
     auto& rb = reg->get<engine::physics::Rigidbody>(entity);
     if (!b2Body_IsValid(rb.body_id)) return;
-    s_host_runtime->physics_world()->set_body_linear_velocity(rb.body_id, vx, vy);
+    rt->physics_world()->set_body_linear_velocity(rb.body_id, vx, vy);
 }
 
-static void host_add_force(entt::registry* reg, entt::entity entity, float fx, float fy) {
-    if (!reg || !reg->valid(entity) || !s_host_runtime || !s_host_runtime->physics_world()) return;
+static void host_add_force(runtime::ScriptHostAPI* api, entt::registry* reg, entt::entity entity, float fx, float fy) {
+    auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
+    if (!reg || !reg->valid(entity) || !rt || !rt->physics_world()) return;
     if (!reg->all_of<engine::physics::Rigidbody>(entity)) return;
     auto& rb = reg->get<engine::physics::Rigidbody>(entity);
     if (!b2Body_IsValid(rb.body_id)) return;
-    s_host_runtime->physics_world()->apply_force(rb.body_id, fx, fy);
+    rt->physics_world()->apply_force(rb.body_id, fx, fy);
 }
 
-static void host_add_impulse(entt::registry* reg, entt::entity entity, float ix, float iy) {
-    if (!reg || !reg->valid(entity) || !s_host_runtime || !s_host_runtime->physics_world()) return;
+static void host_add_impulse(runtime::ScriptHostAPI* api, entt::registry* reg, entt::entity entity, float ix, float iy) {
+    auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
+    if (!reg || !reg->valid(entity) || !rt || !rt->physics_world()) return;
     if (!reg->all_of<engine::physics::Rigidbody>(entity)) return;
     auto& rb = reg->get<engine::physics::Rigidbody>(entity);
     if (!b2Body_IsValid(rb.body_id)) return;
-    s_host_runtime->physics_world()->apply_impulse(rb.body_id, ix, iy);
+    rt->physics_world()->apply_impulse(rb.body_id, ix, iy);
 }
 
-// --- Entity operation callbacks ---
-
-static entt::entity host_find_entity_by_name(entt::registry* reg, const char* name) {
+static entt::entity host_find_entity_by_name(runtime::ScriptHostAPI* /*api*/, entt::registry* reg, const char* name) {
     if (!reg || !name) return entt::null;
     auto view = reg->view<EntityInfo>();
     for (auto entity : view) {
@@ -127,54 +119,55 @@ static entt::entity host_find_entity_by_name(entt::registry* reg, const char* na
     return entt::null;
 }
 
-static void host_destroy_entity(entt::registry* reg, entt::entity entity) {
-    if (!reg || !reg->valid(entity) || !s_host_runtime) return;
-    // Queue for deferred destruction (avoids destroying while iterating)
-    s_host_runtime->queue_destroy(entity);
+static void host_destroy_entity(runtime::ScriptHostAPI* api, entt::registry* reg, entt::entity entity) {
+    auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
+    if (!reg || !reg->valid(entity) || !rt) return;
+    rt->queue_destroy(entity);
 }
 
-/// Host-side component accessor. This function is compiled into the editor EXE,
-/// so entt template instantiations use the EXE's type system (avoiding DLL type ID mismatch).
-static void* host_get_component(entt::registry* reg, entt::entity entity, entt::id_type type_hash) {
+static void* host_get_component(runtime::ScriptHostAPI* /*api*/, entt::registry* reg, entt::entity entity, entt::id_type type_hash) {
     if (!reg || !reg->valid(entity)) return nullptr;
     auto* storage = reg->storage(type_hash);
     if (!storage || !storage->contains(entity)) return nullptr;
     return storage->value(entity);
 }
 
-// --- Component manipulation callbacks ---
-
-static void* host_add_component(entt::registry* reg, entt::entity entity, entt::id_type type_hash) {
+static void* host_add_component(runtime::ScriptHostAPI* /*api*/, entt::registry* reg, entt::entity entity, entt::id_type type_hash) {
     if (!reg || !reg->valid(entity)) return nullptr;
     auto* storage = reg->storage(type_hash);
     if (!storage) return nullptr;
-    if (storage->contains(entity)) return storage->value(entity); // Already has it
-    storage->push(entity);  // Default-constructs the component
+    if (storage->contains(entity)) return storage->value(entity);
+    storage->push(entity);
     return storage->value(entity);
 }
 
-static void host_remove_component(entt::registry* reg, entt::entity entity, entt::id_type type_hash) {
+static void host_remove_component(runtime::ScriptHostAPI* /*api*/, entt::registry* reg, entt::entity entity, entt::id_type type_hash) {
     if (!reg || !reg->valid(entity)) return;
     auto* storage = reg->storage(type_hash);
     if (!storage || !storage->contains(entity)) return;
     storage->remove(entity);
 }
 
-// --- Prefab instantiation callback ---
-
-static entt::entity host_instantiate_prefab(entt::registry* /*reg*/, const char* prefab_name) {
-    if (!prefab_name || !s_host_runtime) return entt::null;
-    return s_host_runtime->instantiate_prefab_internal(prefab_name);
+static entt::entity host_instantiate_prefab(runtime::ScriptHostAPI* api, entt::registry* /*reg*/, const char* prefab_name) {
+    auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
+    if (!prefab_name || !rt) return entt::null;
+    return rt->instantiate_prefab_internal(prefab_name);
 }
 
 RuntimeContext::RuntimeContext() = default;
-RuntimeContext::~RuntimeContext() = default;
+
+RuntimeContext::~RuntimeContext() {
+    if (m_state != PlayState::Editing) {
+        stop();
+    }
+}
 
 void RuntimeContext::init(entt::registry* editor_registry, ScriptManager* script_manager) {
     m_editor_registry = editor_registry;
     m_script_manager = script_manager;
 
-    // Populate ScriptHostAPI function pointers (constant for lifetime of runtime)
+    m_host_api.runtime_ctx = this;
+
     m_host_api.get_component = &host_get_component;
     m_host_api.is_key_held = &host_is_key_held;
     m_host_api.is_key_pressed = &host_is_key_pressed;
@@ -200,7 +193,7 @@ void RuntimeContext::init(entt::registry* editor_registry, ScriptManager* script
 
 void RuntimeContext::play(const SceneSettings& settings) {
     if (m_state != PlayState::Editing) {
-        return; // Already playing
+        return;
     }
 
     if (!m_editor_registry) {
@@ -208,41 +201,55 @@ void RuntimeContext::play(const SceneSettings& settings) {
         return;
     }
 
-    // Snapshot the current scene state (for restoring on stop)
     snapshot_scene();
 
-    // Initialize physics world from scene settings.
-    // SceneSettings gravity is in pixels/s² with positive Y = down convention.
-    // Editor uses Y-up, so negate Y. PhysicsWorld expects m/s², so divide by ppm.
-    float ppm = settings.pixels_per_meter;
-    float gravity_x_m = settings.gravity_x / ppm;
-    float gravity_y_m = -settings.gravity_y / ppm;  // negate: Y-down scene setting → Y-up Box2D
-    m_physics_world = std::make_unique<engine::physics::PhysicsWorld>();
-    m_physics_world->init(gravity_x_m, gravity_y_m, ppm);
+    try {
+        // Initialize physics world from scene settings.
+        // SceneSettings gravity is in pixels/s² with positive Y = down convention.
+        // Editor uses Y-up, so negate Y. PhysicsWorld expects m/s², so divide by ppm.
+        float ppm = settings.pixels_per_meter;
+        float gravity_x_m = settings.gravity_x / ppm;
+        float gravity_y_m = -settings.gravity_y / ppm;
+        m_physics_world = std::make_unique<engine::physics::PhysicsWorld>();
+        auto result = m_physics_world->init(gravity_x_m, gravity_y_m, ppm);
+        if (!result) {
+            engine::Logger::instance().error("Runtime", "Failed to init physics world: %s",
+                result.error().message.c_str());
+            m_physics_world.reset();
+            restore_scene();
+            return;
+        }
 
-    // Create Box2D bodies from Rigidbody + Collider components
-    init_physics_bodies();
+        m_physics_playback = std::make_unique<PhysicsPlayback>(*m_editor_registry, *m_physics_world);
+        m_physics_playback->init_bodies();
 
-    // Initialize pixel simulations for entities with SimSurface + PixelGridComponent
-    init_pixel_simulations();
+        m_sim_playback = std::make_unique<SimulationPlayback>(*m_editor_registry);
+        m_sim_playback->init(m_physics_world.get());
 
-    // Initialize prefab system for script instantiation
-    m_component_registry = std::make_unique<engine::prefab::ComponentRegistry>();
-    engine::register_engine_components(*m_component_registry);
-    m_prefab_manager = std::make_unique<engine::prefab::PrefabManager>();
-    m_prefab_manager->set_registry(*m_component_registry);
+        m_component_registry = std::make_unique<engine::prefab::ComponentRegistry>();
+        engine::register_engine_components(*m_component_registry);
+        m_prefab_manager = std::make_unique<engine::prefab::PrefabManager>();
+        m_prefab_manager->set_registry(*m_component_registry);
 
-    // Instantiate component scripts from DLL
-    init_scripts();
+        // Instantiate component scripts from DLL
+        init_scripts();
+    } catch (const std::exception& e) {
+        engine::Logger::instance().error("Runtime", "Exception during play init: %s", e.what());
+        shutdown_scripts();
+        m_previously_enabled_script_entities.clear();
+        m_sim_playback.reset();
+        m_physics_playback.reset();
+        m_physics_world.reset();
+        m_prefab_manager.reset();
+        m_component_registry.reset();
+        restore_scene();
+        return;
+    }
 
     m_state = PlayState::Playing;
     m_play_time = 0.0f;
     m_frame_count = 0;
     m_fixed_time_accumulator = 0.0f;
-
-    // Set static pointers for host API callbacks
-    s_host_engine = m_engine;
-    s_host_runtime = this;
 
     engine::Logger::instance().info("Runtime", "Entered play mode with physics system");
 }
@@ -267,23 +274,18 @@ void RuntimeContext::resume() {
 
 void RuntimeContext::stop() {
     if (m_state == PlayState::Editing) {
-        return; // Not playing
+        return;
     }
 
-    // Clear static pointers used by host API callbacks
-    s_host_engine = nullptr;
-    s_host_runtime = nullptr;
-
-    // Shutdown engine systems before restoring scene
     shutdown_scripts();
     m_previously_enabled_script_entities.clear();
     m_deferred_destroys.clear();
-    shutdown_pixel_simulations();
+    m_sim_playback.reset();
+    m_physics_playback.reset();
     m_physics_world.reset();
     m_prefab_manager.reset();
     m_component_registry.reset();
 
-    // Restore the original scene state
     restore_scene();
 
     m_state = PlayState::Editing;
@@ -303,58 +305,54 @@ void RuntimeContext::update(float dt) {
         return;
     }
 
-    // If paused and no step requested, don't update
     if (m_state == PlayState::Paused && !m_step_requested) {
         return;
     }
 
-    // Clear step request
     m_step_requested = false;
 
-    // Update play time and frame count
     m_play_time += dt;
     m_frame_count++;
 
-    // Run engine systems on the editor registry
     if (!m_editor_registry) return;
 
-    // Update host API frame state (scripts read these via convenience methods)
     m_host_api.delta_time = dt;
     m_host_api.time = m_play_time;
     m_host_api.frame_count = m_frame_count;
     m_host_api.fixed_delta_time = m_fixed_timestep;
 
-    // --- Fixed timestep loop (on_fixed_update + physics) ---
     m_fixed_time_accumulator += dt;
+
+    // Cap accumulator to prevent spiral of death when frame rate drops
+    static constexpr float MAX_ACCUMULATION = 0.25f;
+    if (m_fixed_time_accumulator > MAX_ACCUMULATION) {
+        m_fixed_time_accumulator = MAX_ACCUMULATION;
+    }
+
     while (m_fixed_time_accumulator >= m_fixed_timestep) {
         m_fixed_time_accumulator -= m_fixed_timestep;
 
-        // Script fixed update (physics-rate logic)
         fixed_update_scripts();
 
-        // Physics step at fixed rate
         if (m_physics_world) {
             m_physics_world->step(m_fixed_timestep, 4);
         }
     }
 
-    // Sync physics results back to transforms (once per frame)
-    if (m_physics_world) {
-        sync_physics_to_transforms();
+    if (m_physics_playback) {
+        m_physics_playback->sync_to_transforms();
     }
 
-    // Update world transforms for hierarchy
     update_world_transforms(*m_editor_registry);
 
-    // --- Per-frame script callbacks ---
     check_enable_disable_scripts();
     update_scripts();
     late_update_scripts();
 
-    // Update pixel simulations (falling sand, liquids, gases)
-    update_pixel_simulations(dt);
+    if (m_sim_playback) {
+        m_sim_playback->update(m_frame_count);
+    }
 
-    // Flush deferred entity destructions (queued by scripts calling destroy_self/destroy_entity)
     for (auto entity : m_deferred_destroys) {
         if (m_editor_registry->valid(entity)) {
             destroy_entity_recursive(*m_editor_registry, entity);
@@ -368,7 +366,6 @@ void RuntimeContext::snapshot_scene() {
         return;
     }
 
-    // Serialize the scene to a string (JSON)
     SceneSerializer serializer(*m_editor_registry);
     m_scene_snapshot = serializer.save_to_string();
 
@@ -380,10 +377,8 @@ void RuntimeContext::restore_scene() {
         return;
     }
 
-    // Clear the editor registry
     m_editor_registry->clear();
 
-    // Restore from snapshot
     SceneSerializer serializer(*m_editor_registry);
     if (serializer.load_from_string(m_scene_snapshot)) {
         engine::Logger::instance().info("Runtime", "Scene restored from snapshot");
@@ -394,527 +389,13 @@ void RuntimeContext::restore_scene() {
     m_scene_snapshot.clear();
 }
 
-void RuntimeContext::init_physics_bodies() {
-    if (!m_editor_registry || !m_physics_world) return;
-
-    int body_count = 0;
-
-    // 1) Create bodies for entities with explicit Rigidbody components
-    auto rb_view = m_editor_registry->view<engine::physics::Rigidbody, engine::Transform>();
-    for (auto entity : rb_view) {
-        auto& rb = rb_view.get<engine::physics::Rigidbody>(entity);
-        if (!rb.enabled) continue;
-        if (b2Body_IsValid(rb.body_id)) continue;
-
-        create_body_for_entity(entity);
-        body_count++;
-    }
-
-    // 2) Create implicit static bodies for collider-only entities (no Rigidbody).
-    //    Box2D requires every shape to be attached to a body.
-    int static_count = 0;
-    auto create_static_for_collider = [&](entt::entity entity) {
-        if (!m_editor_registry->all_of<engine::Transform>(entity)) return;
-        if (m_editor_registry->all_of<engine::physics::Rigidbody>(entity)) return; // already handled above
-
-        // Add an implicit Rigidbody as static
-        auto& rb = m_editor_registry->emplace<engine::physics::Rigidbody>(entity);
-        rb.body_type = engine::physics::BodyType::Static;
-        rb.mass = 0.0f;
-        rb.enabled = true;
-
-        auto& transform = m_editor_registry->get<engine::Transform>(entity);
-        float angle_rad = transform.world_rotation * engine::DEG_TO_RAD;
-        rb.body_id = m_physics_world->create_static_body(
-            transform.world_x, transform.world_y, angle_rad);
-
-        // Attach collider shapes
-        attach_collider_shapes(entity, rb);
-        static_count++;
-    };
-
-    m_editor_registry->view<engine::physics::BoxCollider>().each(
-        [&](entt::entity e, auto&) { create_static_for_collider(e); });
-    m_editor_registry->view<engine::physics::CircleCollider>().each(
-        [&](entt::entity e, auto&) { create_static_for_collider(e); });
-    m_editor_registry->view<engine::physics::CapsuleCollider>().each(
-        [&](entt::entity e, auto&) { create_static_for_collider(e); });
-
-    engine::Logger::instance().info("Runtime", "Created %d physics bodies (%d implicit static)", body_count + static_count, static_count);
-}
-
-void RuntimeContext::create_body_for_entity(entt::entity entity) {
-    if (!m_editor_registry || !m_physics_world) return;
-    if (!m_editor_registry->all_of<engine::physics::Rigidbody, engine::Transform>(entity)) return;
-
-    auto& rb = m_editor_registry->get<engine::physics::Rigidbody>(entity);
-    auto& transform = m_editor_registry->get<engine::Transform>(entity);
-
-    // Create body based on type using world position
-    float angle_rad = transform.world_rotation * engine::DEG_TO_RAD;
-
-    switch (rb.body_type) {
-        case engine::physics::BodyType::Dynamic:
-            rb.body_id = m_physics_world->create_dynamic_body(
-                transform.world_x, transform.world_y, angle_rad);
-            break;
-        case engine::physics::BodyType::Static:
-            rb.body_id = m_physics_world->create_static_body(
-                transform.world_x, transform.world_y, angle_rad);
-            break;
-        case engine::physics::BodyType::Kinematic:
-            rb.body_id = m_physics_world->create_kinematic_body(
-                transform.world_x, transform.world_y, angle_rad);
-            break;
-    }
-
-    // Apply body properties
-    m_physics_world->set_gravity_scale(rb.body_id, rb.gravity_scale);
-    m_physics_world->set_fixed_rotation(rb.body_id, rb.lock_rotation);
-
-    // Apply initial velocity for dynamic bodies
-    if (rb.body_type == engine::physics::BodyType::Dynamic) {
-        if (rb.initial_velocity_x != 0.0f || rb.initial_velocity_y != 0.0f) {
-            m_physics_world->set_body_linear_velocity(rb.body_id,
-                rb.initial_velocity_x, rb.initial_velocity_y);
-        }
-        if (rb.initial_angular_velocity != 0.0f) {
-            m_physics_world->set_body_angular_velocity(rb.body_id,
-                rb.initial_angular_velocity);
-        }
-    }
-
-    // Attach collider shapes to the body
-    attach_collider_shapes(entity, rb);
-
-    // For dynamic bodies: ensure mass is set even without collider shapes.
-    // Box2D bodies with no shapes have zero mass and won't respond to gravity.
-    // Use Rigidbody.mass as override (like Unity behavior).
-    if (rb.body_type == engine::physics::BodyType::Dynamic && rb.mass > 0.0f) {
-        b2MassData mass_data = b2Body_GetMassData(rb.body_id);
-        if (mass_data.mass <= 0.0f) {
-            mass_data.mass = rb.mass;
-            mass_data.center = {0.0f, 0.0f};
-            mass_data.rotationalInertia = rb.mass * 0.01f;
-            b2Body_SetMassData(rb.body_id, mass_data);
-        }
-    }
-}
-
-void RuntimeContext::attach_collider_shapes(entt::entity entity, engine::physics::Rigidbody& rb) {
-    if (!m_editor_registry || !m_physics_world) return;
-    if (!m_editor_registry->all_of<engine::Transform>(entity)) return;
-
-    auto& transform = m_editor_registry->get<engine::Transform>(entity);
-    float scale_x = transform.world_scale_x;
-    float scale_y = transform.world_scale_y;
-    float avg_scale = (std::abs(scale_x) + std::abs(scale_y)) * 0.5f;
-
-    // BoxCollider
-    if (m_editor_registry->all_of<engine::physics::BoxCollider>(entity)) {
-        auto& box = m_editor_registry->get<engine::physics::BoxCollider>(entity);
-        if (box.enabled) {
-            // Apply entity scale to dimensions and offset
-            float hw = m_physics_world->pixels_to_meters(box.width * 0.5f * std::abs(scale_x));
-            float hh = m_physics_world->pixels_to_meters(box.height * 0.5f * std::abs(scale_y));
-            float ox = m_physics_world->pixels_to_meters(box.offset_x * scale_x);
-            float oy = m_physics_world->pixels_to_meters(box.offset_y * scale_y);
-
-            float rot_rad = box.rotation * engine::DEG_TO_RAD;
-            float cos_r = std::cos(rot_rad);
-            float sin_r = std::sin(rot_rad);
-
-            float corners[4][2] = {
-                {-hw, -hh}, {hw, -hh}, {hw, hh}, {-hw, hh}
-            };
-            b2Vec2 verts[4];
-            for (int i = 0; i < 4; i++) {
-                verts[i].x = corners[i][0] * cos_r - corners[i][1] * sin_r + ox;
-                verts[i].y = corners[i][0] * sin_r + corners[i][1] * cos_r + oy;
-            }
-
-            box.shape_id = m_physics_world->add_polygon_shape(
-                rb.body_id, verts, 4, box.density, box.friction, box.restitution);
-        }
-    }
-
-    // CircleCollider
-    if (m_editor_registry->all_of<engine::physics::CircleCollider>(entity)) {
-        auto& circle = m_editor_registry->get<engine::physics::CircleCollider>(entity);
-        if (circle.enabled) {
-            b2Circle c;
-            c.center.x = m_physics_world->pixels_to_meters(circle.offset_x * scale_x);
-            c.center.y = m_physics_world->pixels_to_meters(circle.offset_y * scale_y);
-            c.radius = m_physics_world->pixels_to_meters(circle.radius * avg_scale);
-
-            b2ShapeDef shape_def = b2DefaultShapeDef();
-            shape_def.density = circle.density;
-            shape_def.material.friction = circle.friction;
-            shape_def.material.restitution = circle.restitution;
-            shape_def.isSensor = circle.is_trigger;
-
-            circle.shape_id = b2CreateCircleShape(rb.body_id, &shape_def, &c);
-        }
-    }
-
-    // CapsuleCollider
-    if (m_editor_registry->all_of<engine::physics::CapsuleCollider>(entity)) {
-        auto& cap = m_editor_registry->get<engine::physics::CapsuleCollider>(entity);
-        if (cap.enabled) {
-            // Apply entity scale to dimensions and offset
-            float half_len = m_physics_world->pixels_to_meters(cap.length * 0.5f * avg_scale);
-            float rad = m_physics_world->pixels_to_meters(cap.radius * avg_scale);
-            float ox = m_physics_world->pixels_to_meters(cap.offset_x * scale_x);
-            float oy = m_physics_world->pixels_to_meters(cap.offset_y * scale_y);
-            float cap_rot = cap.rotation * engine::DEG_TO_RAD;
-
-            float ax = -std::sin(cap_rot);
-            float ay = std::cos(cap_rot);
-
-            float bw = rad;
-            float bh = half_len;
-            float cos_c = std::cos(cap_rot);
-            float sin_c = std::sin(cap_rot);
-
-            float box_corners[4][2] = {
-                {-bw, -bh}, {bw, -bh}, {bw, bh}, {-bw, bh}
-            };
-            b2Vec2 box_verts[4];
-            for (int i = 0; i < 4; i++) {
-                box_verts[i].x = box_corners[i][0] * cos_c - box_corners[i][1] * sin_c + ox;
-                box_verts[i].y = box_corners[i][0] * sin_c + box_corners[i][1] * cos_c + oy;
-            }
-            cap.shape_ids.push_back(m_physics_world->add_polygon_shape(
-                rb.body_id, box_verts, 4, cap.density, cap.friction, cap.restitution));
-
-            b2ShapeDef shape_def = b2DefaultShapeDef();
-            shape_def.density = cap.density;
-            shape_def.material.friction = cap.friction;
-            shape_def.material.restitution = cap.restitution;
-            shape_def.isSensor = cap.is_trigger;
-
-            b2Circle top_circle;
-            top_circle.center.x = ox + ax * half_len;
-            top_circle.center.y = oy + ay * half_len;
-            top_circle.radius = rad;
-            cap.shape_ids.push_back(b2CreateCircleShape(rb.body_id, &shape_def, &top_circle));
-
-            b2Circle bottom_circle;
-            bottom_circle.center.x = ox - ax * half_len;
-            bottom_circle.center.y = oy - ay * half_len;
-            bottom_circle.radius = rad;
-            cap.shape_ids.push_back(b2CreateCircleShape(rb.body_id, &shape_def, &bottom_circle));
-        }
-    }
-}
-
-void RuntimeContext::sync_physics_to_transforms() {
-    if (!m_editor_registry || !m_physics_world) return;
-
-    auto view = m_editor_registry->view<engine::physics::Rigidbody, engine::Transform>();
-
-    for (auto entity : view) {
-        auto& rb = view.get<engine::physics::Rigidbody>(entity);
-        auto& transform = view.get<engine::Transform>(entity);
-
-        if (!rb.enabled) continue;
-
-        // Auto-create body for dynamically spawned entities
-        if (!b2Body_IsValid(rb.body_id)) {
-            create_body_for_entity(entity);
-            if (!b2Body_IsValid(rb.body_id)) continue; // Creation failed
-        }
-
-        if (rb.body_type == engine::physics::BodyType::Dynamic) {
-            // Read physics position (in pixels) and angle (in radians)
-            b2Vec2 pos = m_physics_world->get_body_position(rb.body_id);
-            float angle = m_physics_world->get_body_angle(rb.body_id);
-
-            // Write to local transform (works correctly for root entities)
-            transform.x = pos.x;
-            transform.y = pos.y;
-            transform.rotation = angle * engine::RAD_TO_DEG;
-
-            // Handle position locks by zeroing velocity on locked axes
-            if (rb.lock_position_x || rb.lock_position_y) {
-                b2Vec2 vel = m_physics_world->get_body_linear_velocity(rb.body_id);
-                if (rb.lock_position_x) vel.x = 0.0f;
-                if (rb.lock_position_y) vel.y = 0.0f;
-                m_physics_world->set_body_linear_velocity(rb.body_id, vel.x, vel.y);
-            }
-        }
-        else if (rb.body_type == engine::physics::BodyType::Kinematic) {
-            // Sync transform -> physics for kinematic bodies
-            m_physics_world->set_body_transform(rb.body_id,
-                transform.world_x, transform.world_y,
-                transform.world_rotation * engine::DEG_TO_RAD);
-        }
-    }
-}
-
-void RuntimeContext::init_pixel_simulations() {
-    if (!m_editor_registry) return;
-
-    // Load shared color conversion shader (SSBO material IDs → RGBA8 via palette)
-    if (!m_color_shader.load_compute("shaders/ssbo_to_color.comp")) {
-        engine::Logger::instance().error("Runtime", "Failed to load ssbo_to_color compute shader");
-        return;
-    }
-
-    auto view = m_editor_registry->view<engine::simulation::SimSurface,
-                                         engine::simulation::PixelGridComponent>();
-    for (auto entity : view) {
-        auto& sim_surface = view.get<engine::simulation::SimSurface>(entity);
-        auto& grid_comp = view.get<engine::simulation::PixelGridComponent>(entity);
-
-        if (!sim_surface.simulation_enabled) continue;
-        if (grid_comp.pixel_grid_path.empty()) continue;
-
-        // Load .pxg file
-        auto pxg_file = engine::asset::pxg_load(grid_comp.pixel_grid_path);
-        if (!pxg_file) {
-            engine::Logger::instance().warning("Runtime", "Failed to load .pxg file: %s",
-                grid_comp.pixel_grid_path.c_str());
-            continue;
-        }
-
-        auto parsed = engine::asset::parse_pxg(*pxg_file);
-        if (parsed.width <= 0 || parsed.height <= 0) {
-            engine::Logger::instance().warning("Runtime", "Invalid .pxg dimensions: %dx%d",
-                parsed.width, parsed.height);
-            continue;
-        }
-
-        // Get material library
-        auto* lib = engine::simulation::MaterialLibraryRegistry::instance().get_library(sim_surface.material_set);
-        if (!lib) {
-            engine::Logger::instance().warning("Runtime", "Material library '%s' not found",
-                sim_surface.material_set.c_str());
-            continue;
-        }
-
-        auto state = std::make_unique<SimSurfaceState>();
-        state->entity = entity;
-        state->width = parsed.width;
-        state->height = parsed.height;
-
-        // Initialize PixelGrid (4 bytes per pixel: material, category, temperature, flags)
-        if (!state->pixel_grid.init(parsed.width, parsed.height, 4)) {
-            engine::Logger::instance().error("Runtime", "Failed to init PixelGrid %dx%d",
-                parsed.width, parsed.height);
-            continue;
-        }
-
-        // Build initial pixel data from parsed material IDs
-        int pixel_count = parsed.width * parsed.height;
-        std::vector<uint8_t> pixel_data(pixel_count * 4, 0);
-
-        for (int i = 0; i < pixel_count; i++) {
-            uint8_t mat_id = 0;
-            if (!parsed.material_ids.empty() && i < static_cast<int>(parsed.material_ids.size())) {
-                mat_id = parsed.material_ids[i];
-            }
-
-            uint8_t category = 0;
-            uint8_t default_temp = 128;
-            if (mat_id > 0) {
-                auto* mat_def = lib->get_material(mat_id);
-                if (mat_def) {
-                    category = static_cast<uint8_t>(mat_def->category);
-                    default_temp = mat_def->default_temp;
-                }
-            }
-
-            pixel_data[i * 4 + 0] = mat_id;
-            pixel_data[i * 4 + 1] = category;
-            pixel_data[i * 4 + 2] = default_temp;
-            pixel_data[i * 4 + 3] = 0; // flags
-        }
-
-        // Diagnostic: count material distribution
-        int mat_counts[256] = {};
-        for (int i = 0; i < pixel_count; i++) {
-            mat_counts[pixel_data[i * 4 + 0]]++;
-        }
-        int non_air = pixel_count - mat_counts[0];
-        int mobile = 0;
-        for (int i = 0; i < pixel_count; i++) {
-            uint8_t cat = pixel_data[i * 4 + 1];
-            if (cat >= 2) mobile++; // powder=2, liquid=3, gas=4
-        }
-        engine::Logger::instance().info("Runtime",
-            "Pixel data: %d total, %d non-air, %d mobile (powder/liquid/gas)",
-            pixel_count, non_air, mobile);
-        if (!parsed.has_material_layer) {
-            engine::Logger::instance().warning("Runtime", ".pxg has NO material layer - all pixels are air");
-        }
-
-        state->pixel_grid.upload_both(0, 0, parsed.width, parsed.height, pixel_data.data());
-
-        // Build material slots for simulation
-        auto slots = lib->build_material_slots();
-
-        // Resolve special material IDs for sim_step.comp uniforms
-        uint8_t mat_water = 0, mat_lava = 0, mat_ice = 0, mat_steam = 0;
-        if (auto* m = lib->get_material("water")) mat_water = m->id;
-        if (auto* m = lib->get_material("lava"))  mat_lava  = m->id;
-        if (auto* m = lib->get_material("ice"))   mat_ice   = m->id;
-        if (auto* m = lib->get_material("steam")) mat_steam = m->id;
-
-        // Init Margolus simulation with material uniform callback
-        auto uniform_callback = [mat_water, mat_lava, mat_ice, mat_steam](engine::graphics::Shader& shader) {
-            shader.set_uint("u_mat_water", mat_water);
-            shader.set_uint("u_mat_lava", mat_lava);
-            shader.set_uint("u_mat_ice", mat_ice);
-            shader.set_uint("u_mat_steam", mat_steam);
-        };
-
-        if (!state->simulation.init(slots.data(), static_cast<int>(slots.size()),
-                                     parsed.width, parsed.height,
-                                     "shaders/sim_step.comp", uniform_callback)) {
-            engine::Logger::instance().error("Runtime", "Failed to init MargolusSimulation");
-            state->pixel_grid.shutdown();
-            continue;
-        }
-
-        // Create RGBA8 color texture for viewport display
-        if (!state->color_texture.create_2d(parsed.width, parsed.height,
-                                             engine::graphics::TextureFormat::RGBA8)) {
-            engine::Logger::instance().error("Runtime", "Failed to create color texture");
-            state->simulation.shutdown();
-            state->pixel_grid.shutdown();
-            continue;
-        }
-
-        // Build palette SSBO from material library colors
-        auto palette = lib->build_color_palette();
-        // Ensure 256 entries
-        palette.resize(256, 0x00000000);
-        state->palette_ssbo.create(palette.size() * sizeof(uint32_t), palette.data(),
-                                    engine::graphics::BufferUsage::StaticDraw);
-
-        // Initialize terrain collider generation if requested
-        if (sim_surface.generate_colliders && m_physics_world) {
-            state->terrain_colliders = std::make_unique<engine::physics::TerrainColliderManager>();
-            if (state->terrain_colliders->init(*m_physics_world,
-                    sim_surface.chunk_size_x, sim_surface.chunk_size_y)) {
-                engine::Logger::instance().info("Runtime",
-                    "Terrain colliders enabled: chunk=%dx%d",
-                    sim_surface.chunk_size_x, sim_surface.chunk_size_y);
-            } else {
-                engine::Logger::instance().error("Runtime", "Failed to init TerrainColliderManager");
-                state->terrain_colliders.reset();
-            }
-        }
-
-        engine::Logger::instance().info("Runtime", "Initialized pixel simulation: %dx%d, %zu materials",
-            parsed.width, parsed.height, slots.size());
-
-        m_sim_surfaces.push_back(std::move(state));
-    }
-
-    if (!m_sim_surfaces.empty()) {
-        engine::Logger::instance().info("Runtime", "Started %zu pixel simulation(s)",
-            m_sim_surfaces.size());
-    }
-}
-
-void RuntimeContext::update_pixel_simulations(float /*dt*/) {
-    if (m_sim_surfaces.empty()) return;
-    if (!m_editor_registry) return;
-
-    // Log diagnostic info on first simulation tick per play session
-    bool first_update = (m_frame_count <= 1);
-
-    for (auto& state : m_sim_surfaces) {
-        if (!m_editor_registry->valid(state->entity)) {
-            if (first_update) engine::Logger::instance().warning("Runtime", "Sim entity invalid");
-            continue;
-        }
-        if (!m_editor_registry->all_of<engine::simulation::SimSurface>(state->entity)) {
-            if (first_update) engine::Logger::instance().warning("Runtime", "Entity missing SimSurface");
-            continue;
-        }
-
-        auto& sim_surface = m_editor_registry->get<engine::simulation::SimSurface>(state->entity);
-        if (!sim_surface.simulation_enabled) {
-            if (first_update) engine::Logger::instance().warning("Runtime", "Simulation disabled");
-            continue;
-        }
-
-        if (first_update) {
-            engine::Logger::instance().info("Runtime",
-                "Running simulation tick: entity=%u, grid=%dx%d, color_tex=%u",
-                static_cast<unsigned>(state->entity), state->width, state->height,
-                state->color_texture.handle());
-        }
-
-        // Run falling-sand simulation (4 Margolus phases)
-        state->simulation.simulate(state->pixel_grid, m_render_context);
-
-        // Convert SSBO → RGBA8 color texture via palette lookup compute shader
-        m_color_shader.use();
-        state->pixel_grid.bind_read_ssbo(0);
-        state->palette_ssbo.bind_base(1);
-        state->color_texture.bind_as_image(0, engine::graphics::ImageAccess::WriteOnly);
-        m_color_shader.set_int("u_grid_width", state->width);
-        m_color_shader.set_int("u_grid_height", state->height);
-        m_color_shader.set_uint("u_pixel_size", static_cast<uint32_t>(state->pixel_grid.pixel_size()));
-
-        int groups_x = (state->width + 15) / 16;
-        int groups_y = (state->height + 15) / 16;
-        // TEXTURE_FETCH barrier: ImGui reads this via texture sampler, not imageLoad
-        m_render_context.dispatch_compute(groups_x, groups_y, 1, GL_TEXTURE_FETCH_BARRIER_BIT);
-
-        // Update terrain colliders from settled pixels
-        if (state->terrain_colliders && m_editor_registry->valid(state->entity)) {
-            // Build entity transform for collider positioning
-            engine::physics::TerrainColliderManager::EntityTransform et;
-            if (m_editor_registry->all_of<engine::Transform>(state->entity)) {
-                auto& t = m_editor_registry->get<engine::Transform>(state->entity);
-                et.world_x = t.world_x;
-                et.world_y = t.world_y;
-                et.world_rotation_deg = t.world_rotation;
-                et.scale_x = t.world_scale_x;
-                et.scale_y = t.world_scale_y;
-            }
-            if (m_editor_registry->all_of<engine::simulation::PixelGridComponent>(state->entity)) {
-                auto& gc = m_editor_registry->get<engine::simulation::PixelGridComponent>(state->entity);
-                et.origin_x = gc.origin_x;
-                et.origin_y = gc.origin_y;
-            }
-
-            // Mark entire grid dirty (simulation changes every pixel every frame)
-            state->terrain_colliders->mark_dirty_region(0, 0, state->width, state->height);
-            state->terrain_colliders->update_terrain_colliders(state->pixel_grid, et);
-        }
-    }
-
-    first_update = false;
-}
-
-void RuntimeContext::shutdown_pixel_simulations() {
-    for (auto& state : m_sim_surfaces) {
-        if (state->terrain_colliders) {
-            state->terrain_colliders->shutdown();
-            state->terrain_colliders.reset();
-        }
-        state->simulation.shutdown();
-        state->pixel_grid.shutdown();
-        state->color_texture.destroy();
-        state->palette_ssbo.destroy();
-    }
-    m_sim_surfaces.clear();
-    m_color_shader.destroy();
-}
-
 uint32_t RuntimeContext::get_sim_texture(entt::entity entity) const {
-    for (const auto& state : m_sim_surfaces) {
-        if (state->entity == entity) {
-            return state->color_texture.handle();
-        }
-    }
-    return 0;
+    return m_sim_playback ? m_sim_playback->get_sim_texture(entity) : 0;
+}
+
+const std::vector<std::unique_ptr<SimSurfaceState>>& RuntimeContext::sim_surfaces() const {
+    static const std::vector<std::unique_ptr<SimSurfaceState>> empty;
+    return m_sim_playback ? m_sim_playback->surfaces() : empty;
 }
 
 void RuntimeContext::init_scripts() {
@@ -928,7 +409,6 @@ void RuntimeContext::init_scripts() {
     for (auto entity : view) {
         auto& sc = view.get<runtime::ScriptComponent>(entity);
 
-        // Instantiate script objects from stored type names
         for (const auto& type_name : sc.script_types) {
             auto* script = dll.create_script(type_name);
             if (script) {
@@ -941,12 +421,10 @@ void RuntimeContext::init_scripts() {
             }
         }
 
-        // Call on_create for all instantiated scripts
         for (auto& script : sc.scripts) {
             if (script) script->on_create();
         }
 
-        // Track initial enabled state for on_enable/on_disable detection
         bool enabled = true;
         if (m_editor_registry->all_of<EntityInfo>(entity)) {
             enabled = m_editor_registry->get<EntityInfo>(entity).enabled_in_hierarchy;
@@ -968,65 +446,38 @@ void RuntimeContext::shutdown_scripts() {
         for (auto& script : sc.scripts) {
             if (script) script->on_destroy();
         }
-        sc.scripts.clear(); // Destroy instances, keep type names for serialization
+        sc.scripts.clear();
+    }
+}
+
+template<typename Fn>
+static void for_each_enabled_script(entt::registry& registry, Fn&& fn) {
+    auto view = registry.view<runtime::ScriptComponent>();
+    for (auto entity : view) {
+        if (registry.all_of<EntityInfo>(entity)) {
+            if (!registry.get<EntityInfo>(entity).enabled_in_hierarchy) {
+                continue;
+            }
+        }
+        for (auto& script : view.get<runtime::ScriptComponent>(entity).scripts) {
+            if (script) fn(*script);
+        }
     }
 }
 
 void RuntimeContext::fixed_update_scripts() {
     if (!m_editor_registry) return;
-
-    auto view = m_editor_registry->view<runtime::ScriptComponent>();
-    for (auto entity : view) {
-        auto& sc = view.get<runtime::ScriptComponent>(entity);
-
-        if (m_editor_registry->all_of<EntityInfo>(entity)) {
-            if (!m_editor_registry->get<EntityInfo>(entity).enabled_in_hierarchy) {
-                continue;
-            }
-        }
-
-        for (auto& script : sc.scripts) {
-            if (script) script->on_fixed_update();
-        }
-    }
+    for_each_enabled_script(*m_editor_registry, [](runtime::ComponentScript& s) { s.on_fixed_update(); });
 }
 
 void RuntimeContext::update_scripts() {
     if (!m_editor_registry) return;
-
-    auto view = m_editor_registry->view<runtime::ScriptComponent>();
-    for (auto entity : view) {
-        auto& sc = view.get<runtime::ScriptComponent>(entity);
-
-        if (m_editor_registry->all_of<EntityInfo>(entity)) {
-            if (!m_editor_registry->get<EntityInfo>(entity).enabled_in_hierarchy) {
-                continue;
-            }
-        }
-
-        for (auto& script : sc.scripts) {
-            if (script) script->on_update();
-        }
-    }
+    for_each_enabled_script(*m_editor_registry, [](runtime::ComponentScript& s) { s.on_update(); });
 }
 
 void RuntimeContext::late_update_scripts() {
     if (!m_editor_registry) return;
-
-    auto view = m_editor_registry->view<runtime::ScriptComponent>();
-    for (auto entity : view) {
-        auto& sc = view.get<runtime::ScriptComponent>(entity);
-
-        if (m_editor_registry->all_of<EntityInfo>(entity)) {
-            if (!m_editor_registry->get<EntityInfo>(entity).enabled_in_hierarchy) {
-                continue;
-            }
-        }
-
-        for (auto& script : sc.scripts) {
-            if (script) script->on_late_update();
-        }
-    }
+    for_each_enabled_script(*m_editor_registry, [](runtime::ComponentScript& s) { s.on_late_update(); });
 }
 
 void RuntimeContext::check_enable_disable_scripts() {
@@ -1045,13 +496,11 @@ void RuntimeContext::check_enable_disable_scripts() {
         bool was_enabled = m_previously_enabled_script_entities.count(entity) > 0;
 
         if (currently_enabled && !was_enabled) {
-            // Entity just became enabled
             for (auto& script : sc.scripts) {
                 if (script) script->on_enable();
             }
             m_previously_enabled_script_entities.insert(entity);
         } else if (!currently_enabled && was_enabled) {
-            // Entity just became disabled
             for (auto& script : sc.scripts) {
                 if (script) script->on_disable();
             }
@@ -1063,7 +512,6 @@ void RuntimeContext::check_enable_disable_scripts() {
 entt::entity RuntimeContext::instantiate_prefab_internal(const char* prefab_name) {
     if (!m_prefab_manager || !m_editor_registry || !prefab_name) return entt::null;
 
-    // Load prefab on demand if not already cached
     if (!m_prefab_manager->find(prefab_name)) {
         if (m_project_assets_path.empty()) {
             engine::Logger::instance().error("Runtime",
@@ -1091,7 +539,6 @@ entt::entity RuntimeContext::instantiate_prefab_internal(const char* prefab_name
     auto entity = m_prefab_manager->instantiate(prefab_name, *m_editor_registry);
     if (entity == entt::null) return entt::null;
 
-    // Add editor metadata if not already present (prefab factories don't add these)
     if (!m_editor_registry->all_of<EntityInfo>(entity)) {
         auto& info = m_editor_registry->emplace<EntityInfo>(entity);
         info.name = prefab_name;
@@ -1108,4 +555,4 @@ entt::entity RuntimeContext::instantiate_prefab_internal(const char* prefab_name
     return entity;
 }
 
-} // namespace editor
+}

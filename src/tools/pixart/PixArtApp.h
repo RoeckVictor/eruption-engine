@@ -38,6 +38,10 @@ private:
     void render_add_layer_dialog();
     void render_unsaved_changes_dialog();
 
+    // --- File operations ---
+    bool try_save_document();      // Save to current path, or prompt if none. Returns true on success.
+    bool try_save_document_as();   // Always prompt for path. Returns true on success.
+
     // --- Unsaved changes handling ---
     void try_open_file();
     void try_new_document();

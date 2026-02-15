@@ -7,6 +7,14 @@ namespace engine::asset {
 namespace fs = std::filesystem;
 
 void FileWatcher::watch(const std::string& physical_path, Callback on_changed) {
+    // If already watching this path, update the callback instead of adding a duplicate
+    for (auto& existing : m_entries) {
+        if (existing.path == physical_path) {
+            existing.callback = std::move(on_changed);
+            return;
+        }
+    }
+
     WatchEntry entry;
     entry.path = physical_path;
     entry.callback = std::move(on_changed);
@@ -25,6 +33,10 @@ void FileWatcher::unwatch(const std::string& physical_path) {
 }
 
 void FileWatcher::poll() {
+    auto now = std::chrono::steady_clock::now();
+    if (now - m_last_poll < m_poll_interval) return;
+    m_last_poll = now;
+
     for (auto& entry : m_entries) {
         std::error_code ec;
         auto current_time = fs::last_write_time(entry.path, ec);

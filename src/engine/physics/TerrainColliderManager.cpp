@@ -17,10 +17,19 @@ bool TerrainColliderManager::init(PhysicsWorld& world, int chunk_size_x, int chu
         ENGINE_ERR("TerrainColliderManager::init() - Invalid PhysicsWorld provided");
         return false;
     }
+    if (chunk_size_x <= 0 || chunk_size_y <= 0) {
+        ENGINE_ERR("TerrainColliderManager::init() - Invalid chunk size (%d, %d)", chunk_size_x, chunk_size_y);
+        return false;
+    }
 
     m_world = &world;
     m_chunk_size_x = chunk_size_x;
     m_chunk_size_y = chunk_size_y;
+
+    // Pre-allocate readback buffer for one chunk (avoids allocation on first dirty chunk).
+    // Uses minimum pixel size of 4; will grow if pixel_size is larger.
+    m_terrain_readback_buf.reserve(static_cast<size_t>(chunk_size_x) * chunk_size_y * 4);
+
     return true;
 }
 
@@ -126,8 +135,9 @@ void TerrainColliderManager::update_terrain_colliders(simulation::PixelGrid& gri
             chunk->debug_verts.clear();
 
             // Read back this chunk's pixels (exact chunk size, no padding)
-            int chunk_w = std::min(m_chunk_size_x, grid.width() - chunk_px);
-            int chunk_h = std::min(m_chunk_size_y, grid.height() - chunk_py);
+            int chunk_w = std::min(m_chunk_size_x, std::max(0, grid.width() - chunk_px));
+            int chunk_h = std::min(m_chunk_size_y, std::max(0, grid.height() - chunk_py));
+            if (chunk_w <= 0 || chunk_h <= 0) continue;
 
             size_t pixel_size = grid.pixel_size();
             size_t buf_size = static_cast<size_t>(chunk_w) * chunk_h * pixel_size;
@@ -171,10 +181,15 @@ void TerrainColliderManager::update_terrain_colliders(simulation::PixelGrid& gri
                             is_settled = at_grid_bottom;
                             if (!is_settled) has_moving = true;
                         } else {
-                            // Check the pixel directly below
+                            // Check the pixel directly below.
+                            // Only consider the powder settled if it rests on a solid
+                            // surface (static material) or another powder that could
+                            // itself be settled.  Liquids and gases are moving materials
+                            // and cannot support powder for collision purposes.
                             int below_i = (ly + 1) * chunk_w + lx;
                             uint8_t below_cat = m_terrain_readback_buf[below_i * pixel_size + 1];
-                            is_settled = (below_cat != simulation::CAT_EMPTY);
+                            is_settled = (below_cat == simulation::CAT_STATIC ||
+                                          below_cat == simulation::CAT_POWDER);
                             if (!is_settled) has_moving = true;
                         }
 

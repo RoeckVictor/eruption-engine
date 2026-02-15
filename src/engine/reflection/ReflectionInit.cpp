@@ -1,5 +1,6 @@
 #include "ReflectionInit.h"
-#include "TypeRegistry.h"
+#include "ReflectionSerializer.h"
+#include "EngineComponentList.h"
 #include "engine/core/Transform.h"
 #include "engine/render/Camera2D.h"
 #include "engine/render/PixelGridRenderer.h"
@@ -40,6 +41,7 @@ REFLECT_TYPE_END()
 // Animator reflection
 REFLECT_TYPE_BEGIN(engine::animation::Animator)
     REFLECT_PROPERTY(enabled, "Enabled")
+    REFLECT_PROPERTY(current_clip, "Current Clip")
     REFLECT_PROPERTY(playing, "Playing")
 REFLECT_TYPE_END()
 
@@ -69,6 +71,7 @@ REFLECT_TYPE_END()
 // Rigidbody reflection
 REFLECT_TYPE_BEGIN(engine::physics::Rigidbody)
     REFLECT_PROPERTY(enabled, "Enabled")
+    REFLECT_PROPERTY(body_type, "Body Type")
     REFLECT_PROPERTY_RANGE(mass, "Mass", 0.0f, 1000.0f, 0.1f)
     REFLECT_PROPERTY_RANGE(linear_damping, "Linear Damping", 0.0f, 10.0f, 0.1f)
     REFLECT_PROPERTY_RANGE(angular_damping, "Angular Damping", 0.0f, 10.0f, 0.1f)
@@ -169,181 +172,15 @@ REFLECT_TYPE_END()
 namespace engine::reflection {
 
 void init_engine_reflections() {
-    auto& registry = TypeRegistry::instance();
-
     engine::Logger::instance().info("Reflection", "Initializing engine component reflections...");
 
-    // Register Transform
-    {
-        auto info = std::make_unique<TypeInfo>(
-            "engine::Transform",
-            sizeof(engine::Transform),
-            std::type_index(typeid(engine::Transform))
-        );
-        TypeReflector<engine::Transform>::reflect(*info);
-        size_t prop_count = info->properties().size();
-        registry.register_type(std::move(info));
-        engine::Logger::instance().info("Reflection", "Registered Transform with %zu properties", prop_count);
-    }
+    // Register all engine components from the central list (EngineComponentList.h)
+    #define REGISTER_REFLECTION(T) register_type<T>();
+    ENGINE_COMPONENT_LIST(REGISTER_REFLECTION)
+    #undef REGISTER_REFLECTION
 
-    // Register Camera2D
-    {
-        auto info = std::make_unique<TypeInfo>(
-            "engine::render::Camera2D",
-            sizeof(engine::render::Camera2D),
-            std::type_index(typeid(engine::render::Camera2D))
-        );
-        TypeReflector<engine::render::Camera2D>::reflect(*info);
-        size_t prop_count = info->properties().size();
-        registry.register_type(std::move(info));
-        engine::Logger::instance().info("Reflection", "Registered Camera2D with %zu properties", prop_count);
-    }
-
-    // Register Animator
-    {
-        auto info = std::make_unique<TypeInfo>(
-            "engine::animation::Animator",
-            sizeof(engine::animation::Animator),
-            std::type_index(typeid(engine::animation::Animator))
-        );
-        TypeReflector<engine::animation::Animator>::reflect(*info);
-        size_t prop_count = info->properties().size();
-        registry.register_type(std::move(info));
-        engine::Logger::instance().info("Reflection", "Registered Animator with %zu properties", prop_count);
-    }
-
-    // Register PixelGridComponent
-    {
-        auto info = std::make_unique<TypeInfo>(
-            "engine::simulation::PixelGridComponent",
-            sizeof(engine::simulation::PixelGridComponent),
-            std::type_index(typeid(engine::simulation::PixelGridComponent))
-        );
-        TypeReflector<engine::simulation::PixelGridComponent>::reflect(*info);
-        size_t prop_count = info->properties().size();
-        registry.register_type(std::move(info));
-        engine::Logger::instance().info("Reflection", "Registered PixelGridComponent with %zu properties", prop_count);
-    }
-
-    // Register PixelGridRenderer
-    {
-        auto info = std::make_unique<TypeInfo>(
-            "engine::render::PixelGridRenderer",
-            sizeof(engine::render::PixelGridRenderer),
-            std::type_index(typeid(engine::render::PixelGridRenderer))
-        );
-        TypeReflector<engine::render::PixelGridRenderer>::reflect(*info);
-        size_t prop_count = info->properties().size();
-        registry.register_type(std::move(info));
-        engine::Logger::instance().info("Reflection", "Registered PixelGridRenderer with %zu properties", prop_count);
-    }
-
-    // Register Rigidbody
-    {
-        auto info = std::make_unique<TypeInfo>(
-            "engine::physics::Rigidbody",
-            sizeof(engine::physics::Rigidbody),
-            std::type_index(typeid(engine::physics::Rigidbody))
-        );
-        TypeReflector<engine::physics::Rigidbody>::reflect(*info);
-        size_t prop_count = info->properties().size();
-        registry.register_type(std::move(info));
-        engine::Logger::instance().info("Reflection", "Registered Rigidbody with %zu properties", prop_count);
-    }
-
-    // Register BoxCollider
-    {
-        auto info = std::make_unique<TypeInfo>(
-            "engine::physics::BoxCollider",
-            sizeof(engine::physics::BoxCollider),
-            std::type_index(typeid(engine::physics::BoxCollider))
-        );
-        TypeReflector<engine::physics::BoxCollider>::reflect(*info);
-        size_t prop_count = info->properties().size();
-        registry.register_type(std::move(info));
-        engine::Logger::instance().info("Reflection", "Registered BoxCollider with %zu properties", prop_count);
-    }
-
-    // Register CapsuleCollider
-    {
-        auto info = std::make_unique<TypeInfo>(
-            "engine::physics::CapsuleCollider",
-            sizeof(engine::physics::CapsuleCollider),
-            std::type_index(typeid(engine::physics::CapsuleCollider))
-        );
-        TypeReflector<engine::physics::CapsuleCollider>::reflect(*info);
-        size_t prop_count = info->properties().size();
-        registry.register_type(std::move(info));
-        engine::Logger::instance().info("Reflection", "Registered CapsuleCollider with %zu properties", prop_count);
-    }
-
-    // Register CircleCollider
-    {
-        auto info = std::make_unique<TypeInfo>(
-            "engine::physics::CircleCollider",
-            sizeof(engine::physics::CircleCollider),
-            std::type_index(typeid(engine::physics::CircleCollider))
-        );
-        TypeReflector<engine::physics::CircleCollider>::reflect(*info);
-        size_t prop_count = info->properties().size();
-        registry.register_type(std::move(info));
-        engine::Logger::instance().info("Reflection", "Registered CircleCollider with %zu properties", prop_count);
-    }
-
-    // Register DynamicCollider
-    {
-        auto info = std::make_unique<TypeInfo>(
-            "engine::physics::DynamicCollider",
-            sizeof(engine::physics::DynamicCollider),
-            std::type_index(typeid(engine::physics::DynamicCollider))
-        );
-        TypeReflector<engine::physics::DynamicCollider>::reflect(*info);
-        size_t prop_count = info->properties().size();
-        registry.register_type(std::move(info));
-        engine::Logger::instance().info("Reflection", "Registered DynamicCollider with %zu properties", prop_count);
-    }
-
-    // Register PlayerController
-    {
-        auto info = std::make_unique<TypeInfo>(
-            "engine::gameplay::PlayerController",
-            sizeof(engine::gameplay::PlayerController),
-            std::type_index(typeid(engine::gameplay::PlayerController))
-        );
-        TypeReflector<engine::gameplay::PlayerController>::reflect(*info);
-        size_t prop_count = info->properties().size();
-        registry.register_type(std::move(info));
-        engine::Logger::instance().info("Reflection", "Registered PlayerController with %zu properties", prop_count);
-    }
-
-    // Register CameraFollower
-    {
-        auto info = std::make_unique<TypeInfo>(
-            "engine::gameplay::CameraFollower",
-            sizeof(engine::gameplay::CameraFollower),
-            std::type_index(typeid(engine::gameplay::CameraFollower))
-        );
-        TypeReflector<engine::gameplay::CameraFollower>::reflect(*info);
-        size_t prop_count = info->properties().size();
-        registry.register_type(std::move(info));
-        engine::Logger::instance().info("Reflection", "Registered CameraFollower with %zu properties", prop_count);
-    }
-
-    // Register SimSurface
-    {
-        auto info = std::make_unique<TypeInfo>(
-            "engine::simulation::SimSurface",
-            sizeof(engine::simulation::SimSurface),
-            std::type_index(typeid(engine::simulation::SimSurface))
-        );
-        TypeReflector<engine::simulation::SimSurface>::reflect(*info);
-        size_t prop_count = info->properties().size();
-        registry.register_type(std::move(info));
-        engine::Logger::instance().info("Reflection", "Registered SimSurface with %zu properties", prop_count);
-    }
-
-    auto all_types = registry.get_all_types();
-    engine::Logger::instance().info("Reflection", "Finished initializing reflections. Total types registered: %zu", all_types.size());
+    auto count = TypeRegistry::instance().all_types().size();
+    engine::Logger::instance().info("Reflection", "Finished initializing reflections. Total types registered: %zu", count);
 }
 
 } // namespace engine::reflection

@@ -7,8 +7,8 @@
 
 namespace editor {
 
-/// Helper for dynamic component access via type_index.
-/// Maps type_index to functions that can check/get components at runtime.
+// Helper for dynamic component access via type_index.
+// Maps type_index to functions that can check/get components at runtime.
 class ComponentTypeRegistry {
 public:
     using HasComponentFunc = std::function<bool(entt::registry&, entt::entity)>;
@@ -25,7 +25,7 @@ public:
         RemoveComponentFunc remove_component;
     };
 
-    /// Register a component type with its handler functions.
+    // Register a component type with its handler functions.
     template<typename T>
     void register_component() {
         auto type = std::type_index(typeid(T));
@@ -61,7 +61,6 @@ public:
         };
     }
 
-    /// Check if entity has component with given type_index.
     bool has_component(entt::registry& registry, entt::entity entity, std::type_index type) const {
         auto it = m_handlers.find(type);
         if (it != m_handlers.end()) {
@@ -70,8 +69,6 @@ public:
         return false;
     }
 
-    /// Get component pointer for entity with given type_index.
-    /// Returns nullptr if entity doesn't have the component.
     void* get_component(entt::registry& registry, entt::entity entity, std::type_index type) const {
         auto it = m_handlers.find(type);
         if (it != m_handlers.end()) {
@@ -80,15 +77,12 @@ public:
         return nullptr;
     }
 
-    /// Copy all registered components from src_entity to dst_entity.
     void copy_all_components(entt::registry& src, entt::entity src_entity, entt::registry& dst, entt::entity dst_entity) const {
         for (const auto& [type, handler] : m_handlers) {
             handler.copy_component(src, src_entity, dst, dst_entity);
         }
     }
 
-    /// Create a component on an entity and return a pointer to it.
-    /// Returns nullptr if the type is not registered.
     void* create_component(entt::registry& registry, entt::entity entity, std::type_index type) const {
         auto it = m_handlers.find(type);
         if (it != m_handlers.end()) {
@@ -97,7 +91,6 @@ public:
         return nullptr;
     }
 
-    /// Remove a component from an entity by type_index.
     void remove_component(entt::registry& registry, entt::entity entity, std::type_index type) const {
         auto it = m_handlers.find(type);
         if (it != m_handlers.end()) {
@@ -105,7 +98,6 @@ public:
         }
     }
 
-    /// Singleton accessor.
     static ComponentTypeRegistry& instance() {
         static ComponentTypeRegistry registry;
         return registry;
@@ -116,4 +108,4 @@ private:
     std::unordered_map<std::type_index, ComponentTypeHandler> m_handlers;
 };
 
-} // namespace editor
+}

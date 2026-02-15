@@ -12,30 +12,25 @@ namespace editor {
 void EditorPixelGridLoader::update(entt::registry* registry) {
     if (!registry) return;
 
-    // Iterate entities with PixelGridComponent
     auto view = registry->view<engine::simulation::PixelGridComponent>();
 
     for (auto entity : view) {
         auto& grid_comp = view.get<engine::simulation::PixelGridComponent>(entity);
 
-        // Skip if already loaded or disabled
         if (grid_comp.loaded || !grid_comp.enabled) {
             continue;
         }
 
-        // Skip if no path specified
         if (grid_comp.pixel_grid_path.empty()) {
             continue;
         }
 
-        // Skip disabled entities
         if (registry->all_of<EntityInfo>(entity)) {
             if (!registry->get<EntityInfo>(entity).enabled_in_hierarchy) {
                 continue;
             }
         }
 
-        // Load the grid
         load_grid_for_entity(registry, entity);
     }
 }
@@ -48,7 +43,6 @@ void EditorPixelGridLoader::load_grid_for_entity(entt::registry* registry, entt:
 
     engine::Logger::instance().info("EditorLoader", "Loading pixel grid: %s", grid_comp->pixel_grid_path.c_str());
 
-    // Load .pxg file using engine's loader
     auto loaded_file = engine::asset::pxg_load(grid_comp->pixel_grid_path);
 
     if (!loaded_file) {
@@ -56,7 +50,6 @@ void EditorPixelGridLoader::load_grid_for_entity(entt::registry* registry, entt:
         return;
     }
 
-    // Parse .pxg data into structured channels
     auto parsed = engine::asset::parse_pxg(*loaded_file);
 
     LoadedPixelGrid loaded_grid;
@@ -69,7 +62,6 @@ void EditorPixelGridLoader::load_grid_for_entity(entt::registry* registry, entt:
     loaded_grid.origin_x = parsed.origin_x;
     loaded_grid.origin_y = parsed.origin_y;
 
-    // Update component
     grid_comp->width = parsed.width;
     grid_comp->height = parsed.height;
     grid_comp->origin_x = parsed.origin_x;
@@ -89,7 +81,6 @@ void EditorPixelGridLoader::load_grid_for_entity(entt::registry* registry, entt:
                                     parsed.has_color_layer ? "yes" : "no",
                                     parsed.has_material_layer ? "yes" : "no");
 
-    // Store in cache
     m_loaded_grids[entity] = std::move(loaded_grid);
 }
 
@@ -105,4 +96,4 @@ void EditorPixelGridLoader::clear() {
     m_loaded_grids.clear();
 }
 
-} // namespace editor
+}

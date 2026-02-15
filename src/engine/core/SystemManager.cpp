@@ -7,6 +7,11 @@
 namespace engine {
 
 bool SystemManager::init_all(Engine& engine) {
+    if (m_is_initialized) {
+        ENGINE_LOG("SystemManager::init_all() called again -- already initialized, skipping");
+        return true;
+    }
+
     // Collect unique systems across all phases, preserving registration order.
     // A system that appears in multiple phases is only initialized once,
     // at the position of its first registration.
@@ -26,6 +31,7 @@ bool SystemManager::init_all(Engine& engine) {
         }
         m_initialized.push_back(sys);
     }
+    m_is_initialized = true;
     return true;
 }
 
@@ -35,6 +41,7 @@ void SystemManager::shutdown_all() {
         (*it)->shutdown();
     }
     m_initialized.clear();
+    m_is_initialized = false;
 }
 
 void SystemManager::update_all(Engine& engine, float dt) {

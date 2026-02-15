@@ -122,6 +122,7 @@ bool MaterialLibrary::parse_json(const std::string& json_str) {
 
         // Second pass: resolve name-based phase transitions
         for (const auto& mat_json : materials_array) {
+            if (!mat_json.contains("id")) continue;
             uint8_t id = mat_json["id"].get<uint8_t>();
             auto& def = m_materials[id];
 
