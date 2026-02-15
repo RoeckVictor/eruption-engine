@@ -28,12 +28,13 @@ uniform uint u_mat_lava;
 uniform uint u_mat_ice;
 uniform uint u_mat_steam;
 
+#define PIXEL_READ_SSBO pixels_read
 #include "include/pixel_access.glsl"
 #include "include/material_props.glsl"
 
 // Load pixel from read SSBO at grid position
 uvec4 loadPixel(ivec2 pos) {
-    return unpackPixel(readPackedPixel(pixels_read, pos));
+    return unpackPixel(readPackedPixel(pos));
 }
 
 // Store pixel to write SSBO at grid position.

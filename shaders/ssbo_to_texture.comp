@@ -20,7 +20,7 @@ void main() {
     ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
     if (pos.x >= u_grid_width || pos.y >= u_grid_height) return;
 
-    uint packed = readPackedPixel(pixel_data, pos);
+    uint packed = readPackedPixel(pos);
     uvec4 pixel = unpackPixel(packed);
 
     imageStore(u_render_texture, pos, pixel);

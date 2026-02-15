@@ -364,7 +364,9 @@ std::string ScriptCompiler::find_cmake() const {
     };
 
     // Also check Visual Studio installations
-    const char* program_files = std::getenv("ProgramFiles");
+    char* program_files = nullptr;
+    size_t pf_len = 0;
+    _dupenv_s(&program_files, &pf_len, "ProgramFiles");
     if (program_files) {
         // VS 2022 bundled CMake
         search_paths.push_back(std::string(program_files) +
@@ -373,6 +375,7 @@ std::string ScriptCompiler::find_cmake() const {
             "\\Microsoft Visual Studio\\2022\\Professional\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe");
         search_paths.push_back(std::string(program_files) +
             "\\Microsoft Visual Studio\\2022\\Enterprise\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe");
+        free(program_files);
     }
 
     for (const auto& path : search_paths) {

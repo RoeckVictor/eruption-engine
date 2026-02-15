@@ -1,19 +1,24 @@
 // Shared pixel SSBO access helpers.
 // Requires: uniform uint u_pixel_size; uniform int u_grid_width, u_grid_height;
-// Requires: SSBO buffer with uint array bound before use.
+// Requires: Define PIXEL_READ_SSBO before including, or have a buffer named 'pixel_data'.
 
-// Read the first 4 packed bytes of a pixel from a uint[] SSBO.
-// `ssbo` is the SSBO array, `pos` is the grid coordinate.
+// Default SSBO name if not specified
+#ifndef PIXEL_READ_SSBO
+#define PIXEL_READ_SSBO pixel_data
+#endif
+
+// Read the first 4 packed bytes of a pixel from the SSBO.
+// `pos` is the grid coordinate.
 // Returns a uint32 with bytes [0..3] = the first 4 bytes of the pixel.
-uint readPackedPixel(readonly uint[] ssbo, ivec2 pos) {
+uint readPackedPixel(ivec2 pos) {
     uint idx = uint(pos.y) * uint(u_grid_width) + uint(pos.x);
     uint byte_offset = idx * u_pixel_size;
     uint word_offset = byte_offset / 4u;
     uint byte_in_word = byte_offset % 4u;
 
-    uint packed = ssbo[word_offset];
+    uint packed = PIXEL_READ_SSBO[word_offset];
     if (byte_in_word != 0u) {
-        uint next_word = ssbo[word_offset + 1u];
+        uint next_word = PIXEL_READ_SSBO[word_offset + 1u];
         uint shift_bits = byte_in_word * 8u;
         packed = (packed >> shift_bits) | (next_word << (32u - shift_bits));
     }

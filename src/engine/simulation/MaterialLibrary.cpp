@@ -62,16 +62,16 @@ bool MaterialLibrary::parse_json(const std::string& json_str) {
 
             // Optional fields with defaults
             def.name = mat_json.value("name", def.internal_name);
-            def.density = mat_json.value("density", 0);
+            def.density = mat_json.value<uint8_t>("density", 0);
 
             // Category (string -> enum)
             std::string cat_str = mat_json.value("category", "empty");
             def.category = string_to_category(cat_str);
 
             // Thermal properties
-            def.melt_point = mat_json.value("melt_point", 0);
-            def.boil_point = mat_json.value("boil_point", 0);
-            def.default_temp = mat_json.value("default_temp", 128);
+            def.melt_point = mat_json.value<uint8_t>("melt_point", 0);
+            def.boil_point = mat_json.value<uint8_t>("boil_point", 0);
+            def.default_temp = mat_json.value<uint8_t>("default_temp", 128);
 
             // Phase transition targets (can be IDs or names)
             if (mat_json.contains("melt_into")) {

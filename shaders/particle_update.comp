@@ -26,6 +26,7 @@ uniform int   u_grid_height;
 uniform uint  u_max_particles;
 uniform uint  u_pixel_size;  // bytes per pixel
 
+#define PIXEL_READ_SSBO pixels_read
 #include "include/pixel_access.glsl"
 
 // Collision parameters
@@ -35,7 +36,7 @@ const float MAX_SPEED        = 800.0; // pixels/sec clamp
 
 // Load material ID (byte 0) from pixel at grid position
 uint loadMaterial(int wx, int wy) {
-    return readPackedPixel(pixels_read, ivec2(wx, wy)) & 0xFFu;
+    return readPackedPixel(ivec2(wx, wy)) & 0xFFu;
 }
 
 bool is_solid(int wx, int wy) {

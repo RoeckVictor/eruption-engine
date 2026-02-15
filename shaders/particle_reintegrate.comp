@@ -32,12 +32,13 @@ uniform int  u_grid_height;
 uniform uint u_max_particles;
 uniform uint u_pixel_size;  // bytes per pixel
 
+#define PIXEL_READ_SSBO pixels_a
 #include "include/pixel_access.glsl"
 #include "include/material_props.glsl"
 
 // Load material ID from pixel buffer A
 uint loadMaterial(uint wx, uint wy) {
-    return readPackedPixel(pixels_a, ivec2(wx, wy)) & 0xFFu;
+    return readPackedPixel(ivec2(wx, wy)) & 0xFFu;
 }
 
 // Store pixel to both SSBOs (for aligned 4-byte pixels)

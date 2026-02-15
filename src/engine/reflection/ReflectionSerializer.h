@@ -2,6 +2,7 @@
 
 #include "TypeInfo.h"
 #include "TypeRegistry.h"
+#include "ReflectionMacros.h"
 #include "engine/core/Logger.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
