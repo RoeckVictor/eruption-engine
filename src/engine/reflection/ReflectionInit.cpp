@@ -2,6 +2,7 @@
 #include "ReflectionSerializer.h"
 #include "EngineComponentList.h"
 #include "engine/core/Transform.h"
+#include "engine/core/ScreenRect.h"
 #include "engine/render/Camera2D.h"
 #include "engine/render/PixelGridRenderer.h"
 #include "engine/animation/Animator.h"
@@ -25,6 +26,19 @@ REFLECT_TYPE_BEGIN(engine::Transform)
     REFLECT_PROPERTY(rotation, "Rotation")
     REFLECT_PROPERTY(scale_x, "Scale X")
     REFLECT_PROPERTY(scale_y, "Scale Y")
+REFLECT_TYPE_END()
+
+// ScreenRect reflection (screen-space UI entities)
+REFLECT_TYPE_BEGIN(engine::ScreenRect)
+    REFLECT_PROPERTY(enabled, "Enabled")
+    REFLECT_PROPERTY_RANGE(anchor_x, "Anchor X", 0.0f, 1.0f, 0.01f)
+    REFLECT_PROPERTY_RANGE(anchor_y, "Anchor Y", 0.0f, 1.0f, 0.01f)
+    REFLECT_PROPERTY_RANGE(pivot_x, "Pivot X", 0.0f, 1.0f, 0.01f)
+    REFLECT_PROPERTY_RANGE(pivot_y, "Pivot Y", 0.0f, 1.0f, 0.01f)
+    REFLECT_PROPERTY(offset_x, "Offset X")
+    REFLECT_PROPERTY(offset_y, "Offset Y")
+    REFLECT_PROPERTY(width, "Width")
+    REFLECT_PROPERTY(height, "Height")
 REFLECT_TYPE_END()
 
 // Camera2D reflection

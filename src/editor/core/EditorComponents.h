@@ -33,6 +33,7 @@ void remove_from_parent(entt::registry& registry, entt::entity child);
 std::vector<entt::entity> get_root_entities(entt::registry& registry);
 
 void update_world_transforms(entt::registry& registry);
+void update_screen_rects(entt::registry& registry, float screen_width, float screen_height);
 
 void set_entity_enabled(entt::registry& registry, entt::entity entity, bool enabled);
 void update_enabled_in_hierarchy(entt::registry& registry, entt::entity entity);
@@ -40,7 +41,13 @@ void update_enabled_in_hierarchy(entt::registry& registry, entt::entity entity);
 void init_component_type_registry();
 
 entt::entity create_entity(entt::registry& registry, const std::string& name = "Entity");
+entt::entity create_screen_entity(entt::registry& registry, const std::string& name = "Screen Entity");
 void destroy_entity_recursive(entt::registry& registry, entt::entity entity);
+
+bool is_screen_space_entity(entt::registry& registry, entt::entity entity);
+bool is_world_space_entity(entt::registry& registry, entt::entity entity);
+std::vector<entt::entity> get_world_root_entities(entt::registry& registry);
+std::vector<entt::entity> get_screen_root_entities(entt::registry& registry);
 
 }
 

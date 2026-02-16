@@ -22,8 +22,8 @@ void PanelManager::shutdown() {
 void PanelManager::render() {
     begin_dockspace();
 
-    // Set up default layout on first frame if needed
-    if (m_needs_layout_reset && m_first_frame) {
+    // Set up default layout on first frame or when reset is requested
+    if (m_needs_layout_reset) {
         setup_default_layout();
         m_needs_layout_reset = false;
     }
@@ -235,9 +235,10 @@ void PanelManager::setup_default_layout() {
     ImGui::DockBuilderDockWindow("Hierarchy", dock_left);
     ImGui::DockBuilderDockWindow("Scene Manager", dock_left);
     ImGui::DockBuilderDockWindow("Game", dock_center);
-    ImGui::DockBuilderDockWindow("Viewport", dock_center);
+    ImGui::DockBuilderDockWindow("Screen", dock_center);
     ImGui::DockBuilderDockWindow("Prefab Editor", dock_center);
     ImGui::DockBuilderDockWindow("Project Hub", dock_center);
+    ImGui::DockBuilderDockWindow("Viewport", dock_center);  // Viewport last to be the active tab
     ImGui::DockBuilderDockWindow("Inspector", dock_right);
     ImGui::DockBuilderDockWindow("Asset Preview", dock_right);  // Tabbed with Inspector
     ImGui::DockBuilderDockWindow("File Browser", dock_bottom_left);
@@ -248,7 +249,10 @@ void PanelManager::setup_default_layout() {
 
 void PanelManager::reset_layout() {
     m_needs_layout_reset = true;
-    m_first_frame = true;
+    // Call the callback to reset cameras and panel visibility
+    if (menu_callbacks.reset_layout) {
+        menu_callbacks.reset_layout();
+    }
 }
 
 void PanelManager::save_layout(const std::string& path) {

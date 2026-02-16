@@ -85,6 +85,7 @@ public:
         std::function<void()> paste;
         std::function<void()> duplicate;
         std::function<void()> delete_selected;
+        std::function<void()> reset_layout;  // Reset cameras and panel visibility
     };
     MenuCallbacks menu_callbacks;
 

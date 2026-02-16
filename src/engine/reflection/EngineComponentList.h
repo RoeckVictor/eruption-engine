@@ -13,6 +13,7 @@
 
 #define ENGINE_COMPONENT_LIST(X) \
     X(engine::Transform) \
+    X(engine::ScreenRect) \
     X(engine::render::Camera2D) \
     X(engine::animation::Animator) \
     X(engine::simulation::PixelGridComponent) \

@@ -14,6 +14,7 @@
 #include "editor/panels/BuildSettingsPanel.h"
 #include "editor/panels/ProjectSettingsPanel.h"
 #include "editor/panels/PrefabEditorPanel.h"
+#include "editor/panels/ScreenPanel.h"
 #include "editor/commands/EntityCommands.h"
 #include "editor/serialization/SceneSerializer.h"
 #include "engine/render/Camera2D.h"
@@ -76,6 +77,7 @@ bool EditorApplication::on_init(engine::Engine& engine) {
     m_panel_manager.add_panel<HierarchyPanel>(m_context);
     m_panel_manager.add_panel<InspectorPanel>(m_context);
     m_panel_manager.add_panel<ViewportPanel>(m_context);
+    m_panel_manager.add_panel<ScreenPanel>(m_context);
     m_panel_manager.add_panel<GamePanel>(m_context);
     m_panel_manager.add_panel<FileBrowserPanel>();
     m_panel_manager.add_panel<SceneManagerPanel>();
@@ -110,6 +112,29 @@ bool EditorApplication::on_init(engine::Engine& engine) {
     m_panel_manager.menu_callbacks.delete_selected = [this]() {
         delete_selection();
     };
+    m_panel_manager.menu_callbacks.reset_layout = [this]() {
+        // Reset cameras
+        m_context.reset_camera();
+        if (auto* prefab_panel = m_panel_manager.get_panel<PrefabEditorPanel>()) {
+            prefab_panel->reset_camera();
+        }
+        // Reset panel visibility to defaults (only if project is loaded)
+        if (has_project()) {
+            if (auto* p = m_panel_manager.get_panel<ConsolePanel>()) p->set_visible(true);
+            if (auto* p = m_panel_manager.get_panel<HierarchyPanel>()) p->set_visible(true);
+            if (auto* p = m_panel_manager.get_panel<InspectorPanel>()) p->set_visible(true);
+            if (auto* p = m_panel_manager.get_panel<ViewportPanel>()) p->set_visible(true);
+            if (auto* p = m_panel_manager.get_panel<ScreenPanel>()) p->set_visible(true);
+            if (auto* p = m_panel_manager.get_panel<GamePanel>()) p->set_visible(true);
+            if (auto* p = m_panel_manager.get_panel<FileBrowserPanel>()) p->set_visible(true);
+            if (auto* p = m_panel_manager.get_panel<SceneManagerPanel>()) p->set_visible(true);
+            if (auto* p = m_panel_manager.get_panel<AssetPreviewPanel>()) p->set_visible(true);
+            if (auto* p = m_panel_manager.get_panel<BuildSettingsPanel>()) p->set_visible(false);
+            if (auto* p = m_panel_manager.get_panel<ProjectSettingsPanel>()) p->set_visible(false);
+            if (auto* p = m_panel_manager.get_panel<PrefabEditorPanel>()) p->set_visible(false);
+            if (auto* p = m_panel_manager.get_panel<ProjectHubPanel>()) p->set_visible(false);
+        }
+    };
 
     // If no project is loaded, show only the project hub
     if (!has_project()) {
@@ -124,6 +149,7 @@ bool EditorApplication::on_init(engine::Engine& engine) {
         if (auto* p = m_panel_manager.get_panel<HierarchyPanel>()) p->set_visible(false);
         if (auto* p = m_panel_manager.get_panel<InspectorPanel>()) p->set_visible(false);
         if (auto* p = m_panel_manager.get_panel<ViewportPanel>()) p->set_visible(false);
+        if (auto* p = m_panel_manager.get_panel<ScreenPanel>()) p->set_visible(false);
         if (auto* p = m_panel_manager.get_panel<GamePanel>()) p->set_visible(false);
         if (auto* p = m_panel_manager.get_panel<FileBrowserPanel>()) p->set_visible(false);
         if (auto* p = m_panel_manager.get_panel<SceneManagerPanel>()) p->set_visible(false);
@@ -154,6 +180,8 @@ void EditorApplication::on_update(engine::Engine& engine, float dt) {
     m_context.pixel_grid_loader().update(m_context.registry());
 
     update_world_transforms(*m_context.registry());
+
+    update_screen_rects(*m_context.registry(), 1920.0f, 1080.0f);
 
     if (m_runtime.is_playing()) {
         m_runtime.update(dt);
@@ -405,6 +433,7 @@ void EditorApplication::on_project_loaded() {
     if (auto* p = m_panel_manager.get_panel<HierarchyPanel>()) p->set_visible(true);
     if (auto* p = m_panel_manager.get_panel<InspectorPanel>()) p->set_visible(true);
     if (auto* p = m_panel_manager.get_panel<ViewportPanel>()) p->set_visible(true);
+    if (auto* p = m_panel_manager.get_panel<ScreenPanel>()) p->set_visible(true);
     auto* asset_preview = m_panel_manager.get_panel<AssetPreviewPanel>();
     if (auto* file_browser = m_panel_manager.get_panel<FileBrowserPanel>()) {
         file_browser->set_visible(true);

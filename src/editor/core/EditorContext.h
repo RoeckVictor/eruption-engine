@@ -97,9 +97,11 @@ public:
         float x = 0.0f;
         float y = 0.0f;
         float zoom = 1.0f;
+        void reset() { x = 0.0f; y = 0.0f; zoom = 1.0f; }
     };
     EditorCamera& camera() { return m_camera; }
     const EditorCamera& camera() const { return m_camera; }
+    void reset_camera() { m_camera.reset(); }
     void focus_on_selection();
 
     bool is_grid_visible() const { return m_grid_visible; }

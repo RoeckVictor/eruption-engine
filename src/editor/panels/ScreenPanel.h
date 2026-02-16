@@ -1,0 +1,105 @@
+#pragma once
+
+#include "Panel.h"
+#include <glad/gl.h>
+#include <entt/entt.hpp>
+#include <imgui.h>
+
+namespace editor {
+
+class EditorContext;
+
+/// Common reference resolutions for screen panel display
+struct RefResolution {
+    const char* name;
+    float width;
+    float height;
+};
+
+/// Screen panel for viewing and manipulating screen-space entities.
+/// Similar to Viewport but for UI entities using ScreenRect instead of Transform.
+class ScreenPanel : public Panel {
+public:
+    explicit ScreenPanel(EditorContext& context);
+    ~ScreenPanel() override;
+
+    void on_open() override;
+    void on_close() override;
+    void on_gui() override;
+
+    /// Reset camera by fitting reference rect to canvas.
+    void reset_camera() { fit_to_canvas(); }
+
+    /// Fit the reference rect to the current canvas size.
+    void fit_to_canvas();
+
+private:
+    void create_framebuffer(int width, int height);
+    void destroy_framebuffer();
+    void render_scene();
+    void render_entities(ImDrawList* draw_list, ImVec2 canvas_pos, ImVec2 canvas_size);
+    void render_gizmos(ImDrawList* draw_list, ImVec2 canvas_pos, ImVec2 canvas_size);
+    void render_toolbar();
+    void handle_input(ImVec2 canvas_pos, ImVec2 canvas_size);
+
+    // Convert reference screen coords to canvas screen coords (with zoom/pan)
+    ImVec2 screen_to_canvas(float sx, float sy, ImVec2 canvas_pos, ImVec2 canvas_size) const;
+    // Convert canvas screen coords to reference screen coords (with zoom/pan)
+    void canvas_to_screen(ImVec2 canvas_pos_local, ImVec2 canvas_size, float& out_sx, float& out_sy) const;
+
+    EditorContext& m_context;
+
+    GLuint m_framebuffer = 0;
+    GLuint m_texture = 0;
+    GLuint m_depth_buffer = 0;
+
+    int m_canvas_width = 0;
+    int m_canvas_height = 0;
+
+    // Resize debouncing
+    int m_pending_width = 0;
+    int m_pending_height = 0;
+    float m_resize_timer = 0.0f;
+    static constexpr float RESIZE_DEBOUNCE_SEC = 0.15f;
+    bool m_framebuffer_failed = false;
+
+    // Reference screen resolution (what ScreenRect coordinates are relative to)
+    float m_ref_width = 1920.0f;
+    float m_ref_height = 1080.0f;
+    int m_resolution_index = 0;
+
+    // Common reference resolutions
+    static constexpr RefResolution RESOLUTIONS[] = {
+        {"1920x1080 (Full HD)", 1920.0f, 1080.0f},
+        {"1280x720 (HD)", 1280.0f, 720.0f},
+        {"2560x1440 (QHD)", 2560.0f, 1440.0f},
+        {"3840x2160 (4K)", 3840.0f, 2160.0f},
+        {"1366x768", 1366.0f, 768.0f},
+        {"1600x900", 1600.0f, 900.0f},
+        {"800x600", 800.0f, 600.0f},
+        {"1024x768", 1024.0f, 768.0f},
+    };
+    static constexpr int RESOLUTION_COUNT = sizeof(RESOLUTIONS) / sizeof(RESOLUTIONS[0]);
+
+    // Zoom and pan state
+    float m_zoom = 1.0f;
+    float m_pan_x = 0.0f;  // Pan offset in reference screen coords
+    float m_pan_y = 0.0f;
+
+    // Panning state
+    bool m_is_panning = false;
+    float m_pan_start_mouse_x = 0.0f;
+    float m_pan_start_mouse_y = 0.0f;
+    float m_pan_start_offset_x = 0.0f;
+    float m_pan_start_offset_y = 0.0f;
+
+    // Gizmo state (entity dragging)
+    bool m_is_dragging = false;
+    entt::entity m_drag_entity = entt::null;
+    float m_drag_start_x = 0.0f;
+    float m_drag_start_y = 0.0f;
+    float m_entity_start_offset_x = 0.0f;
+    float m_entity_start_offset_y = 0.0f;
+};
+
+} // namespace editor

@@ -3,6 +3,7 @@
 #include "engine/reflection/ReflectionSerializer.h"
 #include "engine/reflection/EngineComponentList.h"
 #include "engine/core/Transform.h"
+#include "engine/core/ScreenRect.h"
 #include "engine/render/Camera2D.h"
 #include "engine/render/PixelGridRenderer.h"
 #include "engine/animation/Animator.h"

@@ -17,8 +17,9 @@ public:
 
 private:
     void render_toolbar();
-    void render_entity_tree();
-    void render_entity_node(entt::entity entity, int depth = 0);
+    void render_world_hierarchy();
+    void render_screen_hierarchy();
+    void render_entity_node(entt::entity entity, int depth = 0, bool is_screen_space = false);
 
     EditorContext& m_context;
     char m_filter[128] = "";
@@ -26,6 +27,10 @@ private:
     entt::entity m_renaming_entity = entt::null;
     char m_rename_buffer[128] = "";
     bool m_focus_rename = false;  // Flag to set focus on next frame
+
+    // Section collapse states
+    bool m_world_section_open = true;
+    bool m_screen_section_open = true;
 
     // Prefab creation dialog
     entt::entity m_pending_prefab_entity = entt::null;

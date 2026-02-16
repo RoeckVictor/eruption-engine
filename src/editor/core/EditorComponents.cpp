@@ -4,6 +4,8 @@
 #include "engine/reflection/EngineComponentList.h"
 #include "engine/core/MathConstants.h"
 #include "engine/core/Logger.h"
+#include "engine/core/ScreenRect.h"
+#include "engine/core/ScreenRectSystem.h"
 #include "engine/render/Camera2D.h"
 #include "engine/render/PixelGridRenderer.h"
 #include "engine/animation/Animator.h"
@@ -20,6 +22,17 @@ namespace editor {
 
 void set_parent(entt::registry& registry, entt::entity child, entt::entity new_parent) {
     if (child == new_parent) return;
+
+    // Same-space validation: screen entities can only parent to screen entities
+    if (new_parent != entt::null) {
+        bool child_is_screen = is_screen_space_entity(registry, child);
+        bool parent_is_screen = is_screen_space_entity(registry, new_parent);
+        if (child_is_screen != parent_is_screen) {
+            engine::Logger::instance().warning("Editor",
+                "Cannot set parent: mixed world/screen space hierarchy not allowed");
+            return;
+        }
+    }
 
     // Detect circular hierarchy: walk from new_parent to root, reject if child is encountered
     if (new_parent != entt::null) {
@@ -117,6 +130,10 @@ void update_world_transforms(entt::registry& registry) {
     engine::TransformSystem::update(registry);
 }
 
+void update_screen_rects(entt::registry& registry, float screen_width, float screen_height) {
+    engine::ScreenRectSystem::update(registry, screen_width, screen_height);
+}
+
 void set_entity_enabled(entt::registry& registry, entt::entity entity, bool enabled) {
     if (!registry.valid(entity)) return;
 
@@ -162,6 +179,66 @@ entt::entity create_entity(entt::registry& registry, const std::string& name) {
     registry.emplace<engine::Transform>(entity);
     registry.emplace<Hierarchy>(entity);
     return entity;
+}
+
+entt::entity create_screen_entity(entt::registry& registry, const std::string& name) {
+    auto entity = registry.create();
+    registry.emplace<EntityInfo>(entity, EntityInfo{name, "", true, true, "", false});
+    registry.emplace<engine::ScreenRect>(entity);
+    registry.emplace<Hierarchy>(entity);
+    return entity;
+}
+
+bool is_screen_space_entity(entt::registry& registry, entt::entity entity) {
+    return engine::ScreenRectSystem::is_screen_entity(registry, entity);
+}
+
+bool is_world_space_entity(entt::registry& registry, entt::entity entity) {
+    return registry.all_of<engine::Transform>(entity) &&
+           !registry.all_of<engine::ScreenRect>(entity);
+}
+
+std::vector<entt::entity> get_world_root_entities(entt::registry& registry) {
+    std::vector<entt::entity> roots;
+
+    auto view = registry.view<EntityInfo, engine::Transform>();
+    for (auto entity : view) {
+        // Skip entities that also have ScreenRect (shouldn't happen, but be safe)
+        if (registry.all_of<engine::ScreenRect>(entity)) continue;
+
+        bool is_root = true;
+        if (registry.all_of<Hierarchy>(entity)) {
+            const auto& hierarchy = registry.get<Hierarchy>(entity);
+            if (hierarchy.parent != entt::null && registry.valid(hierarchy.parent)) {
+                is_root = false;
+            }
+        }
+        if (is_root) {
+            roots.push_back(entity);
+        }
+    }
+
+    return roots;
+}
+
+std::vector<entt::entity> get_screen_root_entities(entt::registry& registry) {
+    std::vector<entt::entity> roots;
+
+    auto view = registry.view<EntityInfo, engine::ScreenRect>();
+    for (auto entity : view) {
+        bool is_root = true;
+        if (registry.all_of<Hierarchy>(entity)) {
+            const auto& hierarchy = registry.get<Hierarchy>(entity);
+            if (hierarchy.parent != entt::null && registry.valid(hierarchy.parent)) {
+                is_root = false;
+            }
+        }
+        if (is_root) {
+            roots.push_back(entity);
+        }
+    }
+
+    return roots;
 }
 
 void destroy_entity_recursive(entt::registry& registry, entt::entity entity) {

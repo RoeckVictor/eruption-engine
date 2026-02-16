@@ -1,0 +1,539 @@
+#include "ScreenPanel.h"
+#include "editor/core/EditorContext.h"
+#include "editor/core/EditorComponents.h"
+#include "engine/core/ScreenRect.h"
+#include "engine/core/Logger.h"
+
+#include <imgui.h>
+#include <algorithm>
+#include <cmath>
+
+namespace editor {
+
+// Define static constexpr array outside class for ODR compliance
+constexpr RefResolution ScreenPanel::RESOLUTIONS[];
+
+ScreenPanel::ScreenPanel(EditorContext& context)
+    : Panel("Screen")
+    , m_context(context)
+{
+}
+
+ScreenPanel::~ScreenPanel() {
+    destroy_framebuffer();
+}
+
+void ScreenPanel::on_open() {
+    // Will fit to canvas once framebuffer is created
+    m_zoom = 0.0f;  // Signal to fit on first frame
+}
+
+void ScreenPanel::on_close() {
+    destroy_framebuffer();
+}
+
+void ScreenPanel::on_gui() {
+    // When the screen panel is focused, clear any editing override
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) {
+        m_context.clear_editing_override();
+    }
+
+    // Render toolbar with resolution dropdown
+    render_toolbar();
+
+    // Get available size after toolbar
+    ImVec2 size = ImGui::GetContentRegionAvail();
+    int width = static_cast<int>(size.x);
+    int height = static_cast<int>(size.y);
+
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+
+    // Debounced framebuffer resize
+    if (width != m_pending_width || height != m_pending_height) {
+        m_pending_width = width;
+        m_pending_height = height;
+        m_resize_timer = 0.0f;
+        m_framebuffer_failed = false;
+    }
+
+    if (!m_framebuffer_failed &&
+        (m_pending_width != m_canvas_width || m_pending_height != m_canvas_height)) {
+        m_resize_timer += ImGui::GetIO().DeltaTime;
+        if (m_resize_timer >= RESIZE_DEBOUNCE_SEC || m_canvas_width == 0) {
+            bool was_first_create = (m_canvas_width == 0);
+            destroy_framebuffer();
+            create_framebuffer(m_pending_width, m_pending_height);
+            // Fit to canvas on first creation
+            if (was_first_create || m_zoom <= 0.0f) {
+                fit_to_canvas();
+            }
+        }
+    }
+
+    // Render scene to framebuffer
+    render_scene();
+
+    // Display the framebuffer texture
+    ImGui::Image(
+        (ImTextureID)(uintptr_t)m_texture,
+        size,
+        ImVec2(0, 1),
+        ImVec2(1, 0)
+    );
+
+    // Get canvas rect
+    ImVec2 canvas_pos = ImGui::GetItemRectMin();
+    ImVec2 canvas_size = ImGui::GetItemRectSize();
+
+    // Handle input when hovered
+    if (ImGui::IsItemHovered()) {
+        handle_input(canvas_pos, canvas_size);
+    }
+
+    // Render overlay (entities and gizmos)
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    render_entities(draw_list, canvas_pos, canvas_size);
+    render_gizmos(draw_list, canvas_pos, canvas_size);
+
+    // Draw zoom info
+    char info[128];
+    snprintf(info, sizeof(info), "Zoom: %.0f%%", m_zoom * 100.0f);
+    draw_list->AddText(
+        ImVec2(canvas_pos.x + 10, canvas_pos.y + 10),
+        IM_COL32(200, 200, 200, 200),
+        info
+    );
+
+    // Draw selection count for screen entities
+    int screen_selected = 0;
+    auto* registry = m_context.registry();
+    if (registry) {
+        for (auto entity : m_context.selection()) {
+            if (is_screen_space_entity(*registry, entity)) {
+                screen_selected++;
+            }
+        }
+    }
+    if (screen_selected > 0) {
+        char sel_info[64];
+        snprintf(sel_info, sizeof(sel_info), "Selected: %d screen entities", screen_selected);
+        draw_list->AddText(
+            ImVec2(canvas_pos.x + 10, canvas_pos.y + 30),
+            IM_COL32(255, 180, 100, 200),
+            sel_info
+        );
+    }
+}
+
+void ScreenPanel::render_toolbar() {
+    // Resolution dropdown
+    ImGui::SetNextItemWidth(180.0f);
+    if (ImGui::BeginCombo("##RefResolution", RESOLUTIONS[m_resolution_index].name)) {
+        for (int i = 0; i < RESOLUTION_COUNT; i++) {
+            bool is_selected = (m_resolution_index == i);
+            if (ImGui::Selectable(RESOLUTIONS[i].name, is_selected)) {
+                m_resolution_index = i;
+                m_ref_width = RESOLUTIONS[i].width;
+                m_ref_height = RESOLUTIONS[i].height;
+                // Fit the new resolution to canvas
+                fit_to_canvas();
+            }
+            if (is_selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Reference resolution for screen entities");
+    }
+
+    ImGui::SameLine();
+
+    // Fit to canvas button
+    if (ImGui::Button("Fit")) {
+        fit_to_canvas();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Fit reference rect to canvas");
+    }
+
+    ImGui::SameLine();
+
+    // Reset view button (1:1 pixel mode)
+    if (ImGui::Button("1:1")) {
+        m_zoom = 1.0f;
+        m_pan_x = 0.0f;
+        m_pan_y = 0.0f;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("View at 100%% zoom (1 pixel = 1 pixel)");
+    }
+
+    ImGui::SameLine();
+
+    // Reset pan only
+    if (ImGui::Button("Center")) {
+        m_pan_x = 0.0f;
+        m_pan_y = 0.0f;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Center view (Home)");
+    }
+
+    ImGui::Separator();
+}
+
+void ScreenPanel::create_framebuffer(int width, int height) {
+    m_canvas_width = width;
+    m_canvas_height = height;
+
+    glGenFramebuffers(1, &m_framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
+
+    glGenTextures(1, &m_texture);
+    glBindTexture(GL_TEXTURE_2D, m_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_texture, 0);
+
+    glGenRenderbuffers(1, &m_depth_buffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, m_depth_buffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, m_depth_buffer);
+
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        engine::Logger::instance().error("ScreenPanel", "Framebuffer incomplete (status=0x%X)", status);
+        destroy_framebuffer();
+        m_framebuffer_failed = true;
+    }
+}
+
+void ScreenPanel::destroy_framebuffer() {
+    if (m_framebuffer) {
+        glDeleteFramebuffers(1, &m_framebuffer);
+        m_framebuffer = 0;
+    }
+    if (m_texture) {
+        glDeleteTextures(1, &m_texture);
+        m_texture = 0;
+    }
+    if (m_depth_buffer) {
+        glDeleteRenderbuffers(1, &m_depth_buffer);
+        m_depth_buffer = 0;
+    }
+
+    m_canvas_width = 0;
+    m_canvas_height = 0;
+}
+
+void ScreenPanel::render_scene() {
+    if (!m_framebuffer) {
+        return;
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
+    glViewport(0, 0, m_canvas_width, m_canvas_height);
+
+    // Dark background with subtle grid pattern suggestion
+    glClearColor(0.12f, 0.12f, 0.15f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+ImVec2 ScreenPanel::screen_to_canvas(float sx, float sy, ImVec2 canvas_pos, ImVec2 canvas_size) const {
+    // Pixel-accurate mode: zoom 1.0 = 1 reference pixel = 1 canvas pixel
+    float scale = m_zoom;
+
+    // Center of the canvas
+    float center_x = canvas_pos.x + canvas_size.x * 0.5f;
+    float center_y = canvas_pos.y + canvas_size.y * 0.5f;
+
+    // Transform: screen coord relative to reference center, then apply scale and pan
+    float ref_center_x = m_ref_width * 0.5f;
+    float ref_center_y = m_ref_height * 0.5f;
+
+    float canvas_x = center_x + ((sx - ref_center_x) - m_pan_x) * scale;
+    float canvas_y = center_y + ((sy - ref_center_y) - m_pan_y) * scale;
+
+    return ImVec2(canvas_x, canvas_y);
+}
+
+void ScreenPanel::canvas_to_screen(ImVec2 canvas_mouse, ImVec2 canvas_size, float& out_sx, float& out_sy) const {
+    // Pixel-accurate mode: zoom 1.0 = 1 reference pixel = 1 canvas pixel
+    float scale = m_zoom;
+
+    // Center of the canvas
+    float center_x = canvas_size.x * 0.5f;
+    float center_y = canvas_size.y * 0.5f;
+
+    // Reference center
+    float ref_center_x = m_ref_width * 0.5f;
+    float ref_center_y = m_ref_height * 0.5f;
+
+    // Reverse transform
+    out_sx = ((canvas_mouse.x - center_x) / scale) + m_pan_x + ref_center_x;
+    out_sy = ((canvas_mouse.y - center_y) / scale) + m_pan_y + ref_center_y;
+}
+
+void ScreenPanel::fit_to_canvas() {
+    // Calculate zoom to fit reference rect in current canvas
+    if (m_canvas_width <= 0 || m_canvas_height <= 0) return;
+
+    float scale_x = static_cast<float>(m_canvas_width) / m_ref_width;
+    float scale_y = static_cast<float>(m_canvas_height) / m_ref_height;
+    m_zoom = std::min(scale_x, scale_y) * 0.95f;  // 95% to leave a small margin
+    m_pan_x = 0.0f;
+    m_pan_y = 0.0f;
+}
+
+void ScreenPanel::render_entities(ImDrawList* draw_list, ImVec2 canvas_pos, ImVec2 canvas_size) {
+    auto* registry = m_context.registry();
+    if (!registry) return;
+
+    // Draw reference screen bounds
+    ImVec2 ref_tl = screen_to_canvas(0, 0, canvas_pos, canvas_size);
+    ImVec2 ref_br = screen_to_canvas(m_ref_width, m_ref_height, canvas_pos, canvas_size);
+    draw_list->AddRect(ref_tl, ref_br, IM_COL32(100, 100, 100, 150), 0.0f, 0, 2.0f);
+
+    // Draw all screen entities
+    auto view = registry->view<engine::ScreenRect>();
+    for (auto entity : view) {
+        auto& rect = view.get<engine::ScreenRect>(entity);
+
+        // Skip disabled entities
+        if (registry->all_of<EntityInfo>(entity)) {
+            if (!registry->get<EntityInfo>(entity).enabled_in_hierarchy) continue;
+        }
+        if (!rect.enabled) continue;
+
+        // Use computed position
+        ImVec2 tl = screen_to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
+        ImVec2 br = screen_to_canvas(
+            rect.computed_x + rect.computed_width,
+            rect.computed_y + rect.computed_height,
+            canvas_pos, canvas_size
+        );
+
+        // Draw filled rect with border
+        bool is_selected = m_context.is_selected(entity);
+        ImU32 fill_color = is_selected ? IM_COL32(100, 150, 200, 60) : IM_COL32(80, 80, 100, 40);
+        ImU32 border_color = is_selected ? IM_COL32(100, 180, 255, 255) : IM_COL32(120, 120, 140, 180);
+
+        draw_list->AddRectFilled(tl, br, fill_color);
+        draw_list->AddRect(tl, br, border_color, 0.0f, 0, is_selected ? 2.0f : 1.0f);
+
+        // Draw entity name
+        if (registry->all_of<EntityInfo>(entity)) {
+            const auto& info = registry->get<EntityInfo>(entity);
+            ImVec2 text_pos(tl.x + 4, tl.y + 2);
+            draw_list->AddText(text_pos, IM_COL32(200, 200, 200, 200), info.name.c_str());
+        }
+
+        // Draw anchor point indicator
+        ImVec2 anchor_pos = screen_to_canvas(
+            rect.computed_x + rect.pivot_x * rect.computed_width,
+            rect.computed_y + rect.pivot_y * rect.computed_height,
+            canvas_pos, canvas_size
+        );
+        draw_list->AddCircleFilled(anchor_pos, 4.0f, IM_COL32(255, 200, 100, 200));
+        draw_list->AddCircle(anchor_pos, 4.0f, IM_COL32(255, 255, 255, 255), 12, 1.0f);
+    }
+}
+
+void ScreenPanel::render_gizmos(ImDrawList* draw_list, ImVec2 canvas_pos, ImVec2 canvas_size) {
+    auto* registry = m_context.registry();
+    if (!registry) return;
+
+    // Draw resize handles for selected screen entities
+    for (auto entity : m_context.selection()) {
+        if (!is_screen_space_entity(*registry, entity)) continue;
+        if (!registry->all_of<engine::ScreenRect>(entity)) continue;
+
+        auto& rect = registry->get<engine::ScreenRect>(entity);
+
+        ImVec2 tl = screen_to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
+        ImVec2 br = screen_to_canvas(
+            rect.computed_x + rect.computed_width,
+            rect.computed_y + rect.computed_height,
+            canvas_pos, canvas_size
+        );
+
+        constexpr float handle_size = 6.0f;
+        ImU32 handle_color = IM_COL32(255, 255, 255, 255);
+        ImU32 handle_fill = IM_COL32(100, 150, 255, 200);
+
+        // Corner handles
+        ImVec2 corners[4] = {tl, ImVec2(br.x, tl.y), br, ImVec2(tl.x, br.y)};
+        for (int i = 0; i < 4; i++) {
+            draw_list->AddRectFilled(
+                ImVec2(corners[i].x - handle_size, corners[i].y - handle_size),
+                ImVec2(corners[i].x + handle_size, corners[i].y + handle_size),
+                handle_fill
+            );
+            draw_list->AddRect(
+                ImVec2(corners[i].x - handle_size, corners[i].y - handle_size),
+                ImVec2(corners[i].x + handle_size, corners[i].y + handle_size),
+                handle_color
+            );
+        }
+
+        // Edge midpoint handles
+        ImVec2 mid_top((tl.x + br.x) * 0.5f, tl.y);
+        ImVec2 mid_bot((tl.x + br.x) * 0.5f, br.y);
+        ImVec2 mid_left(tl.x, (tl.y + br.y) * 0.5f);
+        ImVec2 mid_right(br.x, (tl.y + br.y) * 0.5f);
+
+        ImVec2 edges[4] = {mid_top, mid_right, mid_bot, mid_left};
+        for (int i = 0; i < 4; i++) {
+            draw_list->AddRectFilled(
+                ImVec2(edges[i].x - handle_size * 0.7f, edges[i].y - handle_size * 0.7f),
+                ImVec2(edges[i].x + handle_size * 0.7f, edges[i].y + handle_size * 0.7f),
+                handle_fill
+            );
+            draw_list->AddRect(
+                ImVec2(edges[i].x - handle_size * 0.7f, edges[i].y - handle_size * 0.7f),
+                ImVec2(edges[i].x + handle_size * 0.7f, edges[i].y + handle_size * 0.7f),
+                handle_color
+            );
+        }
+    }
+}
+
+void ScreenPanel::handle_input(ImVec2 canvas_pos, ImVec2 canvas_size) {
+    ImGuiIO& io = ImGui::GetIO();
+    auto* registry = m_context.registry();
+    if (!registry) return;
+
+    ImVec2 mouse_pos = io.MousePos;
+    ImVec2 local_mouse(mouse_pos.x - canvas_pos.x, mouse_pos.y - canvas_pos.y);
+
+    float screen_x, screen_y;
+    canvas_to_screen(local_mouse, canvas_size, screen_x, screen_y);
+
+    // Zoom with mouse wheel
+    if (io.MouseWheel != 0.0f) {
+        float zoom_factor = 1.1f;
+        if (io.MouseWheel > 0) {
+            m_zoom *= zoom_factor;
+        } else {
+            m_zoom /= zoom_factor;
+        }
+        m_zoom = std::clamp(m_zoom, 0.1f, 10.0f);
+    }
+
+    // Reset with Home key
+    if (ImGui::IsKeyPressed(ImGuiKey_Home)) {
+        reset_camera();
+    }
+
+    // Pan with middle mouse button
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
+        m_is_panning = true;
+        m_pan_start_mouse_x = io.MousePos.x;
+        m_pan_start_mouse_y = io.MousePos.y;
+        m_pan_start_offset_x = m_pan_x;
+        m_pan_start_offset_y = m_pan_y;
+    }
+
+    if (m_is_panning) {
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
+            // Pixel-accurate mode: zoom is the direct scale factor
+            float scale = m_zoom;
+
+            float dx = io.MousePos.x - m_pan_start_mouse_x;
+            float dy = io.MousePos.y - m_pan_start_mouse_y;
+
+            // Pan in opposite direction of mouse movement
+            m_pan_x = m_pan_start_offset_x - dx / scale;
+            m_pan_y = m_pan_start_offset_y - dy / scale;
+        } else {
+            m_is_panning = false;
+        }
+    }
+
+    // Handle entity dragging (takes priority over panning)
+    if (m_is_dragging) {
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            if (registry->valid(m_drag_entity) && registry->all_of<engine::ScreenRect>(m_drag_entity)) {
+                auto& rect = registry->get<engine::ScreenRect>(m_drag_entity);
+
+                float dx = screen_x - m_drag_start_x;
+                float dy = screen_y - m_drag_start_y;
+
+                rect.offset_x = m_entity_start_offset_x + dx;
+                rect.offset_y = m_entity_start_offset_y + dy;
+
+                m_context.mark_dirty();
+            }
+        } else {
+            m_is_dragging = false;
+            m_drag_entity = entt::null;
+        }
+        return;
+    }
+
+    // Click to select (only if not panning)
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !m_is_panning) {
+        entt::entity hit_entity = entt::null;
+
+        // Find entity under cursor (reverse order for proper z-ordering)
+        auto view = registry->view<engine::ScreenRect>();
+        for (auto entity : view) {
+            auto& rect = view.get<engine::ScreenRect>(entity);
+
+            if (registry->all_of<EntityInfo>(entity)) {
+                if (!registry->get<EntityInfo>(entity).enabled_in_hierarchy) continue;
+            }
+            if (!rect.enabled) continue;
+
+            // Check if point is inside rect
+            if (screen_x >= rect.computed_x &&
+                screen_x <= rect.computed_x + rect.computed_width &&
+                screen_y >= rect.computed_y &&
+                screen_y <= rect.computed_y + rect.computed_height) {
+                hit_entity = entity;
+                // Don't break - last one wins (top of stack)
+            }
+        }
+
+        if (hit_entity != entt::null) {
+            if (io.KeyCtrl) {
+                if (m_context.is_selected(hit_entity)) {
+                    m_context.remove_from_selection(hit_entity);
+                } else {
+                    m_context.add_to_selection(hit_entity);
+                }
+            } else if (io.KeyShift) {
+                m_context.add_to_selection(hit_entity);
+            } else {
+                m_context.select(hit_entity);
+            }
+
+            // Start dragging if this is selected
+            if (m_context.is_selected(hit_entity)) {
+                m_is_dragging = true;
+                m_drag_entity = hit_entity;
+                m_drag_start_x = screen_x;
+                m_drag_start_y = screen_y;
+                auto& rect = registry->get<engine::ScreenRect>(hit_entity);
+                m_entity_start_offset_x = rect.offset_x;
+                m_entity_start_offset_y = rect.offset_y;
+            }
+        } else {
+            // Clicked on empty space - deselect
+            if (!io.KeyCtrl && !io.KeyShift) {
+                m_context.clear_selection();
+            }
+        }
+    }
+}
+
+} // namespace editor

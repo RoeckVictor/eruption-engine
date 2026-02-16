@@ -8,6 +8,7 @@
 #include "editor/inspectors/PixelGridComponentInspector.h"
 #include "engine/reflection/TypeRegistry.h"
 #include "engine/core/Transform.h"
+#include "engine/core/ScreenRect.h"
 #include "engine/core/Logger.h"
 #include "engine/render/Camera2D.h"
 #include "engine/render/PixelGridRenderer.h"
@@ -276,7 +277,8 @@ void InspectorPanel::render_component_inspector(entt::entity entity, const engin
     ImGui::PushID(type_info.name().c_str());
 
     // Check if this is a required component (can't be removed)
-    bool is_required = (type_info.name() == "engine::Transform");
+    bool is_required = (type_info.name() == "engine::Transform") ||
+                       (type_info.name() == "engine::ScreenRect");
 
     bool header_open = ImGui::CollapsingHeader(type_info.name().c_str(), header_flags);
 
@@ -423,13 +425,19 @@ void InspectorPanel::render_add_component_button(entt::entity entity) {
         for (const auto* type_info : all_types) {
             if (!type_info) continue;
 
+            const auto& name = type_info->name();
+
+            // Never allow adding Transform or ScreenRect - they define entity type
+            // and are mutually exclusive (set at entity creation)
+            if (name == "engine::Transform" || name == "engine::ScreenRect") {
+                continue;
+            }
+
             // Skip if entity already has this component
             bool has_component = false;
-            if (type_info->name() == "engine::Transform" && registry->all_of<engine::Transform>(entity)) {
+            if (name == "engine::render::Camera2D" && registry->all_of<engine::render::Camera2D>(entity)) {
                 has_component = true;
-            } else if (type_info->name() == "engine::render::Camera2D" && registry->all_of<engine::render::Camera2D>(entity)) {
-                has_component = true;
-            } else if (type_info->name() == "engine::animation::Animator" && registry->all_of<engine::animation::Animator>(entity)) {
+            } else if (name == "engine::animation::Animator" && registry->all_of<engine::animation::Animator>(entity)) {
                 has_component = true;
             }
 
@@ -630,8 +638,9 @@ void InspectorPanel::remove_component_from_entity(entt::entity entity, std::type
     auto* registry = m_context.registry();
     if (!registry) return;
 
-    // Transform is required, never remove it
-    if (type == std::type_index(typeid(engine::Transform))) {
+    // Transform and ScreenRect are required, never remove them
+    if (type == std::type_index(typeid(engine::Transform)) ||
+        type == std::type_index(typeid(engine::ScreenRect))) {
         return;
     }
 
@@ -745,6 +754,8 @@ std::string InspectorPanel::get_component_category(const std::string& type_name)
         return "Physics";
     } else if (type_name.find("engine::Transform") != std::string::npos) {
         return "Core";
+    } else if (type_name.find("engine::ScreenRect") != std::string::npos) {
+        return "UI";
     }
     return "Other";
 }

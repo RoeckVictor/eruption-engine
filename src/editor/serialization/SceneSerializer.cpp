@@ -3,6 +3,8 @@
 #include "editor/core/ComponentTypeRegistry.h"
 #include "engine/core/Logger.h"
 #include "engine/core/Transform.h"
+#include "engine/core/ScreenRect.h"
+#include "engine/core/ScreenRectSystem.h"
 #include "engine/reflection/ReflectionSerializer.h"
 #include "runtime/ScriptComponent.h"
 #include <fstream>
@@ -200,6 +202,9 @@ bool SceneSerializer::deserialize(const nlohmann::json& json) {
         // Update world transforms
         update_world_transforms(m_registry);
 
+        // Update screen-space entity positions
+        engine::ScreenRectSystem::update(m_registry, 1920.0f, 1080.0f);
+
         return true;
     } catch (const std::exception& e) {
         m_last_error = std::string("Exception while deserializing: ") + e.what();
@@ -321,6 +326,9 @@ std::vector<entt::entity> SceneSerializer::deserialize_entities(const nlohmann::
 
         // Update world transforms for new entities
         update_world_transforms(m_registry);
+
+        // Update screen-space entity positions
+        engine::ScreenRectSystem::update(m_registry, 1920.0f, 1080.0f);
 
     } catch (const std::exception& e) {
         m_last_error = std::string("Exception while deserializing entities: ") + e.what();
@@ -482,9 +490,20 @@ entt::entity SceneSerializer::load_prefab(const std::filesystem::path& path) {
             return entt::null;
         }
 
-        // Create entity with name
+        // Detect if this is a screen-space prefab (has ScreenRect component)
+        bool is_screen_prefab = false;
+        for (const auto& comp : json["components"]) {
+            if (comp.value("type", "") == "engine::ScreenRect") {
+                is_screen_prefab = true;
+                break;
+            }
+        }
+
+        // Create entity with name (screen or world space based on prefab type)
         std::string name = json.value("name", path.stem().string());
-        auto entity = create_entity(m_registry, name);
+        auto entity = is_screen_prefab
+            ? create_screen_entity(m_registry, name)
+            : create_entity(m_registry, name);
 
         // Deserialize each component
         for (const auto& comp : json["components"]) {
@@ -492,6 +511,7 @@ entt::entity SceneSerializer::load_prefab(const std::filesystem::path& path) {
         }
 
         update_world_transforms(m_registry);
+        engine::ScreenRectSystem::update(m_registry, 1920.0f, 1080.0f);
 
         engine::Logger::instance().info("SceneSerializer", "Loaded prefab: %s", path.string().c_str());
         return entity;
@@ -609,6 +629,7 @@ void SceneSerializer::sync_entity_from_prefab(entt::entity target, entt::registr
     }
 
     update_world_transforms(m_registry);
+    engine::ScreenRectSystem::update(m_registry, 1920.0f, 1080.0f);
 }
 
 } // namespace editor

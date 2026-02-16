@@ -37,6 +37,9 @@ public:
     /// Check if prefab has unsaved changes.
     bool has_unsaved_changes() const { return m_dirty; }
 
+    /// Reset the prefab editor camera to default.
+    void reset_camera() { m_camera.reset(); }
+
     /// If prefab is dirty, show save dialog then execute action.
     /// If clean, execute action immediately.
     void confirm_prefab_discard_or_save(std::function<void()> action);

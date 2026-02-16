@@ -58,13 +58,18 @@ struct ViewportCamera {
 
         // Reset camera with Home key
         if (ImGui::IsKeyPressed(ImGuiKey_Home)) {
-            x = 0.0f;
-            y = 0.0f;
-            zoom = default_zoom;
+            reset();
         }
     }
 
     bool is_panning() const { return m_is_panning; }
+
+    /// Reset camera to default position and zoom.
+    void reset() {
+        x = 0.0f;
+        y = 0.0f;
+        zoom = default_zoom;
+    }
 
 private:
     bool m_is_panning = false;
