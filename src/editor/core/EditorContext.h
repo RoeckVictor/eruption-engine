@@ -82,6 +82,17 @@ public:
     const std::string& current_scene_path() const { return m_scene_path; }
     void set_current_scene_path(const std::string& path);
 
+    const std::string& project_path() const { return m_project_path; }
+    void set_project_path(const std::string& path) { m_project_path = path; }
+
+    // File browser refresh callback (called when assets are created/modified)
+    using FileBrowserRefreshCallback = std::function<void()>;
+    void set_file_browser_refresh_callback(FileBrowserRefreshCallback cb) { m_file_browser_refresh_callback = std::move(cb); }
+    void refresh_file_browser() { if (m_file_browser_refresh_callback) m_file_browser_refresh_callback(); }
+
+    // Sync prefab changes to all instances in the scene and project
+    void sync_prefab_to_instances(const std::string& prefab_path);
+
     struct EditorCamera {
         float x = 0.0f;
         float y = 0.0f;
@@ -132,6 +143,11 @@ public:
 private:
     void notify_selection_changed();
 
+    // Helper to update all scene files in the project with prefab changes
+    void sync_prefab_to_project_scenes(const std::string& prefab_path,
+                                        entt::registry& prefab_registry,
+                                        entt::entity prefab_root);
+
     std::vector<entt::entity> m_selection;
     std::unordered_set<entt::entity> m_selection_set;
     SelectionChangedCallback m_selection_callback;
@@ -141,6 +157,8 @@ private:
 
     bool m_dirty = false;
     std::string m_scene_path;
+    std::string m_project_path;
+    FileBrowserRefreshCallback m_file_browser_refresh_callback;
     std::string m_clipboard;
     std::string m_component_clipboard;
     std::type_index m_component_clipboard_type = std::type_index(typeid(void));

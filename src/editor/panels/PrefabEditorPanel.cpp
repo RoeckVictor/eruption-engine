@@ -5,6 +5,7 @@
 #include "editor/icons/IconsFontAwesome6.h"
 #include "editor/ui/UnsavedDialog.h"
 #include "editor/render/SceneRenderUtils.h"
+#include "editor/render/EntityHitDetector.h"
 #include "engine/core/MathConstants.h"
 #include "engine/core/Transform.h"
 #include "engine/core/TransformSystem.h"
@@ -288,8 +289,23 @@ void PrefabEditorPanel::render_viewport() {
 
         // Click to select entity
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-            ImVec2 mouse = ImGui::GetIO().MousePos;
-            select_entity_at(mouse.x, mouse.y);
+            ImGuiIO& io = ImGui::GetIO();
+            ImVec2 mouse_pos = io.MousePos;
+
+            HitResult hit = EntityHitDetector::hit_test(
+                m_prefab_registry,
+                mouse_pos,
+                m_viewport_pos,
+                m_viewport_size,
+                m_camera.x,
+                m_camera.y,
+                m_camera.zoom
+            );
+
+            EntityHitDetector::process_click_selection(
+                m_main_context, hit, mouse_pos, m_click_cycle_state,
+                io.KeyCtrl, io.KeyShift
+            );
         }
     }
 
@@ -349,56 +365,6 @@ void PrefabEditorPanel::render_gizmos(ImDrawList* draw_list, ImVec2 vp_pos, ImVe
 
 void PrefabEditorPanel::handle_viewport_input() {
     m_camera.handle_input();
-}
-
-void PrefabEditorPanel::select_entity_at(float screen_x, float screen_y) {
-    float screen_cx = m_viewport_pos.x + m_viewport_size.x * 0.5f;
-    float screen_cy = m_viewport_pos.y + m_viewport_size.y * 0.5f;
-
-    float world_x = m_camera.x + (screen_x - screen_cx) / m_camera.zoom;
-    float world_y = m_camera.y - (screen_y - screen_cy) / m_camera.zoom;
-
-    // Check sprite entities first (they have bounds)
-    auto sprite_view = m_prefab_registry.view<engine::Transform,
-                                               engine::simulation::PixelGridComponent,
-                                               engine::render::PixelGridRenderer>();
-    for (auto entity : sprite_view) {
-        auto& t = sprite_view.get<engine::Transform>(entity);
-        auto& grid = sprite_view.get<engine::simulation::PixelGridComponent>(entity);
-
-        float w = grid.width > 0 ? static_cast<float>(grid.width) : 32.0f;
-        float h = grid.height > 0 ? static_cast<float>(grid.height) : 32.0f;
-        float ox = static_cast<float>(grid.origin_x);
-        float oy = static_cast<float>(grid.origin_y);
-
-        // Simple AABB test (ignoring rotation for click detection)
-        float half_w = w * std::abs(t.world_scale_x) * 0.5f;
-        float half_h = h * std::abs(t.world_scale_y) * 0.5f;
-        float center_x = t.world_x + ((w * 0.5f) - ox) * t.world_scale_x;
-        float center_y = t.world_y + ((h * 0.5f) - oy) * t.world_scale_y;
-
-        if (world_x >= center_x - half_w && world_x <= center_x + half_w &&
-            world_y >= center_y - half_h && world_y <= center_y + half_h) {
-            m_main_context.select(entity);
-            return;
-        }
-    }
-
-    // Check non-sprite entities (marker hit test)
-    float hit_radius = 10.0f / m_camera.zoom;
-    auto all_view = m_prefab_registry.view<engine::Transform>();
-    for (auto entity : all_view) {
-        auto& t = all_view.get<engine::Transform>(entity);
-        float dx = world_x - t.world_x;
-        float dy = world_y - t.world_y;
-        if (dx * dx + dy * dy < hit_radius * hit_radius) {
-            m_main_context.select(entity);
-            return;
-        }
-    }
-
-    // Clicked on empty space - deselect
-    m_main_context.clear_selection();
 }
 
 void PrefabEditorPanel::activate_editing_override() {
@@ -472,6 +438,10 @@ bool PrefabEditorPanel::save_prefab_file() {
     if (serializer.save_prefab(m_prefab_path, root)) {
         m_dirty = false;
         engine::Logger::instance().info("PrefabEditor", "Saved prefab: %s", m_prefab_path.c_str());
+
+        // Sync changes to all prefab instances in the scene
+        m_main_context.sync_prefab_to_instances(m_prefab_path);
+
         return true;
     }
 

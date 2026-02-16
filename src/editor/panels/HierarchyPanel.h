@@ -26,6 +26,12 @@ private:
     entt::entity m_renaming_entity = entt::null;
     char m_rename_buffer[128] = "";
     bool m_focus_rename = false;  // Flag to set focus on next frame
+
+    // Prefab creation dialog
+    entt::entity m_pending_prefab_entity = entt::null;
+    bool m_show_prefab_save_dialog = false;
+    char m_prefab_name_buffer[256] = "";
+    bool m_prefab_name_focus = false;
 };
 
 } // namespace editor

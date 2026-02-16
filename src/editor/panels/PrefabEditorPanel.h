@@ -6,9 +6,11 @@
 #include "editor/gizmos/RotateGizmo.h"
 #include "editor/gizmos/ScaleGizmo.h"
 #include "editor/render/ViewportCamera.h"
+#include "editor/render/EntityHitDetector.h"
 #include "editor/core/PixelGridTextureCache.h"
 #include <glad/gl.h>
 #include <entt/entt.hpp>
+#include <imgui.h>
 #include <string>
 #include <vector>
 #include <functional>
@@ -57,9 +59,6 @@ private:
     bool load_prefab_file(const std::string& path);
     bool save_prefab_file();
 
-    // Entity selection
-    void select_entity_at(float screen_x, float screen_y);
-
     // Activate/deactivate the editing override on EditorContext
     void activate_editing_override();
     void deactivate_editing_override();
@@ -94,6 +93,9 @@ private:
     // Unsaved changes dialog state
     bool m_show_unsaved_dialog = false;
     std::function<void()> m_pending_action;
+
+    // Click-to-select cycling state
+    ClickCycleState m_click_cycle_state;
 };
 
 } // namespace editor

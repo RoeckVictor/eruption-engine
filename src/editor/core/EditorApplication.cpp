@@ -366,6 +366,9 @@ void EditorApplication::handle_shortcuts(engine::Engine& engine) {
 void EditorApplication::on_project_loaded() {
     engine::Logger::instance().info("Editor", "Project loaded: %s", m_project_manager->project_info().name.c_str());
 
+    // Set project path on context for panels to access
+    m_context.set_project_path(m_project_manager->project_path());
+
     // Initialize script manager for this project
     // Engine paths need to be absolute for CMake to find includes
     std::filesystem::path exe_dir = std::filesystem::current_path();
@@ -405,6 +408,7 @@ void EditorApplication::on_project_loaded() {
     auto* asset_preview = m_panel_manager.get_panel<AssetPreviewPanel>();
     if (auto* file_browser = m_panel_manager.get_panel<FileBrowserPanel>()) {
         file_browser->set_visible(true);
+        file_browser->set_editor_context(&m_context);
         auto assets_path = std::filesystem::path(m_project_manager->project_path()) / "Assets";
         std::filesystem::create_directories(assets_path);
         file_browser->set_root(assets_path.string());
@@ -419,6 +423,11 @@ void EditorApplication::on_project_loaded() {
         // Connect file browser open to scene loading
         file_browser->set_file_opened_callback([this](const std::string& path) {
             on_file_opened(path);
+        });
+
+        // Set up file browser refresh callback on context
+        m_context.set_file_browser_refresh_callback([file_browser]() {
+            file_browser->refresh();
         });
     }
     if (auto* p = m_panel_manager.get_panel<SceneManagerPanel>()) p->set_visible(true);

@@ -1,11 +1,14 @@
 #pragma once
 
 #include "Panel.h"
+#include <entt/entt.hpp>
 #include <string>
 #include <vector>
 #include <functional>
 
 namespace editor {
+
+class EditorContext;
 
 /// File browser panel for navigating project assets.
 class FileBrowserPanel : public Panel {
@@ -28,6 +31,12 @@ public:
     /// Get the currently selected file path (empty if none).
     const std::string& selected_file() const { return m_selected_file; }
 
+    /// Set the editor context for entity drag-drop support.
+    void set_editor_context(EditorContext* context) { m_editor_context = context; }
+
+    /// Refresh the file list.
+    void refresh();
+
 private:
     struct FileEntry {
         std::string name;
@@ -39,7 +48,6 @@ private:
     void render_toolbar();
     void render_folder_tree();
     void render_file_list();
-    void refresh();
 
     void navigate_to(const std::string& path);
     void select_file(const std::string& path);
@@ -80,6 +88,14 @@ private:
 
     // Delete confirmation
     std::string m_pending_delete_path;
+    int m_pending_delete_prefab_usage = 0;  // Count of entities using this prefab
+
+    // Editor context for entity drag-drop
+    EditorContext* m_editor_context = nullptr;
+
+    // Helper to count and unlink prefab instances
+    int count_prefab_instances(const std::string& prefab_path);
+    void unlink_prefab_instances(const std::string& prefab_path);
 };
 
 } // namespace editor

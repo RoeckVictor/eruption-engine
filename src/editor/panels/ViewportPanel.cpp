@@ -3,6 +3,7 @@
 #include "editor/core/EditorComponents.h"
 #include "editor/core/SimulationPlayback.h"
 #include "editor/render/SceneRenderUtils.h"
+#include "editor/render/EntityHitDetector.h"
 #include "engine/core/MathConstants.h"
 #include "engine/core/Transform.h"
 #include "engine/core/Logger.h"
@@ -93,8 +94,8 @@ void ViewportPanel::on_gui() {
     ImVec2 viewport_pos = ImGui::GetItemRectMin();
     ImVec2 viewport_size = ImGui::GetItemRectSize();
 
-    // Handle input when hovered (but not when gizmo is active)
-    if (ImGui::IsItemHovered() && !m_gizmo_renderer.is_active()) {
+    // Handle input when hovered
+    if (ImGui::IsItemHovered()) {
         handle_input();
     }
 
@@ -789,6 +790,33 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
 void ViewportPanel::handle_input() {
     ImGuiIO& io = ImGui::GetIO();
     auto& camera = m_context.camera();
+
+    // Get viewport info for hit detection
+    ImVec2 viewport_pos = ImGui::GetItemRectMin();
+    ImVec2 viewport_size = ImGui::GetItemRectSize();
+
+    // Click-to-select with left mouse button (when not manipulating gizmo)
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !m_gizmo_renderer.is_active()) {
+        ImVec2 mouse_pos = io.MousePos;
+
+        auto* registry = m_context.registry();
+        if (registry) {
+            HitResult hit = EntityHitDetector::hit_test(
+                *registry,
+                mouse_pos,
+                viewport_pos,
+                viewport_size,
+                camera.x,
+                camera.y,
+                camera.zoom
+            );
+
+            EntityHitDetector::process_click_selection(
+                m_context, hit, mouse_pos, m_click_cycle_state,
+                io.KeyCtrl, io.KeyShift
+            );
+        }
+    }
 
     // Zoom with scroll wheel
     if (io.MouseWheel != 0.0f) {

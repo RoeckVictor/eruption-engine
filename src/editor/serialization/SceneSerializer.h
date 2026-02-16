@@ -69,6 +69,10 @@ public:
     /// Save a single entity as a .prefab file.
     bool save_prefab(const std::filesystem::path& path, entt::entity entity);
 
+    /// Sync an entity's components from a source entity in another registry.
+    /// Used for updating prefab instances when the prefab is edited.
+    void sync_entity_from_prefab(entt::entity target, entt::registry& source_registry, entt::entity source);
+
     /// Get/set scene settings.
     SceneSettings& settings() { return m_settings; }
     const SceneSettings& settings() const { return m_settings; }

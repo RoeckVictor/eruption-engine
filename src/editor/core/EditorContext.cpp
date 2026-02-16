@@ -4,10 +4,49 @@
 #include "editor/commands/EntityCommands.h"
 #include "editor/serialization/SceneSerializer.h"
 #include "engine/core/Logger.h"
+#include "engine/core/Transform.h"
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 
 namespace editor {
+
+namespace {
+
+/// Normalize a path for comparison (handles slashes, case, and makes it canonical if possible)
+std::string normalize_path_for_comparison(const std::string& path) {
+    if (path.empty()) return path;
+
+    namespace fs = std::filesystem;
+    try {
+        // Use weakly_canonical to normalize without requiring the file to exist
+        fs::path normalized = fs::weakly_canonical(fs::path(path));
+        std::string result = normalized.string();
+
+        // On Windows, convert to lowercase for case-insensitive comparison
+#ifdef _WIN32
+        std::transform(result.begin(), result.end(), result.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+#endif
+        return result;
+    } catch (const std::exception&) {
+        // Fallback: just normalize slashes
+        std::string result = path;
+        std::replace(result.begin(), result.end(), '\\', '/');
+#ifdef _WIN32
+        std::transform(result.begin(), result.end(), result.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+#endif
+        return result;
+    }
+}
+
+/// Compare two paths for equality (handles platform differences)
+bool paths_equal(const std::string& a, const std::string& b) {
+    return normalize_path_for_comparison(a) == normalize_path_for_comparison(b);
+}
+
+} // anonymous namespace
 
 EditorContext::EditorContext() = default;
 EditorContext::~EditorContext() = default;
@@ -221,6 +260,100 @@ float EditorContext::snap_to_grid(float value) const {
         return value;
     }
     return std::round(value / m_grid_size) * m_grid_size;
+}
+
+void EditorContext::sync_prefab_to_instances(const std::string& prefab_path) {
+    if (!m_registry || prefab_path.empty()) return;
+
+    // Load the updated prefab data once
+    entt::registry temp_registry;
+    SceneSerializer temp_serializer(temp_registry);
+    entt::entity prefab_root = temp_serializer.load_prefab(prefab_path);
+    if (prefab_root == entt::null) {
+        engine::Logger::instance().error("EditorContext", "Failed to load prefab for sync: %s", prefab_path.c_str());
+        return;
+    }
+
+    // Find and update all instances in the current scene
+    std::vector<entt::entity> instances;
+    auto view = m_registry->view<EntityInfo>();
+    for (auto entity : view) {
+        const auto& info = view.get<EntityInfo>(entity);
+        if (info.is_prefab_instance && paths_equal(info.prefab_path, prefab_path)) {
+            instances.push_back(entity);
+        }
+    }
+
+    if (!instances.empty()) {
+        SceneSerializer serializer(*m_registry);
+        for (auto instance : instances) {
+            if (!m_registry->valid(instance)) continue;
+
+            // sync_entity_from_prefab preserves position (x, y) but syncs rotation, scale, and other components
+            serializer.sync_entity_from_prefab(instance, temp_registry, prefab_root);
+        }
+
+        m_dirty = true;
+        engine::Logger::instance().info("EditorContext", "Synced %zu prefab instance(s) in current scene from: %s",
+                                         instances.size(), prefab_path.c_str());
+    }
+
+    // Also update all other scene files in the project
+    if (!m_project_path.empty()) {
+        sync_prefab_to_project_scenes(prefab_path, temp_registry, prefab_root);
+    }
+}
+
+void EditorContext::sync_prefab_to_project_scenes(const std::string& prefab_path,
+                                                   entt::registry& prefab_registry,
+                                                   entt::entity prefab_root) {
+    namespace fs = std::filesystem;
+
+    if (m_project_path.empty()) return;
+
+    int scenes_updated = 0;
+
+    // Find all .scene files in the project
+    try {
+        for (const auto& entry : fs::recursive_directory_iterator(m_project_path)) {
+            if (!entry.is_regular_file()) continue;
+            if (entry.path().extension() != ".scene") continue;
+
+            // Skip the currently open scene - it's already updated in memory
+            if (paths_equal(entry.path().string(), m_scene_path)) continue;
+
+            // Load the scene into a temporary registry
+            entt::registry scene_registry;
+            SceneSerializer scene_serializer(scene_registry);
+            if (!scene_serializer.load(entry.path())) {
+                continue;  // Skip files that fail to load
+            }
+
+            // Find instances of this prefab in the scene
+            bool has_instances = false;
+            auto view = scene_registry.view<EntityInfo>();
+            for (auto entity : view) {
+                const auto& info = view.get<EntityInfo>(entity);
+                if (info.is_prefab_instance && paths_equal(info.prefab_path, prefab_path)) {
+                    scene_serializer.sync_entity_from_prefab(entity, prefab_registry, prefab_root);
+                    has_instances = true;
+                }
+            }
+
+            // Save the scene if it had instances
+            if (has_instances) {
+                scene_serializer.save(entry.path());
+                ++scenes_updated;
+            }
+        }
+    } catch (const std::exception& e) {
+        engine::Logger::instance().error("EditorContext", "Error updating project scenes: %s", e.what());
+    }
+
+    if (scenes_updated > 0) {
+        engine::Logger::instance().info("EditorContext", "Updated %d scene file(s) with prefab changes: %s",
+                                         scenes_updated, prefab_path.c_str());
+    }
 }
 
 }

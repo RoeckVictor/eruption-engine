@@ -1,10 +1,12 @@
 #include "HierarchyPanel.h"
 #include "editor/core/EditorContext.h"
 #include "editor/core/EditorComponents.h"
+#include "editor/serialization/SceneSerializer.h"
 #include "editor/icons/IconsFontAwesome6.h"
 
 #include <imgui.h>
 #include <algorithm>
+#include <filesystem>
 
 namespace editor {
 
@@ -18,6 +20,72 @@ void HierarchyPanel::on_gui() {
     render_toolbar();
     ImGui::Separator();
     render_entity_tree();
+
+    // Prefab save dialog
+    if (m_show_prefab_save_dialog && m_pending_prefab_entity != entt::null) {
+        ImGui::OpenPopup("Save as Prefab");
+    }
+
+    if (ImGui::BeginPopupModal("Save as Prefab", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        auto* registry = m_context.registry();
+        if (!registry || !registry->valid(m_pending_prefab_entity)) {
+            m_show_prefab_save_dialog = false;
+            m_pending_prefab_entity = entt::null;
+            ImGui::CloseCurrentPopup();
+        } else {
+            ImGui::Text("Enter prefab name:");
+
+            if (m_prefab_name_focus) {
+                ImGui::SetKeyboardFocusHere();
+                m_prefab_name_focus = false;
+            }
+
+            bool enter_pressed = ImGui::InputText("##PrefabName", m_prefab_name_buffer, sizeof(m_prefab_name_buffer),
+                                                   ImGuiInputTextFlags_EnterReturnsTrue);
+
+            ImGui::Spacing();
+
+            if (ImGui::Button("Save", ImVec2(120, 0)) || enter_pressed) {
+                // Get project prefabs folder path
+                std::filesystem::path prefab_dir = std::filesystem::path(m_context.project_path()) / "Assets" / "Prefabs";
+                std::filesystem::create_directories(prefab_dir);
+
+                std::filesystem::path prefab_path = prefab_dir / (std::string(m_prefab_name_buffer) + ".prefab");
+
+                // Handle name collision
+                int counter = 1;
+                while (std::filesystem::exists(prefab_path)) {
+                    prefab_path = prefab_dir / (std::string(m_prefab_name_buffer) + "_" + std::to_string(counter++) + ".prefab");
+                }
+
+                SceneSerializer serializer(*registry);
+                if (serializer.save_prefab(prefab_path, m_pending_prefab_entity)) {
+                    // Mark the entity as a prefab instance
+                    if (registry->all_of<EntityInfo>(m_pending_prefab_entity)) {
+                        auto& info = registry->get<EntityInfo>(m_pending_prefab_entity);
+                        info.is_prefab_instance = true;
+                        info.prefab_path = prefab_path.string();
+                    }
+                    m_context.mark_dirty();
+                    m_context.refresh_file_browser();
+                }
+
+                m_show_prefab_save_dialog = false;
+                m_pending_prefab_entity = entt::null;
+                m_prefab_name_buffer[0] = '\0';
+                ImGui::CloseCurrentPopup();
+            }
+
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                m_show_prefab_save_dialog = false;
+                m_pending_prefab_entity = entt::null;
+                m_prefab_name_buffer[0] = '\0';
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::EndPopup();
+    }
 }
 
 void HierarchyPanel::render_toolbar() {
@@ -114,11 +182,16 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth) {
     // Get entity info
     std::string name = "Entity";
     bool enabled = true;
+    bool is_prefab_instance = false;
     if (registry->all_of<EntityInfo>(entity)) {
         const auto& info = registry->get<EntityInfo>(entity);
         name = info.name;
         enabled = info.enabled_in_hierarchy;  // Use effective state (includes parent hierarchy)
+        is_prefab_instance = info.is_prefab_instance;
     }
+
+    // Prepend prefab icon if this entity is a prefab instance
+    std::string display_name = is_prefab_instance ? (std::string(ICON_FA_CUBE) + " " + name) : name;
 
     // Apply filter (m_filter_lower is pre-computed once per frame in render_entity_tree)
     if (!m_filter_lower.empty()) {
@@ -164,9 +237,19 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
     }
 
-    // Render tree node
-    bool is_open = ImGui::TreeNodeEx(name.c_str(), flags);
+    // Prefab instances get a subtle blue tint
+    bool pushed_prefab_color = false;
+    if (is_prefab_instance && enabled) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.8f, 1.0f, 1.0f));
+        pushed_prefab_color = true;
+    }
 
+    // Render tree node
+    bool is_open = ImGui::TreeNodeEx(display_name.c_str(), flags);
+
+    if (pushed_prefab_color) {
+        ImGui::PopStyleColor();
+    }
     if (!enabled) {
         ImGui::PopStyleColor();
     }
@@ -186,6 +269,16 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth) {
         } else {
             // Single select
             m_context.select(entity);
+        }
+    }
+
+    // Show prefab path tooltip for prefab instances
+    if (is_prefab_instance && ImGui::IsItemHovered()) {
+        if (registry->all_of<EntityInfo>(entity)) {
+            const auto& info = registry->get<EntityInfo>(entity);
+            if (!info.prefab_path.empty()) {
+                ImGui::SetTooltip("Prefab: %s", info.prefab_path.c_str());
+            }
         }
     }
 
@@ -224,6 +317,31 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth) {
         if (ImGui::MenuItem("Unparent")) {
             remove_from_parent(*registry, entity);
             m_context.mark_dirty();
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem("Make Prefab from Entity", nullptr, false, !is_prefab_instance)) {
+            m_pending_prefab_entity = entity;
+            m_show_prefab_save_dialog = true;
+            m_prefab_name_focus = true;
+            strncpy(m_prefab_name_buffer, name.c_str(), sizeof(m_prefab_name_buffer) - 1);
+            m_prefab_name_buffer[sizeof(m_prefab_name_buffer) - 1] = '\0';
+        }
+        if (is_prefab_instance && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Entity is already linked to a prefab");
+        }
+        // Show "Unpack Prefab" only if this is a prefab instance
+        if (registry->all_of<EntityInfo>(entity)) {
+            auto& info = registry->get<EntityInfo>(entity);
+            if (info.is_prefab_instance) {
+                if (ImGui::MenuItem("Unpack Prefab")) {
+                    info.is_prefab_instance = false;
+                    info.prefab_path.clear();
+                    m_context.mark_dirty();
+                }
+                if (ImGui::IsItemHovered() && !info.prefab_path.empty()) {
+                    ImGui::SetTooltip("Disconnect from: %s", info.prefab_path.c_str());
+                }
+            }
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Copy", "Ctrl+C")) {

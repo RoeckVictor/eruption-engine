@@ -1,4 +1,7 @@
 #include "FileBrowserPanel.h"
+#include "editor/core/EditorContext.h"
+#include "editor/core/EditorComponents.h"
+#include "editor/serialization/SceneSerializer.h"
 #include "editor/icons/IconsFontAwesome6.h"
 #include "engine/core/Logger.h"
 #include "engine/asset/PixelGridFile.h"
@@ -40,23 +43,48 @@ void FileBrowserPanel::on_gui() {
 
     // Delete confirmation modal (rendered outside children)
     if (!m_pending_delete_path.empty()) {
+        // Check if this is a prefab file and count usage
+        fs::path del_path(m_pending_delete_path);
+        if (del_path.extension() == ".prefab") {
+            m_pending_delete_prefab_usage = count_prefab_instances(m_pending_delete_path);
+        } else {
+            m_pending_delete_prefab_usage = 0;
+        }
         ImGui::OpenPopup("Confirm Delete");
     }
 
     if (ImGui::BeginPopupModal("Confirm Delete", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         std::string filename = fs::path(m_pending_delete_path).filename().string();
         ImGui::Text("Are you sure you want to delete \"%s\"?", filename.c_str());
+
+        // Show prefab usage warning
+        if (m_pending_delete_prefab_usage > 0) {
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.7f, 0.3f, 1.0f));
+            ImGui::Text("Warning: %d entity instance(s) in the scene are linked to this prefab.",
+                        m_pending_delete_prefab_usage);
+            ImGui::Text("They will be automatically unlinked.");
+            ImGui::PopStyleColor();
+        }
+
+        ImGui::Spacing();
         ImGui::Text("This cannot be undone.");
         ImGui::Spacing();
 
         if (ImGui::Button("Delete", ImVec2(120, 0))) {
+            // Unlink prefab instances before deleting
+            if (m_pending_delete_prefab_usage > 0) {
+                unlink_prefab_instances(m_pending_delete_path);
+            }
             perform_delete(m_pending_delete_path);
             m_pending_delete_path.clear();
+            m_pending_delete_prefab_usage = 0;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(120, 0))) {
             m_pending_delete_path.clear();
+            m_pending_delete_prefab_usage = 0;
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -607,6 +635,49 @@ void FileBrowserPanel::render_file_list() {
         }
     }
 
+    // Accept entity drag-drop to create prefab
+    if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ENTITY")) {
+            if (payload->DataSize == sizeof(entt::entity) && m_editor_context) {
+                entt::entity entity = *static_cast<entt::entity*>(payload->Data);
+                auto* registry = m_editor_context->registry();
+
+                if (registry && registry->valid(entity)) {
+                    // Get entity name for prefab filename
+                    std::string prefab_name = "NewPrefab";
+                    if (registry->all_of<EntityInfo>(entity)) {
+                        prefab_name = registry->get<EntityInfo>(entity).name;
+                    }
+
+                    // Create prefab file in current directory
+                    fs::path prefab_path = fs::path(m_current_path) / (prefab_name + ".prefab");
+
+                    // Handle name collision by appending number
+                    int counter = 1;
+                    while (fs::exists(prefab_path)) {
+                        prefab_path = fs::path(m_current_path) / (prefab_name + "_" + std::to_string(counter++) + ".prefab");
+                    }
+
+                    SceneSerializer serializer(*registry);
+                    if (serializer.save_prefab(prefab_path, entity)) {
+                        // Update entity to be a prefab instance
+                        // Ensure EntityInfo exists (add if missing)
+                        if (!registry->all_of<EntityInfo>(entity)) {
+                            registry->emplace<EntityInfo>(entity, EntityInfo{prefab_name});
+                        }
+                        auto& info = registry->get<EntityInfo>(entity);
+                        info.is_prefab_instance = true;
+                        info.prefab_path = prefab_path.string();
+
+                        m_editor_context->mark_dirty();
+                        refresh();
+                    }
+                }
+            }
+        }
+        ImGui::EndDragDropTarget();
+    }
+
     // Right-click on empty space
     if (ImGui::BeginPopupContextWindow(nullptr, ImGuiPopupFlags_NoOpenOverItems | ImGuiPopupFlags_MouseButtonRight)) {
         if (ImGui::BeginMenu("Create")) {
@@ -876,6 +947,40 @@ void FileBrowserPanel::handle_keyboard_shortcuts() {
             m_rename_focus_set = false;
         }
     }
+}
+
+int FileBrowserPanel::count_prefab_instances(const std::string& prefab_path) {
+    if (!m_editor_context) return 0;
+
+    auto* registry = m_editor_context->registry();
+    if (!registry) return 0;
+
+    int count = 0;
+    auto view = registry->view<EntityInfo>();
+    for (auto entity : view) {
+        const auto& info = view.get<EntityInfo>(entity);
+        if (info.is_prefab_instance && info.prefab_path == prefab_path) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+void FileBrowserPanel::unlink_prefab_instances(const std::string& prefab_path) {
+    if (!m_editor_context) return;
+
+    auto* registry = m_editor_context->registry();
+    if (!registry) return;
+
+    auto view = registry->view<EntityInfo>();
+    for (auto entity : view) {
+        auto& info = view.get<EntityInfo>(entity);
+        if (info.is_prefab_instance && info.prefab_path == prefab_path) {
+            info.is_prefab_instance = false;
+            info.prefab_path.clear();
+        }
+    }
+    m_editor_context->mark_dirty();
 }
 
 } // namespace editor

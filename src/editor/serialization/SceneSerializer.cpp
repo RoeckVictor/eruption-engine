@@ -2,6 +2,7 @@
 #include "editor/core/EditorComponents.h"
 #include "editor/core/ComponentTypeRegistry.h"
 #include "engine/core/Logger.h"
+#include "engine/core/Transform.h"
 #include "engine/reflection/ReflectionSerializer.h"
 #include "runtime/ScriptComponent.h"
 #include <fstream>
@@ -349,6 +350,16 @@ entt::entity SceneSerializer::deserialize_entity(const nlohmann::json& json, ent
     if (json.contains("isPrefabInstance")) {
         info.is_prefab_instance = json["isPrefabInstance"].get<bool>();
     }
+    // Auto-unpack if prefab source file is missing
+    if (info.is_prefab_instance && !info.prefab_path.empty()) {
+        if (!std::filesystem::exists(info.prefab_path)) {
+            engine::Logger::instance().warning("SceneSerializer",
+                "Prefab source '%s' not found for entity '%s', unpacking instance",
+                info.prefab_path.c_str(), info.name.c_str());
+            info.is_prefab_instance = false;
+            info.prefab_path.clear();
+        }
+    }
     if (json.contains("componentOrder") && json["componentOrder"].is_array()) {
         for (const auto& name : json["componentOrder"]) {
             info.component_order.push_back(name.get<std::string>());
@@ -549,6 +560,55 @@ bool SceneSerializer::save_prefab(const std::filesystem::path& path, entt::entit
         engine::Logger::instance().error("SceneSerializer", "%s", m_last_error.c_str());
         return false;
     }
+}
+
+void SceneSerializer::sync_entity_from_prefab(entt::entity target, entt::registry& source_registry, entt::entity source) {
+    if (!m_registry.valid(target) || !source_registry.valid(source)) return;
+
+    auto& type_registry = engine::reflection::TypeRegistry::instance();
+    auto& component_registry = ComponentTypeRegistry::instance();
+    const auto& all_types = type_registry.all_types();
+
+    // Get all components from source entity
+    for (const auto* type_info : all_types) {
+        if (!type_info) continue;
+
+        // Skip EntityInfo - we want to preserve the instance's identity
+        if (type_info->name() == "editor::EntityInfo") continue;
+
+        // Handle Transform specially - sync rotation and scale, but preserve position
+        if (type_info->name() == "engine::Transform") {
+            if (source_registry.all_of<engine::Transform>(source) && m_registry.all_of<engine::Transform>(target)) {
+                const auto& src_t = source_registry.get<engine::Transform>(source);
+                auto& dst_t = m_registry.get<engine::Transform>(target);
+
+                // Preserve instance position, sync rotation and scale from prefab
+                dst_t.rotation = src_t.rotation;
+                dst_t.scale_x = src_t.scale_x;
+                dst_t.scale_y = src_t.scale_y;
+            }
+            continue;
+        }
+
+        // Check if source has this component
+        void* source_ptr = component_registry.get_component(source_registry, source, type_info->type_index());
+        if (!source_ptr) {
+            // Source doesn't have this component - remove from target if it exists
+            component_registry.remove_component(m_registry, target, type_info->type_index());
+            continue;
+        }
+
+        // Serialize source component to JSON
+        nlohmann::json comp_json;
+        comp_json["type"] = type_info->name();
+        comp_json["data"] = nlohmann::json::object();
+        engine::reflection::serialize_properties(*type_info, source_ptr, comp_json["data"]);
+
+        // Apply to target
+        deserialize_component(target, comp_json);
+    }
+
+    update_world_transforms(m_registry);
 }
 
 } // namespace editor

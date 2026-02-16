@@ -2,9 +2,11 @@
 
 #include "Panel.h"
 #include "editor/gizmos/GizmoRenderer.h"
+#include "editor/render/EntityHitDetector.h"
 #include "editor/core/PixelGridTextureCache.h"
 #include <glad/gl.h>
 #include <entt/entt.hpp>
+#include <imgui.h>
 #include <string>
 
 namespace editor {
@@ -56,6 +58,9 @@ private:
     bool m_is_panning = false;
     float m_pan_start_x = 0.0f;
     float m_pan_start_y = 0.0f;
+
+    // Click-to-select cycling state
+    ClickCycleState m_click_cycle_state;
 };
 
 } // namespace editor
