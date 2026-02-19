@@ -37,7 +37,9 @@ void ScreenRectSystem::update_recursive(
     float element_y = anchor_pos_y + rect.offset_y;
 
     // Adjust for pivot (pivot is where position is measured from)
-    // The final position is the top-left corner of the rect
+    // The final position is the TOP-LEFT corner of the rect
+    // Y-down convention: Y=0 is top of screen, Y increases downward
+    // anchor_y=0 means top anchor, anchor_y=1 means bottom anchor
     rect.computed_x = element_x - (rect.pivot_x * rect.width);
     rect.computed_y = element_y - (rect.pivot_y * rect.height);
     rect.computed_width = rect.width;

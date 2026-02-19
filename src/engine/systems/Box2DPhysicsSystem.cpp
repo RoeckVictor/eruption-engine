@@ -17,12 +17,16 @@ namespace engine {
 bool Box2DPhysicsSystem::init(Engine& engine) {
     auto& ctx = engine.app_context<EngineContext>();
     m_registry = &ctx.registry;
-    m_physics_world = &ctx.physics_world;
+    m_physics_world = ctx.physics_world;
 
     // Listen for Rigidbody component destruction to clean up Box2D bodies
     m_registry->on_destroy<physics::Rigidbody>().connect<&Box2DPhysicsSystem::on_rigidbody_destroyed>(this);
 
-    Logger::instance().info("Box2DPhysics", "Box2DPhysicsSystem initialized");
+    if (!m_physics_world) {
+        Logger::instance().warning("Box2DPhysics", "No physics world - Box2DPhysicsSystem disabled");
+    } else {
+        Logger::instance().info("Box2DPhysics", "Box2DPhysicsSystem initialized");
+    }
     return true;
 }
 
@@ -34,6 +38,8 @@ void Box2DPhysicsSystem::shutdown() {
 }
 
 void Box2DPhysicsSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
+    if (!m_physics_world) return;
+
     // Step 1: Create bodies for new Rigidbody entities (entities without b2BodyId)
     {
         auto view = m_registry->view<physics::Rigidbody, Transform>();

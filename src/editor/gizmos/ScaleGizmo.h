@@ -10,12 +10,22 @@ class ScaleGizmo : public Gizmo {
 public:
     ScaleGizmo() = default;
 
-    GizmoResult render(
-        ImDrawList* draw_list,
+    GizmoResult update(
         ImVec2 viewport_pos,
         ImVec2 viewport_size,
         entt::entity entity,
         engine::Transform& transform,
+        float camera_x,
+        float camera_y,
+        float zoom,
+        GizmoSpace space = GizmoSpace::World
+    ) override;
+
+    void render(
+        ImDrawList* draw_list,
+        ImVec2 viewport_pos,
+        ImVec2 viewport_size,
+        const engine::Transform& transform,
         float camera_x,
         float camera_y,
         float zoom,

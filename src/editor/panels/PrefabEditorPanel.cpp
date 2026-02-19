@@ -280,11 +280,14 @@ void PrefabEditorPanel::render_viewport() {
 
     draw_list->PopClipRect();
 
+    // Update gizmo state BEFORE handling input (so gizmo takes priority)
+    update_gizmos(m_viewport_pos, m_viewport_size);
+
     // Render gizmos (outside clip rect so they can draw over edges)
     render_gizmos(draw_list, m_viewport_pos, m_viewport_size);
 
     // Handle input
-    if (viewport_hovered && !m_gizmo_active) {
+    if (viewport_hovered && !m_gizmo_active && !m_gizmo_hovering) {
         handle_viewport_input();
 
         // Click to select entity
@@ -321,7 +324,9 @@ void PrefabEditorPanel::render_viewport() {
 // Gizmos
 // ---------------------------------------------------------------------------
 
-void PrefabEditorPanel::render_gizmos(ImDrawList* draw_list, ImVec2 vp_pos, ImVec2 vp_size) {
+void PrefabEditorPanel::update_gizmos(ImVec2 vp_pos, ImVec2 vp_size) {
+    m_gizmo_hovering = false;
+
     const auto& sel = m_selection;
     if (sel.empty()) {
         m_gizmo_active = false;
@@ -344,19 +349,49 @@ void PrefabEditorPanel::render_gizmos(ImDrawList* draw_list, ImVec2 vp_pos, ImVe
 
     auto& transform = m_prefab_registry.get<engine::Transform>(entity);
 
-    GizmoResult result = active_gizmo->render(
-        draw_list, vp_pos, vp_size,
+    GizmoResult result = active_gizmo->update(
+        vp_pos, vp_size,
         entity, transform,
         m_camera.x, m_camera.y, m_camera.zoom,
         GizmoSpace::World
     );
 
     m_gizmo_active = result.is_active;
+    m_gizmo_hovering = active_gizmo->is_hovering();
 
     if (result.value_changed) {
         m_dirty = true;
         update_world_transforms(m_prefab_registry);
     }
+}
+
+void PrefabEditorPanel::render_gizmos(ImDrawList* draw_list, ImVec2 vp_pos, ImVec2 vp_size) {
+    const auto& sel = m_selection;
+    if (sel.empty()) {
+        return;
+    }
+
+    Gizmo* active_gizmo = nullptr;
+    switch (m_gizmo_mode) {
+        case GizmoMode::Translate: active_gizmo = &m_translate_gizmo; break;
+        case GizmoMode::Rotate:    active_gizmo = &m_rotate_gizmo; break;
+        case GizmoMode::Scale:     active_gizmo = &m_scale_gizmo; break;
+    }
+    if (!active_gizmo) return;
+
+    entt::entity entity = sel.front();
+    if (!m_prefab_registry.valid(entity) || !m_prefab_registry.all_of<engine::Transform>(entity)) {
+        return;
+    }
+
+    const auto& transform = m_prefab_registry.get<engine::Transform>(entity);
+
+    active_gizmo->render(
+        draw_list, vp_pos, vp_size,
+        transform,
+        m_camera.x, m_camera.y, m_camera.zoom,
+        GizmoSpace::World
+    );
 }
 
 // ---------------------------------------------------------------------------

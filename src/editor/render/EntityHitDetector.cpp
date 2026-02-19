@@ -3,8 +3,11 @@
 #include "editor/core/EditorComponents.h"
 #include "engine/core/Transform.h"
 #include "engine/core/MathConstants.h"
+#include "engine/core/ScreenRect.h"
 #include "engine/simulation/PixelGridComponent.h"
 #include "engine/physics/Colliders.h"
+#include "engine/render/Image.h"
+#include "engine/render/Text.h"
 
 #include <cmath>
 #include <algorithm>
@@ -168,6 +171,90 @@ bool point_near_origin(
     return (dx * dx + dy * dy) <= (threshold * threshold);
 }
 
+/// Check if point is inside an Image entity bounds (centered on transform)
+bool point_in_image_bounds(
+    float world_x, float world_y,
+    const engine::Transform& transform,
+    const engine::render::Image& image
+) {
+    // Use cached dimensions if available, otherwise use a default
+    float tex_w = (image._cached_width > 0) ? static_cast<float>(image._cached_width) : 100.0f;
+    float tex_h = (image._cached_height > 0) ? static_cast<float>(image._cached_height) : 100.0f;
+
+    float w = tex_w * std::abs(transform.world_scale_x);
+    float h = tex_h * std::abs(transform.world_scale_y);
+    float hw = w * 0.5f;
+    float hh = h * 0.5f;
+
+    // Transform point into local space (centered origin)
+    float dx = world_x - transform.world_x;
+    float dy = world_y - transform.world_y;
+
+    // Inverse rotation
+    float rot_rad = -transform.world_rotation * engine::DEG_TO_RAD;
+    float cos_r = std::cos(rot_rad);
+    float sin_r = std::sin(rot_rad);
+
+    float local_x = dx * cos_r - dy * sin_r;
+    float local_y = dx * sin_r + dy * cos_r;
+
+    // Check centered bounds
+    return local_x >= -hw && local_x <= hw &&
+           local_y >= -hh && local_y <= hh;
+}
+
+/// Check if point is inside a Text entity bounds (centered on transform)
+/// Uses a simple approximation based on content length and font size
+bool point_in_text_bounds(
+    float world_x, float world_y,
+    const engine::Transform& transform,
+    const engine::render::Text& text
+) {
+    if (text.content.empty()) return false;
+
+    // Approximate text bounds: estimate width based on character count and font size
+    // This is a rough approximation since we don't have access to font metrics here
+    float char_width = text.font_size * 0.6f;  // Approximate average character width
+    float line_height = text.font_size * text.line_height;
+
+    // Count lines
+    int line_count = 1;
+    size_t max_line_length = 0;
+    size_t current_line_length = 0;
+    for (char c : text.content) {
+        if (c == '\n') {
+            line_count++;
+            max_line_length = std::max(max_line_length, current_line_length);
+            current_line_length = 0;
+        } else {
+            current_line_length++;
+        }
+    }
+    max_line_length = std::max(max_line_length, current_line_length);
+
+    float w = static_cast<float>(max_line_length) * char_width * std::abs(transform.world_scale_x);
+    float h = static_cast<float>(line_count) * line_height * std::abs(transform.world_scale_y);
+    float hw = w * 0.5f;
+    float hh = h * 0.5f;
+
+    // Transform point into local space (centered origin)
+    float dx = world_x - transform.world_x;
+    float dy = world_y - transform.world_y;
+
+    // Inverse rotation
+    float rot_rad = -transform.world_rotation * engine::DEG_TO_RAD;
+    float cos_r = std::cos(rot_rad);
+    float sin_r = std::sin(rot_rad);
+
+    float local_x = dx * cos_r - dy * sin_r;
+    float local_y = dx * sin_r + dy * cos_r;
+
+    // Check centered bounds (with some padding for click tolerance)
+    float padding = 5.0f;
+    return local_x >= -hw - padding && local_x <= hw + padding &&
+           local_y >= -hh - padding && local_y <= hh + padding;
+}
+
 } // anonymous namespace
 
 HitResult EntityHitDetector::hit_test(
@@ -269,6 +356,50 @@ HitResult EntityHitDetector::hit_test(
             auto& capsule = view.get<engine::physics::CapsuleCollider>(entity);
 
             if (capsule.enabled && point_in_capsule_collider(world_x, world_y, transform, capsule)) {
+                try_add_entity(entity);
+            }
+        }
+    }
+
+    // Check world-space Image entities (Transform + Image, no ScreenRect)
+    {
+        auto view = registry.view<engine::Transform, engine::render::Image>();
+        for (auto entity : view) {
+            if (added_entities.count(entity)) continue;
+
+            // Skip screen-space entities
+            if (registry.all_of<engine::ScreenRect>(entity)) continue;
+
+            if (registry.all_of<EntityInfo>(entity)) {
+                if (!registry.get<EntityInfo>(entity).enabled_in_hierarchy) continue;
+            }
+
+            auto& transform = view.get<engine::Transform>(entity);
+            auto& image = view.get<engine::render::Image>(entity);
+
+            if (image.enabled && point_in_image_bounds(world_x, world_y, transform, image)) {
+                try_add_entity(entity);
+            }
+        }
+    }
+
+    // Check world-space Text entities (Transform + Text, no ScreenRect)
+    {
+        auto view = registry.view<engine::Transform, engine::render::Text>();
+        for (auto entity : view) {
+            if (added_entities.count(entity)) continue;
+
+            // Skip screen-space entities
+            if (registry.all_of<engine::ScreenRect>(entity)) continue;
+
+            if (registry.all_of<EntityInfo>(entity)) {
+                if (!registry.get<EntityInfo>(entity).enabled_in_hierarchy) continue;
+            }
+
+            auto& transform = view.get<engine::Transform>(entity);
+            auto& text = view.get<engine::render::Text>(entity);
+
+            if (text.enabled && point_in_text_bounds(world_x, world_y, transform, text)) {
                 try_add_entity(entity);
             }
         }

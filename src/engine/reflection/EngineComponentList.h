@@ -15,6 +15,8 @@
     X(engine::Transform) \
     X(engine::ScreenRect) \
     X(engine::render::Camera2D) \
+    X(engine::render::Image) \
+    X(engine::render::Text) \
     X(engine::animation::Animator) \
     X(engine::simulation::PixelGridComponent) \
     X(engine::render::PixelGridRenderer) \

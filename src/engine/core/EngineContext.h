@@ -15,7 +15,7 @@ namespace physics { class PhysicsWorld; }
 /// an EngineContext and set it via Engine::set_app_context().
 struct EngineContext {
     entt::registry& registry;
-    physics::PhysicsWorld& physics_world;
+    physics::PhysicsWorld* physics_world;  // Can be null if physics not needed
     render::Camera2D& camera;
 };
 

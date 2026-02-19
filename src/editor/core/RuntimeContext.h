@@ -44,6 +44,8 @@ public:
     void init(entt::registry* editor_registry, ScriptManager* script_manager = nullptr);
 
     void set_engine(engine::Engine* engine) { m_engine = engine; m_host_api.engine_ctx = engine; }
+    engine::Engine* engine() { return m_engine; }
+    const engine::Engine* engine() const { return m_engine; }
 
     PlayState state() const { return m_state; }
     bool is_playing() const { return m_state != PlayState::Editing; }

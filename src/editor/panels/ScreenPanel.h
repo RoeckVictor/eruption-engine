@@ -1,9 +1,13 @@
 #pragma once
 
 #include "Panel.h"
+#include "editor/render/EditorTextureCache.h"
+#include "editor/render/EditorTextRenderer.h"
 #include <glad/gl.h>
 #include <entt/entt.hpp>
 #include <imgui.h>
+#include <string>
+#include <memory>
 
 namespace editor {
 
@@ -100,6 +104,17 @@ private:
     float m_drag_start_y = 0.0f;
     float m_entity_start_offset_x = 0.0f;
     float m_entity_start_offset_y = 0.0f;
+
+    // Texture cache for Image components
+    EditorTextureCache m_image_textures;
+
+    // Helper methods for rendering
+    void render_image_entity(ImDrawList* draw_list, entt::entity entity, ImVec2 canvas_pos, ImVec2 canvas_size);
+    void render_text_entity(ImDrawList* draw_list, entt::entity entity, ImVec2 canvas_pos, ImVec2 canvas_size);
+
+    // Text renderer using game fonts
+    std::unique_ptr<EditorTextRenderer> m_text_renderer;
+    void ensure_text_renderer();
 };
 
 } // namespace editor

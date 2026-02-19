@@ -6,10 +6,14 @@
 #include "editor/render/EntityHitDetector.h"
 #include "engine/core/MathConstants.h"
 #include "engine/core/Transform.h"
+#include "engine/core/ScreenRect.h"
 #include "engine/core/Logger.h"
+#include "engine/core/Engine.h"
 #include "engine/simulation/PixelGridComponent.h"
 #include "engine/simulation/MaterialLibrary.h"
 #include "engine/render/PixelGridRenderer.h"
+#include "engine/render/Image.h"
+#include "engine/render/Text.h"
 #include "engine/asset/PixelGridFile.h"
 #include "engine/asset/PxgDataParser.h"
 #include "engine/physics/Rigidbody.h"
@@ -93,6 +97,10 @@ void ViewportPanel::on_gui() {
     // Get viewport rect for gizmos and overlay
     ImVec2 viewport_pos = ImGui::GetItemRectMin();
     ImVec2 viewport_size = ImGui::GetItemRectSize();
+
+    // Update gizmo state BEFORE handling input
+    // This ensures gizmo hover/drag takes priority over click-to-select
+    m_gizmo_renderer.update(viewport_pos, viewport_size);
 
     // Handle input when hovered
     if (ImGui::IsItemHovered()) {
@@ -190,6 +198,61 @@ void ViewportPanel::render_entities() {
     // This keeps all viewport rendering in one place
 }
 
+void ViewportPanel::ensure_text_renderer() {
+    if (m_text_renderer) return;
+
+    auto* runtime = m_context.runtime();
+    if (!runtime) return;
+
+    auto* eng = runtime->engine();
+    if (!eng) return;
+
+    m_text_renderer = std::make_unique<EditorTextRenderer>(eng->assets());
+}
+
+void ViewportPanel::render_world_image(ImDrawList* draw_list, entt::entity entity,
+                                        float cam_x, float cam_y, float cam_zoom,
+                                        ImVec2 vp_pos, ImVec2 vp_size) {
+    auto* registry = m_context.registry();
+    if (!registry) return;
+
+    auto& transform = registry->get<engine::Transform>(entity);
+    auto& image = registry->get<engine::render::Image>(entity);
+
+    if (!image.enabled) return;
+
+    int tex_width, tex_height;
+    GLuint texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
+
+    // Cache dimensions for hit detection
+    image._cached_width = tex_width;
+    image._cached_height = tex_height;
+
+    WorldToScreen wts(vp_pos, vp_size, cam_x, cam_y, cam_zoom);
+    auto quad = compute_image_quad(transform, tex_width, tex_height, image, wts);
+    draw_image_quad(draw_list, quad, texture);
+}
+
+void ViewportPanel::render_world_text(ImDrawList* draw_list, entt::entity entity,
+                                       float cam_x, float cam_y, float cam_zoom,
+                                       ImVec2 vp_pos, ImVec2 vp_size) {
+    auto* registry = m_context.registry();
+    if (!registry) return;
+
+    ensure_text_renderer();
+    if (!m_text_renderer) return;
+
+    auto& transform = registry->get<engine::Transform>(entity);
+    auto& text = registry->get<engine::render::Text>(entity);
+
+    if (!text.enabled) return;
+
+    WorldToScreen wts(vp_pos, vp_size, cam_x, cam_y, cam_zoom);
+    ImVec2 center = wts(transform.world_x, transform.world_y);
+
+    m_text_renderer->render_centered(draw_list, text, center, cam_zoom);
+}
+
 void ViewportPanel::render_overlay() {
     // Get viewport position
     ImVec2 pos = ImGui::GetItemRectMin();
@@ -273,32 +336,39 @@ void ViewportPanel::render_overlay() {
         }
     }
 
-    // Draw entities that have PixelGridRenderer (actual pixel grid textures)
+    // Draw world-space entities (PixelGrid, Image, Text) sorted by layer
     auto* registry = m_context.registry();
     if (registry) {
         WorldToScreen wts(pos, size, camera.x, camera.y, camera.zoom);
 
-        auto view = registry->view<engine::Transform,
-                                    engine::simulation::PixelGridComponent,
-                                    engine::render::PixelGridRenderer>();
-        for (auto entity : view) {
-            auto& transform = view.get<engine::Transform>(entity);
-            auto& grid_comp = view.get<engine::simulation::PixelGridComponent>(entity);
-            auto& renderer = view.get<engine::render::PixelGridRenderer>(entity);
+        // Collect and sort all world-space renderables
+        auto render_items = collect_world_renderables(*registry);
 
-            if (registry->all_of<EntityInfo>(entity)) {
-                if (!registry->get<EntityInfo>(entity).enabled_in_hierarchy) continue;
-            }
-            if (!renderer.enabled) continue;
+        // Render sorted entities
+        for (const auto& item : render_items) {
+            switch (item.type) {
+                case RenderableType::PixelGrid: {
+                    auto& transform = registry->get<engine::Transform>(item.entity);
+                    auto& grid_comp = registry->get<engine::simulation::PixelGridComponent>(item.entity);
+                    auto& renderer = registry->get<engine::render::PixelGridRenderer>(item.entity);
 
-            auto quad = compute_pixel_grid_quad(transform, grid_comp, renderer, wts);
-            GLuint grid_tex = resolve_grid_texture(
-                entity, grid_comp.pixel_grid_path, m_context.runtime(), m_grid_textures);
+                    auto quad = compute_pixel_grid_quad(transform, grid_comp, renderer, wts);
+                    GLuint grid_tex = resolve_grid_texture(
+                        item.entity, grid_comp.pixel_grid_path, m_context.runtime(), m_grid_textures);
 
-            draw_pixel_grid_quad(draw_list, quad, grid_tex);
+                    draw_pixel_grid_quad(draw_list, quad, grid_tex);
 
-            if (m_context.is_selected(entity)) {
-                draw_selection_outline(draw_list, quad);
+                    if (m_context.is_selected(item.entity)) {
+                        draw_selection_outline(draw_list, quad);
+                    }
+                    break;
+                }
+                case RenderableType::Image:
+                    render_world_image(draw_list, item.entity, camera.x, camera.y, camera.zoom, pos, size);
+                    break;
+                case RenderableType::Text:
+                    render_world_text(draw_list, item.entity, camera.x, camera.y, camera.zoom, pos, size);
+                    break;
             }
         }
 
@@ -795,8 +865,9 @@ void ViewportPanel::handle_input() {
     ImVec2 viewport_pos = ImGui::GetItemRectMin();
     ImVec2 viewport_size = ImGui::GetItemRectSize();
 
-    // Click-to-select with left mouse button (when not manipulating gizmo)
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !m_gizmo_renderer.is_active()) {
+    // Click-to-select with left mouse button (when not manipulating or hovering gizmo)
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+        !m_gizmo_renderer.is_active() && !m_gizmo_renderer.is_hovering()) {
         ImVec2 mouse_pos = io.MousePos;
 
         auto* registry = m_context.registry();

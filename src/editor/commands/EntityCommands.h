@@ -2,6 +2,7 @@
 
 #include "Command.h"
 #include "editor/core/EditorComponents.h"
+#include "engine/core/ScreenRect.h"
 #include <entt/entt.hpp>
 #include <string>
 #include <optional>
@@ -10,7 +11,6 @@ namespace editor {
 
 class EditorContext;
 
-/// Command for adding a new entity.
 class AddEntityCommand : public Command {
 public:
     AddEntityCommand(entt::registry* registry, EditorContext* context,
@@ -59,7 +59,10 @@ private:
         entt::entity entity;
         std::string name;
         bool enabled;
+        bool has_transform = false;
         engine::Transform transform;
+        bool has_screen_rect = false;
+        engine::ScreenRect screen_rect;
         entt::entity parent;
         std::vector<entt::entity> children;
     };

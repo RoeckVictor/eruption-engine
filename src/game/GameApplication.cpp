@@ -2,6 +2,7 @@
 
 #include "engine/core/Engine.h"
 #include "engine/core/Logger.h"
+#include "engine/core/ScreenRectSystem.h"
 #include "engine/scene/Scene.h"
 #include "engine/reflection/ReflectionInit.h"
 #include "engine/platform/KeyCode.h"
@@ -126,6 +127,12 @@ bool GameApplication::on_init(engine::Engine& engine) {
     // correct for physics body creation and initial script callbacks.
     if (scene_loaded) {
         editor::update_world_transforms(m_registry);
+
+        // Compute screen-space positions for first frame rendering
+        auto& window = engine.window();
+        engine::ScreenRectSystem::update(m_registry,
+                                         static_cast<float>(window.width()),
+                                         static_cast<float>(window.height()));
     }
 
     if (scene_loaded) {
@@ -149,26 +156,24 @@ bool GameApplication::on_init(engine::Engine& engine) {
     // -----------------------------------------------------------------------
     // 6. Create EngineContext for engine systems (render, loader)
     // -----------------------------------------------------------------------
-    if (m_runtime->physics_world()) {
-        m_engine_ctx = std::make_unique<engine::EngineContext>(
-            engine::EngineContext{m_registry, *m_runtime->physics_world(), m_camera}
-        );
-        engine.set_app_context(*m_engine_ctx);
-    }
+    m_engine_ctx = std::make_unique<engine::EngineContext>(
+        engine::EngineContext{m_registry, m_runtime->physics_world(), m_camera}
+    );
+    engine.set_app_context(*m_engine_ctx);
 
     // -----------------------------------------------------------------------
     // 7. Create scene with render systems and push it
     // -----------------------------------------------------------------------
     auto scene = std::make_unique<GameScene>();
 
-    if (m_engine_ctx) {
-        // Register render systems into the scene
-        scene->systems().add_update_system(m_loader_system);
-        scene->systems().add_render_system(m_render_system);
+    // Register render systems into the scene
+    scene->systems().add_update_system(m_loader_system);
+    scene->systems().add_render_system(m_render_system);
+    scene->systems().add_render_system(m_image_render_system);
+    scene->systems().add_render_system(m_text_render_system);
 
-        // Wire loader into renderer
-        m_render_system.set_loader(&m_loader_system);
-    }
+    // Wire loader into renderer
+    m_render_system.set_loader(&m_loader_system);
 
     engine.scenes().push(std::move(scene));
 
@@ -196,6 +201,12 @@ void GameApplication::on_update(engine::Engine& engine, float dt) {
             }
         }
     }
+
+    // Update screen-space positions (ScreenRect computed_x/y)
+    auto& window = engine.window();
+    engine::ScreenRectSystem::update(m_registry,
+                                     static_cast<float>(window.width()),
+                                     static_cast<float>(window.height()));
 
     // Sync camera from entity to our stable reference (for rendering)
     {

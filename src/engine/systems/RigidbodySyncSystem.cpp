@@ -14,13 +14,19 @@ namespace engine {
 bool RigidbodySyncSystem::init(Engine& engine) {
     auto& ctx = engine.app_context<EngineContext>();
     m_registry = &ctx.registry;
-    m_physics_world = &ctx.physics_world;
+    m_physics_world = ctx.physics_world;
 
-    Logger::instance().info("RigidbodySync", "RigidbodySyncSystem initialized");
+    if (!m_physics_world) {
+        Logger::instance().warning("RigidbodySync", "No physics world - RigidbodySyncSystem disabled");
+    } else {
+        Logger::instance().info("RigidbodySync", "RigidbodySyncSystem initialized");
+    }
     return true;
 }
 
 void RigidbodySyncSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
+    if (!m_physics_world) return;
+
     // Sync Transform FROM Box2D bodies for Dynamic bodies (Physics → Transform)
     // Note: Kinematic bodies are already synced Transform → Physics in Box2DPhysicsSystem
 

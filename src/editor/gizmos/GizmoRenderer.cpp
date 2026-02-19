@@ -9,18 +9,26 @@ GizmoRenderer::GizmoRenderer(EditorContext& context)
 {
 }
 
-void GizmoRenderer::render(ImDrawList* draw_list, ImVec2 viewport_pos, ImVec2 viewport_size) {
+void GizmoRenderer::update(ImVec2 viewport_pos, ImVec2 viewport_size) {
+    // Cache viewport info for render()
+    m_viewport_pos = viewport_pos;
+    m_viewport_size = viewport_size;
+    m_is_hovering = false;
+
     if (!m_enabled) {
+        m_is_active = false;
         return;
     }
 
     // Don't show gizmos in play mode
     if (m_context.is_playing()) {
+        m_is_active = false;
         return;
     }
 
     auto* registry = m_context.registry();
     if (!registry) {
+        m_is_active = false;
         return;
     }
 
@@ -48,10 +56,11 @@ void GizmoRenderer::render(ImDrawList* draw_list, ImVec2 viewport_pos, ImVec2 vi
     }
 
     if (!active_gizmo) {
+        m_is_active = false;
         return;
     }
 
-    // For now, only render gizmo for the first selected entity
+    // For now, only handle gizmo for the first selected entity
     // TODO: Support multi-selection gizmo (average position, etc.)
     entt::entity entity = selection.front();
 
@@ -62,9 +71,8 @@ void GizmoRenderer::render(ImDrawList* draw_list, ImVec2 viewport_pos, ImVec2 vi
 
     auto& transform = registry->get<engine::Transform>(entity);
 
-    // Render the gizmo (pass coordinate space)
-    GizmoResult result = active_gizmo->render(
-        draw_list,
+    // Update the gizmo (process input)
+    GizmoResult result = active_gizmo->update(
         viewport_pos,
         viewport_size,
         entity,
@@ -76,6 +84,7 @@ void GizmoRenderer::render(ImDrawList* draw_list, ImVec2 viewport_pos, ImVec2 vi
     );
 
     m_is_active = result.is_active;
+    m_is_hovering = active_gizmo->is_hovering();
 
     // Apply snap-to-grid if enabled and transform changed (for translate mode)
     if (result.value_changed && m_context.is_snap_enabled() && m_mode == GizmoMode::Translate) {
@@ -99,6 +108,69 @@ void GizmoRenderer::render(ImDrawList* draw_list, ImVec2 viewport_pos, ImVec2 vi
     if (result.value_changed) {
         m_context.mark_dirty();
     }
+}
+
+void GizmoRenderer::render(ImDrawList* draw_list, ImVec2 viewport_pos, ImVec2 viewport_size) {
+    if (!m_enabled) {
+        return;
+    }
+
+    // Don't show gizmos in play mode
+    if (m_context.is_playing()) {
+        return;
+    }
+
+    auto* registry = m_context.registry();
+    if (!registry) {
+        return;
+    }
+
+    const auto& selection = m_context.selection();
+    if (selection.empty()) {
+        return;
+    }
+
+    // Get camera info
+    const auto& camera = m_context.camera();
+
+    // Get the active gizmo based on mode
+    Gizmo* active_gizmo = nullptr;
+    switch (m_mode) {
+        case GizmoMode::Translate:
+            active_gizmo = &m_translate_gizmo;
+            break;
+        case GizmoMode::Rotate:
+            active_gizmo = &m_rotate_gizmo;
+            break;
+        case GizmoMode::Scale:
+            active_gizmo = &m_scale_gizmo;
+            break;
+    }
+
+    if (!active_gizmo) {
+        return;
+    }
+
+    // For now, only render gizmo for the first selected entity
+    entt::entity entity = selection.front();
+
+    if (!registry->valid(entity) || !registry->all_of<engine::Transform>(entity)) {
+        return;
+    }
+
+    const auto& transform = registry->get<engine::Transform>(entity);
+
+    // Render the gizmo (draw only, no input processing)
+    active_gizmo->render(
+        draw_list,
+        viewport_pos,
+        viewport_size,
+        transform,
+        camera.x,
+        camera.y,
+        camera.zoom,
+        m_space
+    );
 }
 
 void GizmoRenderer::generate_command(entt::entity entity, const engine::Transform& old_transform, const engine::Transform& new_transform) {

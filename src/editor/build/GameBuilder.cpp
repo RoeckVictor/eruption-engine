@@ -234,19 +234,12 @@ bool GameBuilder::copy_runtime(const BuildConfig& config) {
             engine::Logger::instance().info("GameBuilder", "Copied shaders");
         }
 
-        // Copy engine default assets (pixel grid defaults, materials, config)
-        fs::path defaults_src = exe_dir / "assets" / "defaults";
-        if (fs::exists(defaults_src)) {
-            fs::copy(defaults_src, output_dir / "assets" / "defaults",
+        // Copy entire engine assets folder (fonts, materials, defaults, etc.)
+        fs::path assets_src = exe_dir / "assets";
+        if (fs::exists(assets_src)) {
+            fs::copy(assets_src, output_dir / "assets",
                      fs::copy_options::recursive | fs::copy_options::overwrite_existing);
-            engine::Logger::instance().info("GameBuilder", "Copied engine default assets");
-        }
-
-        fs::path materials_src = exe_dir / "assets" / "materials";
-        if (fs::exists(materials_src)) {
-            fs::copy(materials_src, output_dir / "assets" / "materials",
-                     fs::copy_options::recursive | fs::copy_options::overwrite_existing);
-            engine::Logger::instance().info("GameBuilder", "Copied material definitions");
+            engine::Logger::instance().info("GameBuilder", "Copied engine assets");
         }
 
         fs::path engine_config_src = exe_dir / "engine_config.json";

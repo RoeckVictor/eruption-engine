@@ -5,8 +5,7 @@
 
 namespace editor {
 
-GizmoResult ScaleGizmo::render(
-    ImDrawList* draw_list,
+GizmoResult ScaleGizmo::update(
     ImVec2 viewport_pos,
     ImVec2 viewport_size,
     entt::entity /*entity*/,
@@ -51,14 +50,6 @@ GizmoResult ScaleGizmo::render(
     // Calculate handle positions along rotated axes
     ImVec2 x_handle(center.x + AXIS_LENGTH * x_dir_sx, center.y + AXIS_LENGTH * x_dir_sy);
     ImVec2 y_handle(center.x + AXIS_LENGTH * y_dir_sx, center.y + AXIS_LENGTH * y_dir_sy);
-
-    // Colors
-    ImU32 x_color = IM_COL32(220, 60, 60, 255);
-    ImU32 y_color = IM_COL32(60, 180, 60, 255);
-    ImU32 center_color = IM_COL32(200, 200, 200, 255);
-    ImU32 x_hover = IM_COL32(255, 120, 120, 255);
-    ImU32 y_hover = IM_COL32(120, 255, 120, 255);
-    ImU32 center_hover = IM_COL32(255, 255, 255, 255);
 
     // Handle dragging
     if (m_is_dragging) {
@@ -157,6 +148,61 @@ GizmoResult ScaleGizmo::render(
         }
     }
 
+    // Set hovering state for click-to-select priority
+    m_is_hovering = (m_hover_axis != DragAxis::None);
+
+    return result;
+}
+
+void ScaleGizmo::render(
+    ImDrawList* draw_list,
+    ImVec2 viewport_pos,
+    ImVec2 viewport_size,
+    const engine::Transform& transform,
+    float camera_x,
+    float camera_y,
+    float zoom,
+    GizmoSpace space
+) {
+    // Position gizmo at WORLD coordinates (not local)
+    ImVec2 center = world_to_screen(
+        transform.world_x, transform.world_y,
+        viewport_pos, viewport_size,
+        camera_x, camera_y, zoom
+    );
+
+    // Check if gizmo is visible in viewport
+    if (center.x < viewport_pos.x - AXIS_LENGTH * 2 ||
+        center.x > viewport_pos.x + viewport_size.x + AXIS_LENGTH * 2 ||
+        center.y < viewport_pos.y - AXIS_LENGTH * 2 ||
+        center.y > viewport_pos.y + viewport_size.y + AXIS_LENGTH * 2) {
+        return;
+    }
+
+    // Compute rotation for axis orientation
+    float rot_rad = 0.0f;
+    if (space == GizmoSpace::Local) {
+        rot_rad = transform.world_rotation * engine::DEG_TO_RAD;
+    }
+    float cos_r = std::cos(rot_rad);
+    float sin_r = std::sin(rot_rad);
+
+    // Screen-space axis directions (Y inverted for screen)
+    float x_dir_sx = cos_r, x_dir_sy = -sin_r;
+    float y_dir_sx = -sin_r, y_dir_sy = -cos_r;
+
+    // Calculate handle positions along rotated axes
+    ImVec2 x_handle(center.x + AXIS_LENGTH * x_dir_sx, center.y + AXIS_LENGTH * x_dir_sy);
+    ImVec2 y_handle(center.x + AXIS_LENGTH * y_dir_sx, center.y + AXIS_LENGTH * y_dir_sy);
+
+    // Colors
+    ImU32 x_color = IM_COL32(220, 60, 60, 255);
+    ImU32 y_color = IM_COL32(60, 180, 60, 255);
+    ImU32 center_color = IM_COL32(200, 200, 200, 255);
+    ImU32 x_hover = IM_COL32(255, 120, 120, 255);
+    ImU32 y_hover = IM_COL32(120, 255, 120, 255);
+    ImU32 center_hover = IM_COL32(255, 255, 255, 255);
+
     // Determine colors based on hover/drag state
     ImU32 draw_x_color = (m_hover_axis == DragAxis::X || m_drag_axis == DragAxis::X) ? x_hover : x_color;
     ImU32 draw_y_color = (m_hover_axis == DragAxis::Y || m_drag_axis == DragAxis::Y) ? y_hover : y_color;
@@ -201,8 +247,6 @@ GizmoResult ScaleGizmo::render(
         ImVec2 text_pos(center.x + CENTER_SIZE + 10, center.y - CENTER_SIZE);
         draw_list->AddText(text_pos, IM_COL32(255, 255, 255, 255), scale_text);
     }
-
-    return result;
 }
 
 bool ScaleGizmo::is_mouse_in_box(ImVec2 mouse, ImVec2 center, float half_size) const {

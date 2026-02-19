@@ -56,6 +56,7 @@ private:
     void handle_viewport_input();
 
     // Gizmo orchestration (uses gizmo classes directly, no GizmoRenderer)
+    void update_gizmos(ImVec2 vp_pos, ImVec2 vp_size);
     void render_gizmos(ImDrawList* draw_list, ImVec2 vp_pos, ImVec2 vp_size);
 
     // Prefab I/O
@@ -80,6 +81,7 @@ private:
     RotateGizmo m_rotate_gizmo;
     ScaleGizmo m_scale_gizmo;
     bool m_gizmo_active = false;
+    bool m_gizmo_hovering = false;
 
     // File state
     std::string m_prefab_path;

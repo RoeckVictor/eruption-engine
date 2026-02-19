@@ -6,6 +6,8 @@
 #include "editor/inspectors/Camera2DInspector.h"
 #include "editor/inspectors/AnimatorInspector.h"
 #include "editor/inspectors/PixelGridComponentInspector.h"
+#include "editor/inspectors/ImageInspector.h"
+#include "editor/inspectors/TextInspector.h"
 #include "engine/reflection/TypeRegistry.h"
 #include "engine/core/Transform.h"
 #include "engine/core/ScreenRect.h"
@@ -14,6 +16,8 @@
 #include "engine/render/PixelGridRenderer.h"
 #include "engine/animation/Animator.h"
 #include "engine/simulation/PixelGridComponent.h"
+#include "engine/render/Image.h"
+#include "engine/render/Text.h"
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
 #include "editor/icons/IconsFontAwesome6.h"
@@ -386,7 +390,12 @@ void InspectorPanel::render_component_inspector(entt::entity entity, const engin
         else if (type_info.name() == "engine::simulation::PixelGridComponent") {
             changed = PixelGridComponentInspector::draw(*static_cast<engine::simulation::PixelGridComponent*>(component_ptr));
         }
-        // Add more custom inspectors here as needed
+        else if (type_info.name() == "engine::render::Image") {
+            changed = ImageInspector::draw(*static_cast<engine::render::Image*>(component_ptr));
+        }
+        else if (type_info.name() == "engine::render::Text") {
+            changed = TextInspector::draw(*static_cast<engine::render::Text*>(component_ptr));
+        }
         else {
             // Fall back to AutoInspector for components without custom inspectors
             changed = AutoInspector::draw(type_info, component_ptr);

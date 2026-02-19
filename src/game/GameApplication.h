@@ -4,6 +4,8 @@
 #include "engine/core/EngineContext.h"
 #include "engine/systems/PixelGridRenderSystem.h"
 #include "engine/systems/PixelGridLoaderSystem.h"
+#include "engine/systems/ImageRenderSystem.h"
+#include "engine/systems/TextRenderSystem.h"
 #include "engine/render/Camera2D.h"
 
 #include <entt/entt.hpp>
@@ -35,6 +37,8 @@ private:
     // Engine systems (owned here, registered into scene as non-owning refs)
     engine::PixelGridLoaderSystem m_loader_system;
     engine::PixelGridRenderSystem m_render_system;
+    engine::ImageRenderSystem m_image_render_system;
+    engine::TextRenderSystem m_text_render_system;
 
     // Stable camera for EngineContext (synced from camera entity each frame)
     engine::render::Camera2D m_camera;

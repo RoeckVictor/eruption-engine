@@ -4,8 +4,7 @@
 
 namespace editor {
 
-GizmoResult RotateGizmo::render(
-    ImDrawList* draw_list,
+GizmoResult RotateGizmo::update(
     ImVec2 viewport_pos,
     ImVec2 viewport_size,
     entt::entity /*entity*/,
@@ -34,11 +33,6 @@ GizmoResult RotateGizmo::render(
 
     ImGuiIO& io = ImGui::GetIO();
     ImVec2 mouse = io.MousePos;
-
-    // Colors
-    ImU32 circle_color = IM_COL32(60, 120, 220, 255);      // Blue
-    ImU32 circle_hover = IM_COL32(120, 180, 255, 255);
-    ImU32 indicator_color = IM_COL32(255, 255, 255, 200);
 
     // Handle dragging
     if (m_is_dragging) {
@@ -84,13 +78,46 @@ GizmoResult RotateGizmo::render(
         }
     }
 
+    return result;
+}
+
+void RotateGizmo::render(
+    ImDrawList* draw_list,
+    ImVec2 viewport_pos,
+    ImVec2 viewport_size,
+    const engine::Transform& transform,
+    float camera_x,
+    float camera_y,
+    float zoom,
+    GizmoSpace /*space*/
+) {
+    // Position gizmo at WORLD coordinates
+    ImVec2 center = world_to_screen(
+        transform.world_x, transform.world_y,
+        viewport_pos, viewport_size,
+        camera_x, camera_y, zoom
+    );
+
+    // Check if gizmo is visible in viewport
+    if (center.x < viewport_pos.x - CIRCLE_RADIUS ||
+        center.x > viewport_pos.x + viewport_size.x + CIRCLE_RADIUS ||
+        center.y < viewport_pos.y - CIRCLE_RADIUS ||
+        center.y > viewport_pos.y + viewport_size.y + CIRCLE_RADIUS) {
+        return;
+    }
+
+    // Colors
+    ImU32 circle_color = IM_COL32(60, 120, 220, 255);
+    ImU32 circle_hover = IM_COL32(120, 180, 255, 255);
+    ImU32 indicator_color = IM_COL32(255, 255, 255, 200);
+
     // Determine color based on hover/drag state
     ImU32 draw_color = (m_is_hovering || m_is_dragging) ? circle_hover : circle_color;
 
     // Draw the rotation circle
     draw_list->AddCircle(center, CIRCLE_RADIUS, draw_color, 64, CIRCLE_THICKNESS);
 
-    // Draw rotation indicator line (from center pointing in world rotation direction)
+    // Draw rotation indicator line
     float rad = transform.world_rotation * engine::DEG_TO_RAD;
     ImVec2 indicator_end(
         center.x + CIRCLE_RADIUS * std::cos(-rad + engine::PI * 0.5f),
@@ -111,8 +138,6 @@ GizmoResult RotateGizmo::render(
         ImVec2 text_pos(center.x + CIRCLE_RADIUS + 10, center.y - 10);
         draw_list->AddText(text_pos, IM_COL32(255, 255, 255, 255), angle_text);
     }
-
-    return result;
 }
 
 float RotateGizmo::angle_to_point(ImVec2 center, ImVec2 point) const {

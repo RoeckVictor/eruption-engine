@@ -143,8 +143,9 @@ Handle<T> AssetDatabase::load(const std::string& virtual_path) {
     store.slots.emplace_back();
 
     auto& slot = store.slots[index];
-    // Store as std::unique_ptr<T> in std::any for type-safe storage and automatic cleanup
-    slot.data = std::move(asset);
+    // Store as std::shared_ptr<T> in std::any for type-safe storage and automatic cleanup
+    // (std::any requires copy-constructible types, so we convert unique_ptr to shared_ptr)
+    slot.data = std::shared_ptr<T>(std::move(asset));
     slot.meta.virtual_path = virtual_path;
     slot.meta.generation = 1;
     slot.occupied = true;
@@ -171,7 +172,7 @@ Handle<T> AssetDatabase::load(const std::string& virtual_path) {
 
             // Type-safe hot-reload using std::any_cast
             try {
-                auto* ptr = std::any_cast<std::unique_ptr<T>>(&s.data);
+                auto* ptr = std::any_cast<std::shared_ptr<T>>(&s.data);
                 if (!ptr || !*ptr) return;
 
                 ENGINE_LOG("AssetDatabase: Hot-reloading '%s'", vpath.c_str());
@@ -213,7 +214,7 @@ T* AssetDatabase::get(Handle<T> handle) const {
 
     // Type-safe extraction using std::any_cast
     try {
-        const auto* ptr = std::any_cast<std::unique_ptr<T>>(&slot.data);
+        const auto* ptr = std::any_cast<std::shared_ptr<T>>(&slot.data);
         if (ptr && *ptr) {
             return ptr->get();
         }
@@ -237,7 +238,7 @@ bool AssetDatabase::reload(Handle<T> handle) {
 
     // Type-safe extraction for reload
     try {
-        auto* ptr = std::any_cast<std::unique_ptr<T>>(&slot.data);
+        auto* ptr = std::any_cast<std::shared_ptr<T>>(&slot.data);
         if (!ptr || !*ptr) return false;
 
         bool ok = AssetLoader<T>::reload(**ptr, m_vfs, slot.meta.virtual_path);

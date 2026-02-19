@@ -139,34 +139,25 @@ configure_win32_target(eruption_editor)
 # =============================================================================
 # Asset Copy Helper
 # =============================================================================
-# copy_runtime_assets(<target_name> <exe_target> [EXTRA_DIRS dir1 dir2 ...])
-# Copies shaders, materials, and engine_config.json to the exe's output directory.
-# EXTRA_DIRS are additional asset/ subdirectories to copy.
+# copy_runtime_assets(<target_name> <exe_target>)
+# Copies shaders, entire assets folder, and engine_config.json to the exe's output directory.
 function(copy_runtime_assets COPY_TARGET EXE_TARGET)
-    cmake_parse_arguments(ARG "" "" "EXTRA_DIRS" ${ARGN})
     set(COMMANDS
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
             "$<TARGET_FILE_DIR:${EXE_TARGET}>/shaders"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}/assets/materials"
-            "$<TARGET_FILE_DIR:${EXE_TARGET}>/assets/materials"
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+            "$<TARGET_FILE_DIR:${EXE_TARGET}>/assets"
         COMMAND ${CMAKE_COMMAND} -E copy
             "${CMAKE_CURRENT_SOURCE_DIR}/engine_config.json"
             "$<TARGET_FILE_DIR:${EXE_TARGET}>/engine_config.json"
     )
-    foreach(DIR ${ARG_EXTRA_DIRS})
-        list(APPEND COMMANDS
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_CURRENT_SOURCE_DIR}/assets/${DIR}"
-                "$<TARGET_FILE_DIR:${EXE_TARGET}>/assets/${DIR}"
-        )
-    endforeach()
     add_custom_target(${COPY_TARGET} ALL ${COMMANDS} DEPENDS ${EXE_TARGET})
 endfunction()
 
-# Copy assets for editor (includes defaults and fonts)
-copy_runtime_assets(copy_editor_assets eruption_editor EXTRA_DIRS defaults fonts)
+# Copy assets for editor
+copy_runtime_assets(copy_editor_assets eruption_editor)
 
 # =============================================================================
 # Game Runtime Executable
@@ -183,7 +174,7 @@ target_link_libraries(eruption_game PRIVATE
 
 configure_win32_target(eruption_game)
 
-# Copy assets for game runtime (shaders, materials, config only)
+# Copy assets for game runtime
 copy_runtime_assets(copy_game_assets eruption_game)
 
 # =============================================================================

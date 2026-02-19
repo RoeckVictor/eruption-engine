@@ -1,8 +1,13 @@
 #include "ScreenPanel.h"
 #include "editor/core/EditorContext.h"
 #include "editor/core/EditorComponents.h"
+#include "editor/render/SceneRenderUtils.h"
 #include "engine/core/ScreenRect.h"
 #include "engine/core/Logger.h"
+#include "engine/core/Engine.h"
+#include "engine/render/Image.h"
+#include "engine/render/Text.h"
+#include "engine/asset/VFS.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -303,7 +308,15 @@ void ScreenPanel::render_entities(ImDrawList* draw_list, ImVec2 canvas_pos, ImVe
     ImVec2 ref_br = screen_to_canvas(m_ref_width, m_ref_height, canvas_pos, canvas_size);
     draw_list->AddRect(ref_tl, ref_br, IM_COL32(100, 100, 100, 150), 0.0f, 0, 2.0f);
 
-    // Draw all screen entities
+    // Collect and sort entities by layer for proper rendering order
+    struct RenderEntry {
+        entt::entity entity;
+        int layer;
+        bool has_image;
+        bool has_text;
+    };
+    std::vector<RenderEntry> entries;
+
     auto view = registry->view<engine::ScreenRect>();
     for (auto entity : view) {
         auto& rect = view.get<engine::ScreenRect>(entity);
@@ -314,37 +327,83 @@ void ScreenPanel::render_entities(ImDrawList* draw_list, ImVec2 canvas_pos, ImVe
         }
         if (!rect.enabled) continue;
 
-        // Use computed position
-        ImVec2 tl = screen_to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
-        ImVec2 br = screen_to_canvas(
-            rect.computed_x + rect.computed_width,
-            rect.computed_y + rect.computed_height,
-            canvas_pos, canvas_size
-        );
+        bool has_image = registry->all_of<engine::render::Image>(entity);
+        bool has_text = registry->all_of<engine::render::Text>(entity);
 
-        // Draw filled rect with border
-        bool is_selected = m_context.is_selected(entity);
-        ImU32 fill_color = is_selected ? IM_COL32(100, 150, 200, 60) : IM_COL32(80, 80, 100, 40);
-        ImU32 border_color = is_selected ? IM_COL32(100, 180, 255, 255) : IM_COL32(120, 120, 140, 180);
-
-        draw_list->AddRectFilled(tl, br, fill_color);
-        draw_list->AddRect(tl, br, border_color, 0.0f, 0, is_selected ? 2.0f : 1.0f);
-
-        // Draw entity name
-        if (registry->all_of<EntityInfo>(entity)) {
-            const auto& info = registry->get<EntityInfo>(entity);
-            ImVec2 text_pos(tl.x + 4, tl.y + 2);
-            draw_list->AddText(text_pos, IM_COL32(200, 200, 200, 200), info.name.c_str());
+        int layer = 0;
+        if (has_image) {
+            layer = registry->get<engine::render::Image>(entity).layer;
+        } else if (has_text) {
+            layer = registry->get<engine::render::Text>(entity).layer;
         }
 
-        // Draw anchor point indicator
-        ImVec2 anchor_pos = screen_to_canvas(
-            rect.computed_x + rect.pivot_x * rect.computed_width,
-            rect.computed_y + rect.pivot_y * rect.computed_height,
-            canvas_pos, canvas_size
-        );
-        draw_list->AddCircleFilled(anchor_pos, 4.0f, IM_COL32(255, 200, 100, 200));
-        draw_list->AddCircle(anchor_pos, 4.0f, IM_COL32(255, 255, 255, 255), 12, 1.0f);
+        entries.push_back({ entity, layer, has_image, has_text });
+    }
+
+    // Sort by layer (ascending)
+    std::sort(entries.begin(), entries.end(), [](const RenderEntry& a, const RenderEntry& b) {
+        return a.layer < b.layer;
+    });
+
+    // Render entities in layer order
+    for (const auto& entry : entries) {
+        auto& rect = registry->get<engine::ScreenRect>(entry.entity);
+        bool is_selected = m_context.is_selected(entry.entity);
+
+        // Render Image component if present
+        if (entry.has_image) {
+            render_image_entity(draw_list, entry.entity, canvas_pos, canvas_size);
+        }
+
+        // Render Text component if present
+        if (entry.has_text) {
+            render_text_entity(draw_list, entry.entity, canvas_pos, canvas_size);
+        }
+
+        // If entity has neither Image nor Text, draw a placeholder box
+        if (!entry.has_image && !entry.has_text) {
+            ImVec2 tl = screen_to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
+            ImVec2 br = screen_to_canvas(
+                rect.computed_x + rect.computed_width,
+                rect.computed_y + rect.computed_height,
+                canvas_pos, canvas_size
+            );
+
+            ImU32 fill_color = is_selected ? IM_COL32(100, 150, 200, 60) : IM_COL32(80, 80, 100, 40);
+            ImU32 border_color = is_selected ? IM_COL32(100, 180, 255, 255) : IM_COL32(120, 120, 140, 180);
+
+            draw_list->AddRectFilled(tl, br, fill_color);
+            draw_list->AddRect(tl, br, border_color, 0.0f, 0, is_selected ? 2.0f : 1.0f);
+
+            // Draw entity name for placeholders
+            if (registry->all_of<EntityInfo>(entry.entity)) {
+                const auto& info = registry->get<EntityInfo>(entry.entity);
+                ImVec2 text_pos(tl.x + 4, tl.y + 2);
+                draw_list->AddText(text_pos, IM_COL32(200, 200, 200, 200), info.name.c_str());
+            }
+        }
+
+        // Only draw selection outline and anchor for selected entities
+        if (is_selected) {
+            ImVec2 tl = screen_to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
+            ImVec2 br = screen_to_canvas(
+                rect.computed_x + rect.computed_width,
+                rect.computed_y + rect.computed_height,
+                canvas_pos, canvas_size
+            );
+
+            // Draw selection border
+            draw_list->AddRect(tl, br, IM_COL32(100, 180, 255, 255), 0.0f, 0, 2.0f);
+
+            // Draw anchor point indicator
+            ImVec2 anchor_pos = screen_to_canvas(
+                rect.computed_x + rect.pivot_x * rect.computed_width,
+                rect.computed_y + rect.pivot_y * rect.computed_height,
+                canvas_pos, canvas_size
+            );
+            draw_list->AddCircleFilled(anchor_pos, 4.0f, IM_COL32(255, 200, 100, 200));
+            draw_list->AddCircle(anchor_pos, 4.0f, IM_COL32(255, 255, 255, 255), 12, 1.0f);
+        }
     }
 }
 
@@ -534,6 +593,71 @@ void ScreenPanel::handle_input(ImVec2 canvas_pos, ImVec2 canvas_size) {
             }
         }
     }
+}
+
+void ScreenPanel::ensure_text_renderer() {
+    if (m_text_renderer) return;
+
+    auto* runtime = m_context.runtime();
+    if (!runtime) return;
+
+    auto* eng = runtime->engine();
+    if (!eng) return;
+
+    m_text_renderer = std::make_unique<EditorTextRenderer>(eng->assets());
+}
+
+void ScreenPanel::render_image_entity(ImDrawList* draw_list, entt::entity entity, ImVec2 canvas_pos, ImVec2 canvas_size) {
+    auto* registry = m_context.registry();
+    if (!registry) return;
+
+    auto& rect = registry->get<engine::ScreenRect>(entity);
+    auto& image = registry->get<engine::render::Image>(entity);
+
+    if (!image.enabled) return;
+
+    // Get texture
+    int tex_width, tex_height;
+    GLuint texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
+
+    // Compute canvas positions
+    ImVec2 tl = screen_to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
+    ImVec2 br = screen_to_canvas(
+        rect.computed_x + rect.computed_width,
+        rect.computed_y + rect.computed_height,
+        canvas_pos, canvas_size
+    );
+
+    // Use shared utilities for UV and tint computation
+    auto uv = compute_image_uv(image);
+    ImU32 tint = compute_image_tint(image);
+
+    // Draw the image
+    draw_list->AddImage(
+        (ImTextureID)(uintptr_t)texture,
+        tl, br,
+        ImVec2(uv.u0, uv.v0), ImVec2(uv.u1, uv.v1),
+        tint
+    );
+}
+
+void ScreenPanel::render_text_entity(ImDrawList* draw_list, entt::entity entity, ImVec2 canvas_pos, ImVec2 canvas_size) {
+    auto* registry = m_context.registry();
+    if (!registry) return;
+
+    ensure_text_renderer();
+    if (!m_text_renderer) return;
+
+    auto& rect = registry->get<engine::ScreenRect>(entity);
+    auto& text = registry->get<engine::render::Text>(entity);
+
+    if (!text.enabled) return;
+
+    // Compute canvas position
+    ImVec2 pos = screen_to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
+
+    // Use EditorTextRenderer with m_zoom as the scale factor
+    m_text_renderer->render(draw_list, text, pos, m_zoom);
 }
 
 } // namespace editor

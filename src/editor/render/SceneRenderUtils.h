@@ -2,22 +2,28 @@
 
 #include "engine/core/MathConstants.h"
 #include "engine/core/Transform.h"
+#include "engine/core/ScreenRect.h"
 #include "engine/simulation/PixelGridComponent.h"
 #include "engine/render/PixelGridRenderer.h"
+#include "engine/render/Image.h"
+#include "engine/render/Text.h"
 #include "editor/core/PixelGridTextureCache.h"
 #include "editor/core/RuntimeContext.h"
+#include "editor/core/EditorComponents.h"
 
 #include <imgui.h>
 #include <glad/gl.h>
+#include <entt/entt.hpp>
 #include <cstdint>
 #include <cmath>
+#include <vector>
+#include <algorithm>
 
 namespace editor {
 
-/// Converts world coordinates to screen coordinates given a camera and viewport.
 struct WorldToScreen {
-    float screen_cx;  // Viewport center X in screen space
-    float screen_cy;  // Viewport center Y in screen space
+    float screen_cx;
+    float screen_cy;
     float cam_x;
     float cam_y;
     float zoom;
@@ -30,19 +36,17 @@ struct WorldToScreen {
 
     ImVec2 operator()(float wx, float wy) const {
         float sx = screen_cx + (wx - cam_x) * zoom;
-        float sy = screen_cy - (wy - cam_y) * zoom;  // Flip Y for screen space
+        float sy = screen_cy - (wy - cam_y) * zoom;
         return ImVec2(sx, sy);
     }
 };
 
-/// Computed screen-space quad for a pixel grid entity.
 struct PixelGridQuad {
-    ImVec2 corners[4];  // top-left, top-right, bottom-right, bottom-left
-    ImU32 tint;         // Combined tint + opacity color
+    ImVec2 corners[4];
+    ImU32 tint;
     bool valid = false;
 };
 
-/// Compute the screen-space quad corners and tint for a pixel grid entity.
 inline PixelGridQuad compute_pixel_grid_quad(
     const engine::Transform& transform,
     const engine::simulation::PixelGridComponent& grid_comp,
@@ -83,7 +87,6 @@ inline PixelGridQuad compute_pixel_grid_quad(
     return quad;
 }
 
-/// Draw a pixel grid quad with a texture to an ImGui draw list.
 inline void draw_pixel_grid_quad(ImDrawList* draw_list, const PixelGridQuad& quad, GLuint texture_id) {
     if (texture_id != 0) {
         draw_list->AddImageQuad(
@@ -101,7 +104,6 @@ inline void draw_pixel_grid_quad(ImDrawList* draw_list, const PixelGridQuad& qua
     }
 }
 
-/// Draw a selection outline around a pixel grid quad.
 inline void draw_selection_outline(ImDrawList* draw_list, const PixelGridQuad& quad) {
     draw_list->AddQuad(
         quad.corners[0], quad.corners[1], quad.corners[2], quad.corners[3],
@@ -109,9 +111,9 @@ inline void draw_selection_outline(ImDrawList* draw_list, const PixelGridQuad& q
     );
 }
 
-/// Resolve the GL texture for a pixel grid entity.
-/// Prefers the live simulation texture (during play mode), falling back to the
-/// cached static texture loaded from the .pxg file on disk.
+// Resolve the GL texture for a pixel grid entity.
+// Prefers the live simulation texture (during play mode), falling back to the
+// cached static texture loaded from the .pxg file on disk.
 inline GLuint resolve_grid_texture(entt::entity entity,
                                     const std::string& pxg_path,
                                     RuntimeContext* runtime,
@@ -120,4 +122,146 @@ inline GLuint resolve_grid_texture(entt::entity entity,
     return tex ? tex : cache.get(entity, pxg_path);
 }
 
-} // namespace editor
+inline ImU32 compute_image_tint(const engine::render::Image& image) {
+    return IM_COL32(
+        static_cast<uint8_t>(image.color_r * 255.0f),
+        static_cast<uint8_t>(image.color_g * 255.0f),
+        static_cast<uint8_t>(image.color_b * 255.0f),
+        static_cast<uint8_t>(image.color_a * 255.0f)
+    );
+}
+
+struct ImageUV {
+    float u0, v0;
+    float u1, v1;
+};
+
+inline ImageUV compute_image_uv(const engine::render::Image& image) {
+    return {
+        image.flip_x ? image.uv_max_x : image.uv_min_x,
+        image.flip_y ? image.uv_max_y : image.uv_min_y,
+        image.flip_x ? image.uv_min_x : image.uv_max_x,
+        image.flip_y ? image.uv_min_y : image.uv_max_y
+    };
+}
+
+struct ImageQuad {
+    ImVec2 corners[4];
+    ImageUV uv;
+    ImU32 tint;
+};
+
+inline ImageQuad compute_image_quad(
+    const engine::Transform& transform,
+    int tex_w, int tex_h,
+    const engine::render::Image& image,
+    const WorldToScreen& wts)
+{
+    ImageQuad quad;
+
+    float w = static_cast<float>(tex_w) * transform.world_scale_x;
+    float h = static_cast<float>(tex_h) * transform.world_scale_y;
+    float hw = w * 0.5f;
+    float hh = h * 0.5f;
+
+    float rot_rad = transform.world_rotation * engine::DEG_TO_RAD;
+    float cos_r = std::cos(rot_rad);
+    float sin_r = std::sin(rot_rad);
+
+    // Local corners (centered on transform origin)
+    // Order: TL, TR, BR, BL
+    float lx[4] = { -hw, hw, hw, -hw };
+    float ly[4] = { hh, hh, -hh, -hh };
+
+    for (int i = 0; i < 4; ++i) {
+        float wx = transform.world_x + lx[i] * cos_r - ly[i] * sin_r;
+        float wy = transform.world_y + lx[i] * sin_r + ly[i] * cos_r;
+        quad.corners[i] = wts(wx, wy);
+    }
+
+    quad.uv = compute_image_uv(image);
+    quad.tint = compute_image_tint(image);
+
+    return quad;
+}
+
+inline void draw_image_quad(ImDrawList* draw_list, const ImageQuad& quad, GLuint texture_id) {
+    draw_list->AddImageQuad(
+        (ImTextureID)(uintptr_t)texture_id,
+        quad.corners[0], quad.corners[1], quad.corners[2], quad.corners[3],
+        ImVec2(quad.uv.u0, quad.uv.v0),
+        ImVec2(quad.uv.u1, quad.uv.v0),
+        ImVec2(quad.uv.u1, quad.uv.v1),
+        ImVec2(quad.uv.u0, quad.uv.v1),
+        quad.tint
+    );
+}
+
+enum class RenderableType {
+    PixelGrid,
+    Image,
+    Text
+};
+
+struct RenderableItem {
+    entt::entity entity;
+    int layer;
+    RenderableType type;
+};
+
+inline std::vector<RenderableItem> collect_world_renderables(entt::registry& registry) {
+    std::vector<RenderableItem> items;
+
+    // Collect PixelGrid entities
+    {
+        auto view = registry.view<engine::Transform,
+                                   engine::simulation::PixelGridComponent,
+                                   engine::render::PixelGridRenderer>();
+        for (auto entity : view) {
+            if (registry.all_of<EntityInfo>(entity)) {
+                if (!registry.get<EntityInfo>(entity).enabled_in_hierarchy) continue;
+            }
+            auto& renderer = view.get<engine::render::PixelGridRenderer>(entity);
+            if (!renderer.enabled) continue;
+            items.push_back({entity, renderer.layer, RenderableType::PixelGrid});
+        }
+    }
+
+    // Collect world-space Image entities (Transform + Image, no ScreenRect)
+    {
+        auto view = registry.view<engine::Transform, engine::render::Image>();
+        for (auto entity : view) {
+            if (registry.all_of<engine::ScreenRect>(entity)) continue;  // Skip screen-space
+            if (registry.all_of<EntityInfo>(entity)) {
+                if (!registry.get<EntityInfo>(entity).enabled_in_hierarchy) continue;
+            }
+            auto& image = view.get<engine::render::Image>(entity);
+            if (!image.enabled) continue;
+            items.push_back({entity, image.layer, RenderableType::Image});
+        }
+    }
+
+    // Collect world-space Text entities (Transform + Text, no ScreenRect)
+    {
+        auto view = registry.view<engine::Transform, engine::render::Text>();
+        for (auto entity : view) {
+            if (registry.all_of<engine::ScreenRect>(entity)) continue;  // Skip screen-space
+            if (registry.all_of<EntityInfo>(entity)) {
+                if (!registry.get<EntityInfo>(entity).enabled_in_hierarchy) continue;
+            }
+            auto& text = view.get<engine::render::Text>(entity);
+            if (!text.enabled) continue;
+            items.push_back({entity, text.layer, RenderableType::Text});
+        }
+    }
+
+    // Sort by layer (ascending)
+    std::sort(items.begin(), items.end(),
+              [](const RenderableItem& a, const RenderableItem& b) {
+                  return a.layer < b.layer;
+              });
+
+    return items;
+}
+
+}

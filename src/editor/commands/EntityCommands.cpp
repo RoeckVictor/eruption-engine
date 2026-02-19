@@ -78,8 +78,13 @@ void DeleteEntityCommand::undo() {
         // Restore EntityInfo (enabled_in_hierarchy will be computed after hierarchy is restored)
         m_registry->emplace<EntityInfo>(new_entity, EntityInfo{stored.name, "", stored.enabled, true, "", false});
 
-        // Restore engine::Transform
-        m_registry->emplace<engine::Transform>(new_entity, stored.transform);
+        // Restore engine::Transform (world-space) or engine::ScreenRect (screen-space)
+        if (stored.has_transform) {
+            m_registry->emplace<engine::Transform>(new_entity, stored.transform);
+        }
+        if (stored.has_screen_rect) {
+            m_registry->emplace<engine::ScreenRect>(new_entity, stored.screen_rect);
+        }
 
         // Restore Hierarchy (parent will be set below)
         m_registry->emplace<Hierarchy>(new_entity);
@@ -94,10 +99,8 @@ void DeleteEntityCommand::undo() {
         if (stored.parent != entt::null) {
             auto it = old_to_new.find(stored.parent);
             if (it != old_to_new.end()) {
-                // Parent was also deleted and restored
                 set_parent(*m_registry, new_entity, it->second);
             } else if (m_registry->valid(stored.parent)) {
-                // Parent still exists
                 set_parent(*m_registry, new_entity, stored.parent);
             }
         }
@@ -131,9 +134,16 @@ void DeleteEntityCommand::store_entity_recursive(entt::entity entity, entt::enti
         stored.enabled = true;
     }
 
-    // Store engine::Transform
+    // Store engine::Transform (world-space entities)
     if (m_registry->all_of<engine::Transform>(entity)) {
+        stored.has_transform = true;
         stored.transform = m_registry->get<engine::Transform>(entity);
+    }
+
+    // Store engine::ScreenRect (screen-space entities)
+    if (m_registry->all_of<engine::ScreenRect>(entity)) {
+        stored.has_screen_rect = true;
+        stored.screen_rect = m_registry->get<engine::ScreenRect>(entity);
     }
 
     // Store children references
@@ -158,10 +168,15 @@ void PasteEntitiesCommand::execute() {
         m_pasted_entities = serializer.deserialize_entities(json);
 
         for (auto entity : m_pasted_entities) {
+            // Offset pasted entities so they don't overlap originals
             if (m_registry->all_of<engine::Transform>(entity)) {
                 auto& transform = m_registry->get<engine::Transform>(entity);
                 transform.x += 20.0f;
                 transform.y += 20.0f;
+            } else if (m_registry->all_of<engine::ScreenRect>(entity)) {
+                auto& rect = m_registry->get<engine::ScreenRect>(entity);
+                rect.offset_x += 20.0f;
+                rect.offset_y += 20.0f;
             }
 
             // Generate new GUIDs for pasted entities

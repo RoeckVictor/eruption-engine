@@ -414,8 +414,16 @@ entt::entity SceneSerializer::deserialize_entity(const nlohmann::json& json, ent
         }
     }
 
-    // Ensure engine::Transform exists
-    if (!m_registry.all_of<engine::Transform>(entity)) {
+    // Ensure world-space and screen-space entities are mutually exclusive:
+    // - World-space entities have Transform (no ScreenRect)
+    // - Screen-space entities have ScreenRect (no Transform)
+    if (m_registry.all_of<engine::ScreenRect>(entity)) {
+        // Screen-space entity: remove Transform if it was loaded from an old scene
+        if (m_registry.all_of<engine::Transform>(entity)) {
+            m_registry.remove<engine::Transform>(entity);
+        }
+    } else if (!m_registry.all_of<engine::Transform>(entity)) {
+        // World-space entity without Transform: add it
         m_registry.emplace<engine::Transform>(entity);
     }
 

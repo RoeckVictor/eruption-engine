@@ -3,11 +3,14 @@
 #include "Panel.h"
 #include "editor/gizmos/GizmoRenderer.h"
 #include "editor/render/EntityHitDetector.h"
+#include "editor/render/EditorTextureCache.h"
+#include "editor/render/EditorTextRenderer.h"
 #include "editor/core/PixelGridTextureCache.h"
 #include <glad/gl.h>
 #include <entt/entt.hpp>
 #include <imgui.h>
 #include <string>
+#include <memory>
 
 namespace editor {
 
@@ -61,6 +64,21 @@ private:
 
     // Click-to-select cycling state
     ClickCycleState m_click_cycle_state;
+
+    // Texture cache for Image components
+    EditorTextureCache m_image_textures;
+
+    // Text renderer using game fonts
+    std::unique_ptr<EditorTextRenderer> m_text_renderer;
+
+    // Helper methods for rendering Image/Text
+    void ensure_text_renderer();
+    void render_world_image(ImDrawList* draw_list, entt::entity entity,
+                            float cam_x, float cam_y, float cam_zoom,
+                            ImVec2 vp_pos, ImVec2 vp_size);
+    void render_world_text(ImDrawList* draw_list, entt::entity entity,
+                           float cam_x, float cam_y, float cam_zoom,
+                           ImVec2 vp_pos, ImVec2 vp_size);
 };
 
 } // namespace editor

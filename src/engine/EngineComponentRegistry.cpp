@@ -5,6 +5,8 @@
 #include "engine/core/Transform.h"
 #include "engine/core/ScreenRect.h"
 #include "engine/render/Camera2D.h"
+#include "engine/render/Image.h"
+#include "engine/render/Text.h"
 #include "engine/render/PixelGridRenderer.h"
 #include "engine/animation/Animator.h"
 #include "engine/simulation/PixelGridComponent.h"

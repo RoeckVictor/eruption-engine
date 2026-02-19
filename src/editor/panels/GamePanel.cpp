@@ -2,11 +2,17 @@
 #include "editor/core/EditorContext.h"
 #include "editor/core/EditorComponents.h"
 #include "editor/render/SceneRenderUtils.h"
+#include "editor/render/EditorTextRenderer.h"
 #include "engine/core/MathConstants.h"
 #include "engine/core/Transform.h"
+#include "engine/core/ScreenRect.h"
+#include "engine/core/Logger.h"
+#include "engine/core/Engine.h"
 #include "engine/simulation/PixelGridComponent.h"
 #include "engine/render/PixelGridRenderer.h"
 #include "engine/render/Camera2D.h"
+#include "engine/render/Image.h"
+#include "engine/render/Text.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -88,6 +94,115 @@ entt::entity GamePanel::find_camera_entity() const {
     return entt::null;
 }
 
+void GamePanel::ensure_text_renderer() {
+    if (m_text_renderer) return;
+
+    auto* runtime = m_context.runtime();
+    if (!runtime) return;
+
+    auto* eng = runtime->engine();
+    if (!eng) return;
+
+    m_text_renderer = std::make_unique<EditorTextRenderer>(eng->assets());
+}
+
+void GamePanel::render_world_image(ImDrawList* draw_list, entt::entity entity,
+                                    float cam_x, float cam_y, float cam_zoom,
+                                    ImVec2 panel_pos, ImVec2 panel_size) {
+    auto* registry = m_context.registry();
+    if (!registry) return;
+
+    auto& transform = registry->get<engine::Transform>(entity);
+    auto& image = registry->get<engine::render::Image>(entity);
+
+    if (!image.enabled) return;
+
+    int tex_width, tex_height;
+    GLuint texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
+
+    WorldToScreen wts(panel_pos, panel_size, cam_x, cam_y, cam_zoom);
+    auto quad = compute_image_quad(transform, tex_width, tex_height, image, wts);
+    draw_image_quad(draw_list, quad, texture);
+}
+
+void GamePanel::render_world_text(ImDrawList* draw_list, entt::entity entity,
+                                   float cam_x, float cam_y, float cam_zoom,
+                                   ImVec2 panel_pos, ImVec2 panel_size) {
+    auto* registry = m_context.registry();
+    if (!registry) return;
+
+    ensure_text_renderer();
+    if (!m_text_renderer) return;
+
+    auto& transform = registry->get<engine::Transform>(entity);
+    auto& text = registry->get<engine::render::Text>(entity);
+
+    if (!text.enabled) return;
+
+    WorldToScreen wts(panel_pos, panel_size, cam_x, cam_y, cam_zoom);
+    ImVec2 pos = wts(transform.world_x, transform.world_y);
+
+    m_text_renderer->render(draw_list, text, pos, cam_zoom);
+}
+
+void GamePanel::render_screen_image(ImDrawList* draw_list, entt::entity entity,
+                                     ImVec2 panel_pos, ImVec2 panel_size) {
+    auto* registry = m_context.registry();
+    if (!registry) return;
+
+    auto& rect = registry->get<engine::ScreenRect>(entity);
+    auto& image = registry->get<engine::render::Image>(entity);
+
+    if (!rect.enabled || !image.enabled) return;
+
+    int tex_width, tex_height;
+    GLuint texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
+
+    // Map screen coordinates to panel (assuming reference resolution matches panel size for now)
+    // For proper scaling, we'd need to know the reference resolution
+    float scale_x = panel_size.x / 1920.0f;  // Assume 1920x1080 reference
+    float scale_y = panel_size.y / 1080.0f;
+
+    ImVec2 tl(panel_pos.x + rect.computed_x * scale_x,
+              panel_pos.y + rect.computed_y * scale_y);
+    ImVec2 br(panel_pos.x + (rect.computed_x + rect.computed_width) * scale_x,
+              panel_pos.y + (rect.computed_y + rect.computed_height) * scale_y);
+
+    auto uv = compute_image_uv(image);
+    ImU32 tint = compute_image_tint(image);
+
+    draw_list->AddImage(
+        (ImTextureID)(uintptr_t)texture,
+        tl, br,
+        ImVec2(uv.u0, uv.v0), ImVec2(uv.u1, uv.v1),
+        tint
+    );
+}
+
+void GamePanel::render_screen_text(ImDrawList* draw_list, entt::entity entity,
+                                    ImVec2 panel_pos, ImVec2 panel_size) {
+    auto* registry = m_context.registry();
+    if (!registry) return;
+
+    ensure_text_renderer();
+    if (!m_text_renderer) return;
+
+    auto& rect = registry->get<engine::ScreenRect>(entity);
+    auto& text = registry->get<engine::render::Text>(entity);
+
+    if (!rect.enabled || !text.enabled) return;
+
+    float scale_x = panel_size.x / 1920.0f;
+    float scale_y = panel_size.y / 1080.0f;
+    float scale = std::min(scale_x, scale_y);
+
+    ImVec2 pos(panel_pos.x + rect.computed_x * scale_x,
+               panel_pos.y + rect.computed_y * scale_y);
+
+    // Use EditorTextRenderer with the computed scale
+    m_text_renderer->render(draw_list, text, pos, scale);
+}
+
 void GamePanel::render_game_view(ImVec2 panel_pos, ImVec2 panel_size) {
     auto* registry = m_context.registry();
     if (!registry) return;
@@ -109,40 +224,79 @@ void GamePanel::render_game_view(ImVec2 panel_pos, ImVec2 panel_size) {
     draw_list->PushClipRect(panel_pos,
         ImVec2(panel_pos.x + panel_size.x, panel_pos.y + panel_size.y), true);
 
-    // Collect renderable entities and sort by layer
-    struct RenderItem {
-        entt::entity entity;
-        int layer;
-    };
-    std::vector<RenderItem> render_items;
+    // Collect and sort all world-space renderable entities
+    auto render_items = collect_world_renderables(*registry);
 
-    auto view = registry->view<engine::Transform,
-                                engine::simulation::PixelGridComponent,
-                                engine::render::PixelGridRenderer>();
-    for (auto entity : view) {
-        if (registry->all_of<EntityInfo>(entity)) {
-            if (!registry->get<EntityInfo>(entity).enabled_in_hierarchy) continue;
+    // Render sorted world-space entities
+    for (const auto& item : render_items) {
+        switch (item.type) {
+            case RenderableType::PixelGrid: {
+                auto& transform = registry->get<engine::Transform>(item.entity);
+                auto& grid_comp = registry->get<engine::simulation::PixelGridComponent>(item.entity);
+                auto& renderer = registry->get<engine::render::PixelGridRenderer>(item.entity);
+
+                auto quad = compute_pixel_grid_quad(transform, grid_comp, renderer, wts);
+                GLuint grid_tex = resolve_grid_texture(
+                    item.entity, grid_comp.pixel_grid_path, m_context.runtime(), m_grid_textures);
+                draw_pixel_grid_quad(draw_list, quad, grid_tex);
+                break;
+            }
+            case RenderableType::Image:
+                render_world_image(draw_list, item.entity, cam_x, cam_y, cam_zoom, panel_pos, panel_size);
+                break;
+            case RenderableType::Text:
+                render_world_text(draw_list, item.entity, cam_x, cam_y, cam_zoom, panel_pos, panel_size);
+                break;
         }
-
-        auto& renderer = view.get<engine::render::PixelGridRenderer>(entity);
-        if (!renderer.enabled) continue;
-
-        render_items.push_back({entity, renderer.layer});
     }
 
-    std::sort(render_items.begin(), render_items.end(),
-              [](const RenderItem& a, const RenderItem& b) { return a.layer < b.layer; });
+    // Now render screen-space entities (on top of world-space)
+    struct ScreenRenderItem {
+        entt::entity entity;
+        int layer;
+        bool has_image;
+        bool has_text;
+    };
+    std::vector<ScreenRenderItem> screen_items;
 
-    // Render sorted entities
-    for (const auto& item : render_items) {
-        auto& transform = registry->get<engine::Transform>(item.entity);
-        auto& grid_comp = registry->get<engine::simulation::PixelGridComponent>(item.entity);
-        auto& renderer = registry->get<engine::render::PixelGridRenderer>(item.entity);
+    {
+        auto view = registry->view<engine::ScreenRect>();
+        for (auto entity : view) {
+            if (registry->all_of<EntityInfo>(entity)) {
+                if (!registry->get<EntityInfo>(entity).enabled_in_hierarchy) continue;
+            }
 
-        auto quad = compute_pixel_grid_quad(transform, grid_comp, renderer, wts);
-        GLuint grid_tex = resolve_grid_texture(
-            item.entity, grid_comp.pixel_grid_path, m_context.runtime(), m_grid_textures);
-        draw_pixel_grid_quad(draw_list, quad, grid_tex);
+            auto& rect = view.get<engine::ScreenRect>(entity);
+            if (!rect.enabled) continue;
+
+            bool has_image = registry->all_of<engine::render::Image>(entity);
+            bool has_text = registry->all_of<engine::render::Text>(entity);
+
+            if (!has_image && !has_text) continue;  // Skip entities without visuals
+
+            int layer = 0;
+            if (has_image) {
+                layer = registry->get<engine::render::Image>(entity).layer;
+            } else if (has_text) {
+                layer = registry->get<engine::render::Text>(entity).layer;
+            }
+
+            screen_items.push_back({entity, layer, has_image, has_text});
+        }
+    }
+
+    // Sort screen items by layer
+    std::sort(screen_items.begin(), screen_items.end(),
+              [](const ScreenRenderItem& a, const ScreenRenderItem& b) { return a.layer < b.layer; });
+
+    // Render screen-space entities
+    for (const auto& item : screen_items) {
+        if (item.has_image) {
+            render_screen_image(draw_list, item.entity, panel_pos, panel_size);
+        }
+        if (item.has_text) {
+            render_screen_text(draw_list, item.entity, panel_pos, panel_size);
+        }
     }
 
     draw_list->PopClipRect();
