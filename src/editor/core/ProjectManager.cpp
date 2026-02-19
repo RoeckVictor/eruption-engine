@@ -95,26 +95,33 @@ bool ProjectManager::create_project(const std::string& path, const std::string& 
 }
 
 void ProjectManager::add_to_recent(const std::string& path) {
-    remove_from_recent(path);
+    // Make a copy because 'path' may be a reference into m_recent_projects
+    // which gets invalidated by remove_from_recent
+    std::string path_copy = path;
 
-    m_recent_projects.insert(m_recent_projects.begin(), path);
+    remove_from_recent(path_copy);
+
+    m_recent_projects.insert(m_recent_projects.begin(), path_copy);
 
     if (m_recent_projects.size() > MAX_RECENT_PROJECTS) {
         m_recent_projects.resize(MAX_RECENT_PROJECTS);
     }
 
+    m_recent_projects_modified = true;
     save_recent_projects();
 }
 
 void ProjectManager::remove_from_recent(const std::string& path) {
-    m_recent_projects.erase(
-        std::remove(m_recent_projects.begin(), m_recent_projects.end(), path),
-        m_recent_projects.end()
-    );
+    auto it = std::remove(m_recent_projects.begin(), m_recent_projects.end(), path);
+    if (it != m_recent_projects.end()) {
+        m_recent_projects.erase(it, m_recent_projects.end());
+        m_recent_projects_modified = true;
+    }
 }
 
 void ProjectManager::clear_recent() {
     m_recent_projects.clear();
+    m_recent_projects_modified = true;
     save_recent_projects();
 }
 
@@ -132,14 +139,20 @@ void ProjectManager::load_recent_projects() {
 
         if (j.contains("recent_projects") && j["recent_projects"].is_array()) {
             m_recent_projects.clear();
+            size_t total_count = 0;
             for (const auto& p : j["recent_projects"]) {
                 if (p.is_string()) {
+                    ++total_count;
                     std::string path = p.get<std::string>();
                     // Only add if the project still exists
                     if (is_valid_project(path)) {
                         m_recent_projects.push_back(path);
                     }
                 }
+            }
+            // Mark as modified if we filtered out any invalid projects
+            if (m_recent_projects.size() < total_count) {
+                m_recent_projects_modified = true;
             }
         }
     } catch (const std::exception& e) {
@@ -148,6 +161,10 @@ void ProjectManager::load_recent_projects() {
 }
 
 void ProjectManager::save_recent_projects() {
+    if (!m_recent_projects_modified) {
+        return;
+    }
+
     std::string prefs_path = get_prefs_file_path();
 
     fs::path path(prefs_path);
@@ -164,6 +181,7 @@ void ProjectManager::save_recent_projects() {
     std::ofstream file(prefs_path);
     if (file.is_open()) {
         file << j.dump(2);
+        m_recent_projects_modified = false;
     }
 }
 

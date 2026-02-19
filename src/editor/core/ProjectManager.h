@@ -54,6 +54,7 @@ private:
     std::string m_project_path;
     ProjectInfo m_project_info;
     std::vector<std::string> m_recent_projects;
+    bool m_recent_projects_modified = false;
 
     static constexpr const char* PROJECT_FILE_NAME = "project.eruption";
     static constexpr size_t MAX_RECENT_PROJECTS = 10;
