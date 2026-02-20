@@ -5,8 +5,13 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <unordered_map>
+#include <random>
+#include <chrono>
 
 #include "runtime/ComponentScript.h"
+#include "runtime/ScriptEvents.h"
+#include "runtime/ScriptCoroutine.h"
 
 namespace engine {
 class Engine;
@@ -37,6 +42,18 @@ enum class PlayState {
 };
 
 class RuntimeContext {
+    // Friend declarations for host functions that need private member access
+    friend runtime::EventHandle host_subscribe_event(runtime::ScriptHostAPI*, entt::entity, const char*, void*);
+    friend void host_unsubscribe_event(runtime::ScriptHostAPI*, runtime::EventHandle);
+    friend void host_dispatch_event(runtime::ScriptHostAPI*, const char*, const runtime::EventData*);
+    friend runtime::CoroutineHandle host_start_coroutine(runtime::ScriptHostAPI*, entt::entity, void*);
+    friend void host_stop_coroutine(runtime::ScriptHostAPI*, runtime::CoroutineHandle);
+    friend void host_stop_all_coroutines(runtime::ScriptHostAPI*, entt::entity);
+    friend bool host_is_coroutine_running(runtime::ScriptHostAPI*, runtime::CoroutineHandle);
+    friend float host_random_float(runtime::ScriptHostAPI*);
+    friend float host_random_range(runtime::ScriptHostAPI*, float, float);
+    friend int host_random_int(runtime::ScriptHostAPI*, int, int);
+
 public:
     RuntimeContext();
     ~RuntimeContext();
@@ -65,6 +82,9 @@ public:
 
     engine::physics::PhysicsWorld* physics_world() { return m_physics_world.get(); }
     const engine::physics::PhysicsWorld* physics_world() const { return m_physics_world.get(); }
+
+    entt::registry* editor_registry() { return m_editor_registry; }
+    const entt::registry* editor_registry() const { return m_editor_registry; }
 
     const std::vector<std::unique_ptr<SimSurfaceState>>& sim_surfaces() const;
 
@@ -113,6 +133,66 @@ private:
     std::unique_ptr<engine::prefab::ComponentRegistry> m_component_registry;
     std::unique_ptr<engine::prefab::PrefabManager> m_prefab_manager;
     std::string m_project_assets_path;
+
+    // --- Collision tracking ---
+    // Maps body -> entity for looking up entities from Box2D bodies
+    std::unordered_map<uint64_t, entt::entity> m_body_to_entity;
+    bool m_body_map_dirty = true;  // Rebuild map when bodies added/removed
+
+    // Extended contact info stored per pair (keeps best data from multiple events)
+    struct ContactData {
+        runtime::ContactPair pair;
+        runtime::CollisionInfo info_for_a;  // Info from perspective of entity_a
+        runtime::CollisionInfo info_for_b;  // Info from perspective of entity_b
+    };
+
+    // Current frame contacts (pair -> extended info)
+    std::unordered_map<runtime::ContactPair, ContactData, runtime::ContactPairHash> m_current_contacts;
+    std::unordered_set<runtime::ContactPair, runtime::ContactPairHash> m_previous_contact_pairs;
+
+    void process_collision_events();
+    void build_body_to_entity_map();
+    void invalidate_body_map() { m_body_map_dirty = true; }
+
+    // --- Event system ---
+    struct EventSubscriptionInternal {
+        runtime::EventHandle handle;
+        entt::entity owner;
+        void (*callback)(const runtime::EventData&);
+    };
+    std::unordered_map<std::string, std::vector<EventSubscriptionInternal>> m_event_subscriptions;
+    runtime::EventHandle m_next_event_handle = 1;
+
+    // --- Coroutine system ---
+    std::vector<runtime::CoroutineInstance> m_coroutines;
+    runtime::CoroutineHandle m_next_coroutine_handle = 1;
+
+    void update_coroutines(float dt);
+    void cleanup_entity_coroutines(entt::entity entity);
+
+    /// Helper to safely destroy a coroutine handle and mark it inactive.
+    static void destroy_coroutine(runtime::CoroutineInstance& coro) {
+        coro.active = false;
+        if (coro.coro_handle) {
+            coro.coro_handle.destroy();
+            coro.coro_handle = nullptr;
+        }
+    }
+
+    // --- Random ---
+    // Use random_device with time-based fallback (random_device may be deterministic on MinGW)
+    static uint32_t generate_seed() {
+        std::random_device rd;
+        uint32_t seed = rd();
+        // If random_device returns same value repeatedly (MinGW bug), mix in time
+        static uint32_t last_seed = 0;
+        if (seed == last_seed) {
+            seed ^= static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+        }
+        last_seed = seed;
+        return seed;
+    }
+    std::mt19937 m_random_engine{generate_seed()};
 };
 
 }

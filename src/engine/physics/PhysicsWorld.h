@@ -3,6 +3,7 @@
 #include "engine/core/Result.h"
 #include "box2d/box2d.h"
 #include <cstdint>
+#include <functional>
 
 namespace engine::physics {
 
@@ -81,6 +82,36 @@ public:
 
     /// Check if body is in contact with ground (has contact with static body below)
     bool is_grounded(b2BodyId body, float tolerance_pixels = 2.0f) const;
+
+    /// Contact information for collision callbacks.
+    struct ContactInfo {
+        b2BodyId body_a;
+        b2BodyId body_b;
+        b2ShapeId shape_a;
+        b2ShapeId shape_b;
+        float normal_x, normal_y;     // Contact normal (in pixels, world space)
+        float point_x, point_y;       // Contact point (in pixels, world space)
+        float impulse;                // Normal impulse magnitude
+        bool is_touching;             // Currently in contact
+        bool is_sensor;               // One of the shapes is a sensor (trigger)
+    };
+
+    /// Enumerate all contacts in the world.
+    /// Callback is invoked for each contact pair.
+    using ContactCallback = std::function<void(const ContactInfo&)>;
+    void for_each_contact(const ContactCallback& callback) const;
+
+    /// Cast a ray and return the first hit.
+    struct RaycastHit {
+        bool hit = false;
+        b2BodyId body = b2_nullBodyId;
+        b2ShapeId shape = b2_nullShapeId;
+        float point_x = 0.0f, point_y = 0.0f;   // Hit point in pixels
+        float normal_x = 0.0f, normal_y = 0.0f; // Surface normal
+        float fraction = 0.0f;                   // Distance fraction along ray
+    };
+
+    RaycastHit raycast(float origin_x, float origin_y, float dir_x, float dir_y, float max_distance) const;
 
     b2WorldId world_id() const { return m_world_id; }
     bool valid() const;

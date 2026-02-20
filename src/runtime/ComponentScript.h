@@ -3,9 +3,13 @@
 #include <entt/entt.hpp>
 #include <string>
 #include <vector>
+#include <cmath>
+#include <functional>
 
 #include "engine/platform/KeyCode.h"
 #include "engine/core/Transform.h"
+#include "runtime/ScriptEvents.h"
+#include "runtime/ScriptCoroutine.h"
 
 namespace engine {
 class Engine;
@@ -71,7 +75,45 @@ struct ScriptHostAPI {
 
     // --- Prefab Instantiation ---
     entt::entity (*instantiate_prefab)(ScriptHostAPI*, entt::registry*, const char* prefab_name) = nullptr;
+
+    // --- Events ---
+    EventHandle (*subscribe_event)(ScriptHostAPI*, entt::entity owner, const char* event_name, void* callback) = nullptr;
+    void (*unsubscribe_event)(ScriptHostAPI*, EventHandle handle) = nullptr;
+    void (*dispatch_event)(ScriptHostAPI*, const char* event_name, const EventData* data) = nullptr;
+
+    // --- Coroutines ---
+    CoroutineHandle (*start_coroutine)(ScriptHostAPI*, entt::entity owner, void* coro_handle) = nullptr;
+    void (*stop_coroutine)(ScriptHostAPI*, CoroutineHandle handle) = nullptr;
+    void (*stop_all_coroutines)(ScriptHostAPI*, entt::entity owner) = nullptr;
+    bool (*is_coroutine_running)(ScriptHostAPI*, CoroutineHandle handle) = nullptr;
+
+    // --- Random ---
+    float (*random_float)(ScriptHostAPI*) = nullptr;
+    float (*random_range)(ScriptHostAPI*, float min, float max) = nullptr;
+    int (*random_int)(ScriptHostAPI*, int min, int max) = nullptr;
+
+    // --- Camera ---
+    void (*get_camera_position)(ScriptHostAPI*, float* x, float* y) = nullptr;
+    void (*set_camera_position)(ScriptHostAPI*, float x, float y) = nullptr;
+    float (*get_camera_zoom)(ScriptHostAPI*) = nullptr;
+    void (*set_camera_zoom)(ScriptHostAPI*, float zoom) = nullptr;
+    void (*screen_to_world)(ScriptHostAPI*, float screen_x, float screen_y, float* world_x, float* world_y) = nullptr;
+    void (*world_to_screen)(ScriptHostAPI*, float world_x, float world_y, float* screen_x, float* screen_y) = nullptr;
+
+    // --- Hierarchy ---
+    entt::entity (*get_parent)(ScriptHostAPI*, entt::registry*, entt::entity) = nullptr;
+    void (*set_parent)(ScriptHostAPI*, entt::registry*, entt::entity child, entt::entity parent) = nullptr;
+    int (*get_child_count)(ScriptHostAPI*, entt::registry*, entt::entity) = nullptr;
+    entt::entity (*get_child)(ScriptHostAPI*, entt::registry*, entt::entity parent, int index) = nullptr;
+
+    // --- Entity Info ---
+    const char* (*get_entity_name)(ScriptHostAPI*, entt::registry*, entt::entity) = nullptr;
+    bool (*is_entity_active)(ScriptHostAPI*, entt::registry*, entt::entity) = nullptr;
+    void (*set_entity_active)(ScriptHostAPI*, entt::registry*, entt::entity, bool active) = nullptr;
 };
+
+// Forward declaration for global logging API (defined after ComponentScript)
+inline ScriptHostAPI*& get_global_host_api();
 
 /// Base class for user-defined component scripts.
 /// Scripts can be attached to entities to add custom behavior.
@@ -108,6 +150,28 @@ public:
 
     /// Called after all on_update() calls have finished.
     virtual void on_late_update() {}
+
+    // =====================================================================
+    // Physics Events (override these for collision/trigger handling)
+    // =====================================================================
+
+    /// Called when this entity first contacts another collider.
+    virtual void on_collision_enter(const CollisionInfo& info) { (void)info; }
+
+    /// Called every frame while this entity is in contact with another collider.
+    virtual void on_collision_stay(const CollisionInfo& info) { (void)info; }
+
+    /// Called when this entity stops contacting another collider.
+    virtual void on_collision_exit(const CollisionInfo& info) { (void)info; }
+
+    /// Called when this entity first enters a trigger volume.
+    virtual void on_trigger_enter(const CollisionInfo& info) { (void)info; }
+
+    /// Called every frame while this entity is inside a trigger volume.
+    virtual void on_trigger_stay(const CollisionInfo& info) { (void)info; }
+
+    /// Called when this entity exits a trigger volume.
+    virtual void on_trigger_exit(const CollisionInfo& info) { (void)info; }
 
     // =====================================================================
     // Rendering (future hooks — not yet wired)
@@ -380,6 +444,302 @@ public:
         return m_host_api->instantiate_prefab(m_host_api, m_registry, prefab_name);
     }
 
+    // =====================================================================
+    // Math Helpers (inline, no DLL boundary crossing)
+    // =====================================================================
+
+    /// Linear interpolation between two values.
+    static float lerp(float a, float b, float t) {
+        return a + (b - a) * t;
+    }
+
+    /// Inverse linear interpolation: find t such that lerp(a, b, t) = value.
+    static float inverse_lerp(float a, float b, float value) {
+        if (std::abs(b - a) < 0.0001f) return 0.0f;
+        return (value - a) / (b - a);
+    }
+
+    /// Clamp a value between min and max.
+    static float clamp(float value, float min, float max) {
+        return value < min ? min : (value > max ? max : value);
+    }
+
+    /// Clamp a value between 0 and 1.
+    static float clamp01(float value) {
+        return clamp(value, 0.0f, 1.0f);
+    }
+
+    /// Smooth interpolation using smoothstep curve.
+    static float smoothstep(float edge0, float edge1, float x) {
+        float t = clamp01((x - edge0) / (edge1 - edge0));
+        return t * t * (3.0f - 2.0f * t);
+    }
+
+    /// Move towards a target value by at most max_delta.
+    static float move_towards(float current, float target, float max_delta) {
+        float diff = target - current;
+        if (std::abs(diff) <= max_delta) return target;
+        return current + std::copysign(max_delta, diff);
+    }
+
+    /// Rotate towards a target angle (handles 360 degree wrapping).
+    static float rotate_towards(float current, float target, float max_delta) {
+        float diff = angle_difference(target, current);
+        if (std::abs(diff) <= max_delta) return target;
+        return current + std::copysign(max_delta, diff);
+    }
+
+    /// Calculate the shortest difference between two angles in degrees.
+    static float angle_difference(float a, float b) {
+        float diff = std::fmod(a - b + 180.0f, 360.0f) - 180.0f;
+        return diff < -180.0f ? diff + 360.0f : diff;
+    }
+
+    /// Get the sign of a value (-1, 0, or 1).
+    static float sign(float value) {
+        return static_cast<float>((value > 0.0f) - (value < 0.0f));
+    }
+
+    /// Linear interpolation between two Vec2 values.
+    static Vec2 vec2_lerp(Vec2 a, Vec2 b, float t) {
+        return {lerp(a.x, b.x, t), lerp(a.y, b.y, t)};
+    }
+
+    /// Distance between two Vec2 points.
+    static float vec2_distance(Vec2 a, Vec2 b) {
+        float dx = b.x - a.x;
+        float dy = b.y - a.y;
+        return std::sqrt(dx * dx + dy * dy);
+    }
+
+    /// Magnitude (length) of a Vec2.
+    static float vec2_magnitude(Vec2 v) {
+        return std::sqrt(v.x * v.x + v.y * v.y);
+    }
+
+    /// Squared magnitude of a Vec2 (faster than magnitude, good for comparisons).
+    static float vec2_sqr_magnitude(Vec2 v) {
+        return v.x * v.x + v.y * v.y;
+    }
+
+    /// Normalize a Vec2 to unit length.
+    static Vec2 vec2_normalize(Vec2 v) {
+        float len = vec2_magnitude(v);
+        return len > 0.0001f ? Vec2{v.x / len, v.y / len} : Vec2{0.0f, 0.0f};
+    }
+
+    /// Dot product of two Vec2 values.
+    static float vec2_dot(Vec2 a, Vec2 b) {
+        return a.x * b.x + a.y * b.y;
+    }
+
+    /// Move a Vec2 towards a target by at most max_delta distance.
+    static Vec2 vec2_move_towards(Vec2 current, Vec2 target, float max_delta) {
+        Vec2 diff = {target.x - current.x, target.y - current.y};
+        float dist = vec2_magnitude(diff);
+        if (dist <= max_delta || dist < 0.0001f) return target;
+        return {current.x + diff.x / dist * max_delta, current.y + diff.y / dist * max_delta};
+    }
+
+    // =====================================================================
+    // Coroutines
+    // =====================================================================
+
+    /// Start a coroutine. Returns a handle that can be used to stop it.
+    CoroutineHandle start_coroutine(Coroutine coro) {
+        if (!m_host_api || !m_host_api->start_coroutine) return 0;
+        auto handle = coro.release();
+        return m_host_api->start_coroutine(m_host_api, m_entity, handle.address());
+    }
+
+    /// Stop a running coroutine by handle.
+    void stop_coroutine(CoroutineHandle handle) {
+        if (m_host_api && m_host_api->stop_coroutine)
+            m_host_api->stop_coroutine(m_host_api, handle);
+    }
+
+    /// Stop all coroutines owned by this script's entity.
+    void stop_all_coroutines() {
+        if (m_host_api && m_host_api->stop_all_coroutines)
+            m_host_api->stop_all_coroutines(m_host_api, m_entity);
+    }
+
+    /// Check if a coroutine is still running.
+    bool is_coroutine_running(CoroutineHandle handle) const {
+        if (!m_host_api || !m_host_api->is_coroutine_running) return false;
+        return m_host_api->is_coroutine_running(m_host_api, handle);
+    }
+
+    // =====================================================================
+    // Custom Events
+    // =====================================================================
+
+    /// Subscribe to a custom event by name. Returns a handle for unsubscribing.
+    /// The callback will be invoked when dispatch_event is called with matching name.
+    EventHandle subscribe(const char* event_name, void (*callback)(const EventData&)) {
+        if (!m_host_api || !m_host_api->subscribe_event) return 0;
+        return m_host_api->subscribe_event(m_host_api, m_entity, event_name, reinterpret_cast<void*>(callback));
+    }
+
+    /// Unsubscribe from an event using the handle returned from subscribe().
+    void unsubscribe(EventHandle handle) {
+        if (m_host_api && m_host_api->unsubscribe_event)
+            m_host_api->unsubscribe_event(m_host_api, handle);
+    }
+
+    /// Dispatch a custom event to all subscribers.
+    void dispatch_event(const char* event_name, const EventData& data) {
+        if (m_host_api && m_host_api->dispatch_event)
+            m_host_api->dispatch_event(m_host_api, event_name, &data);
+    }
+
+    /// Dispatch a custom event with no data.
+    void dispatch_event(const char* event_name) {
+        EventData empty;
+        dispatch_event(event_name, empty);
+    }
+
+    // =====================================================================
+    // Random
+    // =====================================================================
+
+    /// Get a random float between 0.0 and 1.0.
+    float random_float() {
+        if (!m_host_api || !m_host_api->random_float) return 0.0f;
+        return m_host_api->random_float(m_host_api);
+    }
+
+    /// Get a random float in the range [min, max].
+    float random_range(float min, float max) {
+        if (!m_host_api || !m_host_api->random_range) return min;
+        return m_host_api->random_range(m_host_api, min, max);
+    }
+
+    /// Get a random integer in the range [min, max] (inclusive).
+    int random_int(int min, int max) {
+        if (!m_host_api || !m_host_api->random_int) return min;
+        return m_host_api->random_int(m_host_api, min, max);
+    }
+
+    /// Get a random point inside a circle of the given radius centered at origin.
+    Vec2 random_point_in_circle(float radius) {
+        float angle = random_range(0.0f, 6.28318530718f);
+        float r = radius * std::sqrt(random_float());
+        return {r * std::cos(angle), r * std::sin(angle)};
+    }
+
+    /// Get a random unit direction vector.
+    Vec2 random_direction() {
+        float angle = random_range(0.0f, 6.28318530718f);
+        return {std::cos(angle), std::sin(angle)};
+    }
+
+    // =====================================================================
+    // Camera
+    // =====================================================================
+
+    /// Get the camera's world position.
+    Vec2 get_camera_position() {
+        Vec2 pos{0.0f, 0.0f};
+        if (m_host_api && m_host_api->get_camera_position)
+            m_host_api->get_camera_position(m_host_api, &pos.x, &pos.y);
+        return pos;
+    }
+
+    /// Set the camera's world position.
+    void set_camera_position(float x, float y) {
+        if (m_host_api && m_host_api->set_camera_position)
+            m_host_api->set_camera_position(m_host_api, x, y);
+    }
+
+    /// Get the camera's zoom level.
+    float get_camera_zoom() {
+        if (!m_host_api || !m_host_api->get_camera_zoom) return 1.0f;
+        return m_host_api->get_camera_zoom(m_host_api);
+    }
+
+    /// Set the camera's zoom level.
+    void set_camera_zoom(float zoom) {
+        if (m_host_api && m_host_api->set_camera_zoom)
+            m_host_api->set_camera_zoom(m_host_api, zoom);
+    }
+
+    /// Convert screen coordinates to world coordinates.
+    Vec2 screen_to_world(float screen_x, float screen_y) {
+        Vec2 world{0.0f, 0.0f};
+        if (m_host_api && m_host_api->screen_to_world)
+            m_host_api->screen_to_world(m_host_api, screen_x, screen_y, &world.x, &world.y);
+        return world;
+    }
+
+    /// Convert world coordinates to screen coordinates.
+    Vec2 world_to_screen(float world_x, float world_y) {
+        Vec2 screen{0.0f, 0.0f};
+        if (m_host_api && m_host_api->world_to_screen)
+            m_host_api->world_to_screen(m_host_api, world_x, world_y, &screen.x, &screen.y);
+        return screen;
+    }
+
+    // =====================================================================
+    // Hierarchy
+    // =====================================================================
+
+    /// Get this entity's parent, or entt::null if it has no parent.
+    entt::entity get_parent() {
+        if (!m_host_api || !m_host_api->get_parent || !m_registry) return entt::null;
+        return m_host_api->get_parent(m_host_api, m_registry, m_entity);
+    }
+
+    /// Set this entity's parent. Pass entt::null to detach from parent.
+    void set_parent(entt::entity parent) {
+        if (m_host_api && m_host_api->set_parent && m_registry)
+            m_host_api->set_parent(m_host_api, m_registry, m_entity, parent);
+    }
+
+    /// Detach this entity from its parent.
+    void detach_from_parent() {
+        set_parent(entt::null);
+    }
+
+    /// Get the number of children this entity has.
+    int get_child_count() {
+        if (!m_host_api || !m_host_api->get_child_count || !m_registry) return 0;
+        return m_host_api->get_child_count(m_host_api, m_registry, m_entity);
+    }
+
+    /// Get a child entity by index.
+    entt::entity get_child(int index) {
+        if (!m_host_api || !m_host_api->get_child || !m_registry) return entt::null;
+        return m_host_api->get_child(m_host_api, m_registry, m_entity, index);
+    }
+
+    // =====================================================================
+    // Entity Info
+    // =====================================================================
+
+    /// Get this entity's name.
+    /// NOTE: The returned pointer is valid until the next call to get_name() on THIS script.
+    /// Copy the result to a std::string if you need to store it.
+    const char* get_name() {
+        if (!m_host_api || !m_host_api->get_entity_name || !m_registry) return "";
+        // Copy to local cache to avoid issues with thread-local buffer in host
+        const char* name = m_host_api->get_entity_name(m_host_api, m_registry, m_entity);
+        m_name_cache = name ? name : "";
+        return m_name_cache.c_str();
+    }
+
+    /// Check if this entity is active (enabled in hierarchy).
+    bool is_active() {
+        if (!m_host_api || !m_host_api->is_entity_active || !m_registry) return true;
+        return m_host_api->is_entity_active(m_host_api, m_registry, m_entity);
+    }
+
+    /// Set this entity's active state.
+    void set_active(bool active) {
+        if (m_host_api && m_host_api->set_entity_active && m_registry)
+            m_host_api->set_entity_active(m_host_api, m_registry, m_entity, active);
+    }
+
 protected:
     friend class ScriptSystem;
     friend class ScriptManager;
@@ -389,6 +749,7 @@ protected:
     entt::registry* m_registry = nullptr;
     engine::Engine* m_engine = nullptr;
     ScriptHostAPI* m_host_api = nullptr;
+    mutable std::string m_name_cache;  // Cache for get_name() to avoid buffer issues
 
     /// Initialize the script context (called by ScriptSystem/RuntimeContext).
     void init_context(entt::entity entity, entt::registry* registry, engine::Engine* engine,
@@ -397,6 +758,11 @@ protected:
         m_registry = registry;
         m_engine = engine;
         m_host_api = host_api;
+
+        // Set global host API for static logging functions
+        if (host_api) {
+            get_global_host_api() = host_api;
+        }
     }
 };
 
@@ -422,6 +788,37 @@ struct ScriptAutoRegistrar {
         get_script_registry().push_back({name, factory});
     }
 };
+
+// ============================================================================
+// Global Script Logging API
+// ============================================================================
+// These free functions can be called from anywhere, including static callbacks.
+// They use a global host API pointer that is set when scripts are initialized.
+
+/// Global host API pointer for static logging functions.
+/// Set automatically when any script is initialized.
+inline ScriptHostAPI*& get_global_host_api() {
+    static ScriptHostAPI* s_host_api = nullptr;
+    return s_host_api;
+}
+
+/// Log an info message (usable from static callbacks or anywhere).
+inline void script_log(const char* msg) {
+    auto* api = get_global_host_api();
+    if (api && api->log_info) api->log_info(api, msg);
+}
+
+/// Log a warning message (usable from static callbacks or anywhere).
+inline void script_log_warning(const char* msg) {
+    auto* api = get_global_host_api();
+    if (api && api->log_warning) api->log_warning(api, msg);
+}
+
+/// Log an error message (usable from static callbacks or anywhere).
+inline void script_log_error(const char* msg) {
+    auto* api = get_global_host_api();
+    if (api && api->log_error) api->log_error(api, msg);
+}
 
 /// Macro to register a component script for DLL export.
 /// Usage: Place REGISTER_COMPONENT_SCRIPT(MyScript) in your .cpp file.

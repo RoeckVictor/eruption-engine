@@ -240,4 +240,134 @@ bool PhysicsWorld::valid() const {
     return b2World_IsValid(m_world_id);
 }
 
+void PhysicsWorld::for_each_contact(const ContactCallback& callback) const {
+    if (!b2World_IsValid(m_world_id)) return;
+
+    // Iterate through contact events from the world
+    b2ContactEvents contact_events = b2World_GetContactEvents(m_world_id);
+
+    // Process begin contacts
+    for (int i = 0; i < contact_events.beginCount; ++i) {
+        const b2ContactBeginTouchEvent& event = contact_events.beginEvents[i];
+
+        b2BodyId body_a = b2Shape_GetBody(event.shapeIdA);
+        b2BodyId body_b = b2Shape_GetBody(event.shapeIdB);
+
+        bool is_sensor_a = b2Shape_IsSensor(event.shapeIdA);
+        bool is_sensor_b = b2Shape_IsSensor(event.shapeIdB);
+
+        ContactInfo info;
+        info.body_a = body_a;
+        info.body_b = body_b;
+        info.shape_a = event.shapeIdA;
+        info.shape_b = event.shapeIdB;
+        info.is_touching = true;
+        info.is_sensor = is_sensor_a || is_sensor_b;
+        info.normal_x = 0.0f;
+        info.normal_y = 0.0f;
+        info.point_x = 0.0f;
+        info.point_y = 0.0f;
+        info.impulse = 0.0f;
+
+        // Get contact manifold for detailed info if available
+        // Note: Begin events don't have manifold data in Box2D 3.x
+
+        callback(info);
+    }
+
+    // Process end contacts (for exit detection)
+    for (int i = 0; i < contact_events.endCount; ++i) {
+        const b2ContactEndTouchEvent& event = contact_events.endEvents[i];
+
+        // Only process if both shapes are still valid
+        if (!b2Shape_IsValid(event.shapeIdA) || !b2Shape_IsValid(event.shapeIdB)) {
+            continue;
+        }
+
+        b2BodyId body_a = b2Shape_GetBody(event.shapeIdA);
+        b2BodyId body_b = b2Shape_GetBody(event.shapeIdB);
+
+        // Validity already checked above
+        bool is_sensor_a = b2Shape_IsSensor(event.shapeIdA);
+        bool is_sensor_b = b2Shape_IsSensor(event.shapeIdB);
+
+        ContactInfo info;
+        info.body_a = body_a;
+        info.body_b = body_b;
+        info.shape_a = event.shapeIdA;
+        info.shape_b = event.shapeIdB;
+        info.is_touching = false;  // No longer touching
+        info.is_sensor = is_sensor_a || is_sensor_b;
+        info.normal_x = 0.0f;
+        info.normal_y = 0.0f;
+        info.point_x = 0.0f;
+        info.point_y = 0.0f;
+        info.impulse = 0.0f;
+
+        callback(info);
+    }
+
+    // Process hit events for impulse data
+    for (int i = 0; i < contact_events.hitCount; ++i) {
+        const b2ContactHitEvent& event = contact_events.hitEvents[i];
+
+        b2BodyId body_a = b2Shape_GetBody(event.shapeIdA);
+        b2BodyId body_b = b2Shape_GetBody(event.shapeIdB);
+
+        bool is_sensor_a = b2Shape_IsSensor(event.shapeIdA);
+        bool is_sensor_b = b2Shape_IsSensor(event.shapeIdB);
+
+        ContactInfo info;
+        info.body_a = body_a;
+        info.body_b = body_b;
+        info.shape_a = event.shapeIdA;
+        info.shape_b = event.shapeIdB;
+        info.is_touching = true;
+        info.is_sensor = is_sensor_a || is_sensor_b;
+        info.normal_x = event.normal.x;
+        info.normal_y = event.normal.y;
+        info.point_x = event.point.x * m_pixels_per_meter;
+        info.point_y = event.point.y * m_pixels_per_meter;
+        info.impulse = event.approachSpeed;  // Use approach speed as impulse indicator
+
+        callback(info);
+    }
+}
+
+PhysicsWorld::RaycastHit PhysicsWorld::raycast(float origin_x, float origin_y,
+                                                float dir_x, float dir_y,
+                                                float max_distance) const {
+    RaycastHit result;
+    if (!b2World_IsValid(m_world_id)) return result;
+
+    // Convert to meters
+    b2Vec2 origin = pixels_to_meters(origin_x, origin_y);
+
+    // Normalize direction and scale by max distance in meters
+    float dir_len = std::sqrt(dir_x * dir_x + dir_y * dir_y);
+    if (dir_len < 0.0001f) return result;
+
+    float max_dist_m = pixels_to_meters(max_distance);
+    b2Vec2 translation = {
+        (dir_x / dir_len) * max_dist_m,
+        (dir_y / dir_len) * max_dist_m
+    };
+
+    b2QueryFilter filter = b2DefaultQueryFilter();
+    b2RayResult ray_result = b2World_CastRayClosest(m_world_id, origin, translation, filter);
+
+    if (ray_result.hit) {
+        result.hit = true;
+        result.shape = ray_result.shapeId;
+        result.body = b2Shape_GetBody(ray_result.shapeId);
+        result.point_x = ray_result.point.x * m_pixels_per_meter;
+        result.point_y = ray_result.point.y * m_pixels_per_meter;
+        result.normal_x = ray_result.normal.x;
+        result.normal_y = ray_result.normal.y;
+        result.fraction = ray_result.fraction;
+    }
+
+    return result;
+}
+
 } // namespace engine::physics
