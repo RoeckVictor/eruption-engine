@@ -163,7 +163,7 @@ static entt::entity host_instantiate_prefab(runtime::ScriptHostAPI* api, entt::r
 // Event System Host Functions
 // ============================================================================
 
-static runtime::EventHandle host_subscribe_event(runtime::ScriptHostAPI* api, entt::entity owner, const char* event_name, void* callback) {
+runtime::EventHandle host_subscribe_event(runtime::ScriptHostAPI* api, entt::entity owner, const char* event_name, void* callback) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
     if (!rt || !event_name || !callback) return 0;
 
@@ -173,7 +173,7 @@ static runtime::EventHandle host_subscribe_event(runtime::ScriptHostAPI* api, en
     return handle;
 }
 
-static void host_unsubscribe_event(runtime::ScriptHostAPI* api, runtime::EventHandle handle) {
+void host_unsubscribe_event(runtime::ScriptHostAPI* api, runtime::EventHandle handle) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
     if (!rt || handle == 0) return;
 
@@ -183,7 +183,7 @@ static void host_unsubscribe_event(runtime::ScriptHostAPI* api, runtime::EventHa
     }
 }
 
-static void host_dispatch_event(runtime::ScriptHostAPI* api, const char* event_name, const runtime::EventData* data) {
+void host_dispatch_event(runtime::ScriptHostAPI* api, const char* event_name, const runtime::EventData* data) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
     if (!rt || !event_name) return;
 
@@ -204,7 +204,7 @@ static void host_dispatch_event(runtime::ScriptHostAPI* api, const char* event_n
 // Coroutine Host Functions
 // ============================================================================
 
-static runtime::CoroutineHandle host_start_coroutine(runtime::ScriptHostAPI* api, entt::entity owner, void* coro_handle_ptr) {
+runtime::CoroutineHandle host_start_coroutine(runtime::ScriptHostAPI* api, entt::entity owner, void* coro_handle_ptr) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
     if (!rt || !coro_handle_ptr) return 0;
 
@@ -246,7 +246,7 @@ static runtime::CoroutineHandle host_start_coroutine(runtime::ScriptHostAPI* api
     return handle;
 }
 
-static void host_stop_coroutine(runtime::ScriptHostAPI* api, runtime::CoroutineHandle handle) {
+void host_stop_coroutine(runtime::ScriptHostAPI* api, runtime::CoroutineHandle handle) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
     if (!rt || handle == 0) return;
 
@@ -258,7 +258,7 @@ static void host_stop_coroutine(runtime::ScriptHostAPI* api, runtime::CoroutineH
     }
 }
 
-static void host_stop_all_coroutines(runtime::ScriptHostAPI* api, entt::entity owner) {
+void host_stop_all_coroutines(runtime::ScriptHostAPI* api, entt::entity owner) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
     if (!rt) return;
 
@@ -269,7 +269,7 @@ static void host_stop_all_coroutines(runtime::ScriptHostAPI* api, entt::entity o
     }
 }
 
-static bool host_is_coroutine_running(runtime::ScriptHostAPI* api, runtime::CoroutineHandle handle) {
+bool host_is_coroutine_running(runtime::ScriptHostAPI* api, runtime::CoroutineHandle handle) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
     if (!rt || handle == 0) return false;
 
@@ -285,21 +285,21 @@ static bool host_is_coroutine_running(runtime::ScriptHostAPI* api, runtime::Coro
 // Random Host Functions
 // ============================================================================
 
-static float host_random_float(runtime::ScriptHostAPI* api) {
+float host_random_float(runtime::ScriptHostAPI* api) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
     if (!rt) return 0.0f;
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
     return dist(rt->m_random_engine);
 }
 
-static float host_random_range(runtime::ScriptHostAPI* api, float min, float max) {
+float host_random_range(runtime::ScriptHostAPI* api, float min, float max) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
     if (!rt) return min;
     std::uniform_real_distribution<float> dist(min, max);
     return dist(rt->m_random_engine);
 }
 
-static int host_random_int(runtime::ScriptHostAPI* api, int min, int max) {
+int host_random_int(runtime::ScriptHostAPI* api, int min, int max) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
     if (!rt) return min;
     std::uniform_int_distribution<int> dist(min, max);
@@ -314,8 +314,9 @@ static int host_random_int(runtime::ScriptHostAPI* api, int min, int max) {
 static engine::render::Camera2D* get_first_camera(RuntimeContext* rt) {
     if (!rt || !rt->editor_registry()) return nullptr;
     auto view = rt->editor_registry()->view<engine::render::Camera2D>();
-    for (auto entity : view) {
-        return &view.get<engine::render::Camera2D>(entity);
+    auto it = view.begin();
+    if (it != view.end()) {
+        return &view.get<engine::render::Camera2D>(*it);
     }
     return nullptr;
 }
