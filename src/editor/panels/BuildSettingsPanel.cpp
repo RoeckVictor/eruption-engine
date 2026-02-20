@@ -35,12 +35,16 @@ void BuildSettingsPanel::on_gui() {
 
     if (m_builder.is_building()) {
         render_build_progress();
-    } else if (m_builder.status() == GameBuildStatus::Complete ||
-               m_builder.status() == GameBuildStatus::Cancelled ||
-               m_builder.status() == GameBuildStatus::Failed) {
-        render_build_complete();
     } else {
         render_build_settings();
+
+        // Show build status section if there was a build result
+        auto status = m_builder.status();
+        if (status == GameBuildStatus::Complete ||
+            status == GameBuildStatus::Cancelled ||
+            status == GameBuildStatus::Failed) {
+            render_build_status();
+        }
     }
 }
 
@@ -165,7 +169,8 @@ void BuildSettingsPanel::render_build_settings() {
         } else if (strlen(m_product_name_buffer) == 0) {
             engine::Logger::instance().error("Build", "Product name is required");
         } else {
-            // Start build
+            // Reset any previous build state and start new build
+            m_builder.reset();
             m_config.output_path = m_output_path_buffer;
             m_config.product_name = m_product_name_buffer;
 
@@ -197,13 +202,28 @@ void BuildSettingsPanel::render_build_progress() {
     }
 }
 
-void BuildSettingsPanel::render_build_complete() {
+void BuildSettingsPanel::render_build_status() {
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
     auto status = m_builder.status();
 
     if (status == GameBuildStatus::Complete) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 0.8f, 0.2f, 1.0f));
-        ImGui::Text("Build Completed Successfully!");
+        ImGui::Text("Completed Successfully!");
         ImGui::PopStyleColor();
+
+        // Show output path (includes Debug/Release subfolder)
+        const auto& actual_path = m_builder.actual_output_path();
+        ImGui::Text("Output: %s", actual_path.empty() ? m_output_path_buffer : actual_path.c_str());
+
+        ImGui::Spacing();
+
+        if (ImGui::Button("Open Output Folder", ImVec2(-1, 30))) {
+            engine::platform::open_folder_in_file_manager(
+                actual_path.empty() ? m_output_path_buffer : actual_path.c_str());
+        }
     } else if (status == GameBuildStatus::Cancelled) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.7f, 0.1f, 1.0f));
         ImGui::Text("Build Cancelled");
@@ -217,30 +237,6 @@ void BuildSettingsPanel::render_build_complete() {
             ImGui::Spacing();
             ImGui::TextWrapped("Error: %s", m_builder.error().c_str());
         }
-    }
-
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    // Show output path (includes Debug/Release subfolder)
-    const auto& actual_path = m_builder.actual_output_path();
-    ImGui::Text("Output: %s", actual_path.empty() ? m_output_path_buffer : actual_path.c_str());
-
-    ImGui::Spacing();
-
-    // Buttons
-    if (status == GameBuildStatus::Complete) {
-        if (ImGui::Button("Open Output Folder", ImVec2(-1, 30))) {
-            engine::platform::open_folder_in_file_manager(
-                actual_path.empty() ? m_output_path_buffer : actual_path.c_str());
-        }
-    }
-
-    ImGui::Spacing();
-
-    if (ImGui::Button("Build Again", ImVec2(-1, 30))) {
-        // Reset builder to idle state
-        m_builder.reset();
     }
 }
 

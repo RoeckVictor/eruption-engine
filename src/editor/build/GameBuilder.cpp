@@ -162,14 +162,14 @@ bool GameBuilder::prepare_output_directory(const BuildConfig& config) {
     try {
         fs::path output_dir(config.output_path);
 
-        // Create output directory if it doesn't exist
-        if (!fs::exists(output_dir)) {
-            fs::create_directories(output_dir);
+        // Delete existing build folder if it exists
+        if (fs::exists(output_dir)) {
+            fs::remove_all(output_dir);
+            engine::Logger::instance().info("GameBuilder", "Removed previous build folder");
         }
 
-        // Create subdirectories
-        fs::create_directories(output_dir / "Assets");
-        fs::create_directories(output_dir / "shaders");
+        // Create fresh output directory
+        fs::create_directories(output_dir);
 
         return true;
     } catch (const std::exception& e) {
@@ -205,10 +205,7 @@ bool GameBuilder::copy_assets(const BuildConfig& config) {
         fs::path output_assets = fs::path(config.output_path) / "Assets";
 
         if (fs::exists(project_assets)) {
-            // Copy all assets
-            fs::copy(project_assets, output_assets,
-                     fs::copy_options::recursive | fs::copy_options::overwrite_existing);
-
+            fs::copy(project_assets, output_assets, fs::copy_options::recursive);
             engine::Logger::instance().info("GameBuilder", "Copied assets");
         }
 
@@ -229,16 +226,14 @@ bool GameBuilder::copy_runtime(const BuildConfig& config) {
         fs::path shaders_src = exe_dir / "shaders";
 
         if (fs::exists(shaders_src)) {
-            fs::copy(shaders_src, output_dir / "shaders",
-                     fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+            fs::copy(shaders_src, output_dir / "shaders", fs::copy_options::recursive);
             engine::Logger::instance().info("GameBuilder", "Copied shaders");
         }
 
         // Copy entire engine assets folder (fonts, materials, defaults, etc.)
         fs::path assets_src = exe_dir / "assets";
         if (fs::exists(assets_src)) {
-            fs::copy(assets_src, output_dir / "assets",
-                     fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+            fs::copy(assets_src, output_dir / "assets", fs::copy_options::recursive);
             engine::Logger::instance().info("GameBuilder", "Copied engine assets");
         }
 

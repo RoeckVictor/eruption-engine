@@ -141,15 +141,6 @@ void PanelManager::render_menu_bar() {
                     }
                 }
             }
-            if (ImGui::MenuItem("Build Game")) {
-                // Show Build Settings panel and start build
-                for (auto& panel : m_panels) {
-                    if (std::string(panel->name()) == "Build Settings") {
-                        panel->set_visible(true);
-                        break;
-                    }
-                }
-            }
             ImGui::EndMenu();
         }
 

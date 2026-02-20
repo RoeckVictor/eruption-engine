@@ -28,7 +28,7 @@ public:
 private:
     void render_build_settings();
     void render_build_progress();
-    void render_build_complete();
+    void render_build_status();
 
     GameBuilder m_builder;
     BuildConfig m_config;
