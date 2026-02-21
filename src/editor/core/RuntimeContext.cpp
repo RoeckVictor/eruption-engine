@@ -159,62 +159,33 @@ static entt::entity host_instantiate_prefab(runtime::ScriptHostAPI* api, entt::r
     return rt->instantiate_prefab_internal(prefab_name);
 }
 
-// ============================================================================
-// Event System Host Functions
-// ============================================================================
-
 runtime::EventHandle host_subscribe_event(runtime::ScriptHostAPI* api, entt::entity owner, const char* event_name, void* callback) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
-    if (!rt || !event_name || !callback) return 0;
+    if (!rt) return 0;
 
-    auto handle = rt->m_next_event_handle++;
-    auto& subs = rt->m_event_subscriptions[event_name];
-    subs.push_back({handle, owner, reinterpret_cast<void(*)(const runtime::EventData&)>(callback)});
-    return handle;
+    auto cb = reinterpret_cast<runtime::ScriptEventDispatcher::Callback>(callback);
+    return rt->event_dispatcher().subscribe(event_name, owner, cb);
 }
 
 void host_unsubscribe_event(runtime::ScriptHostAPI* api, runtime::EventHandle handle) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
-    if (!rt || handle == 0) return;
+    if (!rt) return;
 
-    for (auto& [name, subs] : rt->m_event_subscriptions) {
-        subs.erase(std::remove_if(subs.begin(), subs.end(),
-            [handle](const auto& s) { return s.handle == handle; }), subs.end());
-    }
+    rt->event_dispatcher().unsubscribe(handle);
 }
 
 void host_dispatch_event(runtime::ScriptHostAPI* api, const char* event_name, const runtime::EventData* data) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
-    if (!rt || !event_name) return;
+    if (!rt) return;
 
-    auto it = rt->m_event_subscriptions.find(event_name);
-    if (it == rt->m_event_subscriptions.end()) return;
-
-    runtime::EventData empty_data;
-    const runtime::EventData& event_data = data ? *data : empty_data;
-
-    for (const auto& sub : it->second) {
-        if (sub.callback) {
-            sub.callback(event_data);
-        }
-    }
+    rt->event_dispatcher().dispatch(event_name, data);
 }
-
-// ============================================================================
-// Coroutine Host Functions
-// ============================================================================
 
 runtime::CoroutineHandle host_start_coroutine(runtime::ScriptHostAPI* api, entt::entity owner, void* coro_handle_ptr) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
     if (!rt || !coro_handle_ptr) return 0;
 
-    // NOTE: from_address() cannot validate the pointer is a real coroutine handle.
-    // This is safe because ComponentScript::start_coroutine() calls Coroutine::release()
-    // which returns a handle from a properly constructed Coroutine object.
-    // Direct calls with invalid pointers will cause undefined behavior.
     auto coro_handle = runtime::Coroutine::handle_type::from_address(coro_handle_ptr);
-
-    // Basic sanity check - null handle or already finished
     if (!coro_handle) {
         engine::Logger::instance().warning("Coroutine", "Attempted to start null coroutine handle");
         return 0;
@@ -281,10 +252,6 @@ bool host_is_coroutine_running(runtime::ScriptHostAPI* api, runtime::CoroutineHa
     return false;
 }
 
-// ============================================================================
-// Random Host Functions
-// ============================================================================
-
 float host_random_float(runtime::ScriptHostAPI* api) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
     if (!rt) return 0.0f;
@@ -306,11 +273,6 @@ int host_random_int(runtime::ScriptHostAPI* api, int min, int max) {
     return dist(rt->m_random_engine);
 }
 
-// ============================================================================
-// Camera Host Functions
-// ============================================================================
-
-/// Helper to get the first Camera2D in the registry, or nullptr if none exists.
 static engine::render::Camera2D* get_first_camera(RuntimeContext* rt) {
     if (!rt || !rt->editor_registry()) return nullptr;
     auto view = rt->editor_registry()->view<engine::render::Camera2D>();
@@ -372,10 +334,6 @@ static void host_world_to_screen(runtime::ScriptHostAPI* api, float world_x, flo
     *screen_y = (world_y - camera->y) * camera->zoom + screen_h / 2.0f;
 }
 
-// ============================================================================
-// Hierarchy Host Functions
-// ============================================================================
-
 static entt::entity host_get_parent(runtime::ScriptHostAPI* /*api*/, entt::registry* reg, entt::entity entity) {
     if (!reg || !reg->valid(entity)) return entt::null;
     if (!reg->all_of<engine::Hierarchy>(entity)) return entt::null;
@@ -409,10 +367,6 @@ static entt::entity host_get_child(runtime::ScriptHostAPI* /*api*/, entt::regist
     if (index < 0 || index >= static_cast<int>(children.size())) return entt::null;
     return children[index];
 }
-
-// ============================================================================
-// Entity Info Host Functions
-// ============================================================================
 
 static const char* host_get_entity_name(runtime::ScriptHostAPI* /*api*/, entt::registry* reg, entt::entity entity) {
     // Thread-local buffer to avoid data races; caller should copy if needed across calls
@@ -520,9 +474,9 @@ void RuntimeContext::play(const SceneSettings& settings) {
     snapshot_scene();
 
     try {
-        // Initialize physics world from scene settings.
-        // SceneSettings gravity is in pixels/s² with positive Y = down convention.
-        // Editor uses Y-up, so negate Y. PhysicsWorld expects m/s², so divide by ppm.
+        // Initialize physics world from scene settings
+        // SceneSettings gravity is in pixels/s² with positive Y = down convention
+        // Editor uses Y-up, so negate Y. PhysicsWorld expects m/s², so divide by ppm
         float ppm = settings.pixels_per_meter;
         float gravity_x_m = settings.gravity_x / ppm;
         float gravity_y_m = -settings.gravity_y / ppm;
@@ -601,8 +555,7 @@ void RuntimeContext::stop() {
     m_next_coroutine_handle = 1;
 
     // Clean up events
-    m_event_subscriptions.clear();
-    m_next_event_handle = 1;
+    m_event_dispatcher.clear();
 
     // Clean up collision tracking
     m_body_to_entity.clear();
@@ -691,6 +644,7 @@ void RuntimeContext::update(float dt) {
     for (auto entity : m_deferred_destroys) {
         if (m_editor_registry->valid(entity)) {
             cleanup_entity_coroutines(entity);
+            m_event_dispatcher.cleanup_entity(entity);
             destroy_entity_recursive(*m_editor_registry, entity);
         }
     }
@@ -985,7 +939,7 @@ void RuntimeContext::update_coroutines(float dt) {
     // Clean up and remove inactive coroutines
     for (auto& coro : m_coroutines) {
         if (!coro.active) {
-            destroy_coroutine(coro);  // Safe to call even if already destroyed
+            destroy_coroutine(coro);
         }
     }
     m_coroutines.erase(
@@ -1047,7 +1001,7 @@ void RuntimeContext::process_collision_events() {
         auto it_b = m_body_to_entity.find(body_b_key);
 
         if (it_a == m_body_to_entity.end() || it_b == m_body_to_entity.end()) {
-            return;  // One of the bodies doesn't have an entity
+            return;
         }
 
         entt::entity entity_a = it_a->second;

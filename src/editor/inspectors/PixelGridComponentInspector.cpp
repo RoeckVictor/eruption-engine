@@ -9,7 +9,7 @@ namespace editor {
 
 namespace fs = std::filesystem;
 
-bool PixelGridComponentInspector::draw(engine::simulation::PixelGridComponent& component) {
+bool PixelGridComponentInspector::draw(engine::simulation::PixelGridComponent& component, const std::string& project_path) {
     bool changed = false;
 
     // Enabled checkbox
@@ -61,7 +61,7 @@ bool PixelGridComponentInspector::draw(engine::simulation::PixelGridComponent& c
     }
 
     // Asset picker popup
-    show_asset_picker(component);
+    show_asset_picker(component, project_path);
 
     ImGui::Spacing();
 
@@ -74,34 +74,45 @@ bool PixelGridComponentInspector::draw(engine::simulation::PixelGridComponent& c
     return changed;
 }
 
-void PixelGridComponentInspector::show_asset_picker(engine::simulation::PixelGridComponent& component) {
+void PixelGridComponentInspector::show_asset_picker(engine::simulation::PixelGridComponent& component, const std::string& project_path) {
     if (ImGui::BeginPopup("PixelGridAssetPicker")) {
         ImGui::Text("Select Pixel Grid Asset (.pxg)");
         ImGui::Separator();
 
-        // Collect all .pxg files from the project
+        // Collect .pxg files from valid asset folders
         std::vector<std::string> pxg_files;
 
-        try {
-            // Search recursively from current directory
-            for (const auto& entry : fs::recursive_directory_iterator(".")) {
-                if (entry.is_regular_file() && entry.path().extension() == ".pxg") {
-                    std::string path = entry.path().string();
-                    // Normalize path separators
-                    std::replace(path.begin(), path.end(), '\\', '/');
-                    pxg_files.push_back(path);
+        // Helper to scan a directory for .pxg files
+        auto scan_directory = [&](const fs::path& dir) {
+            if (!fs::exists(dir)) return;
+            try {
+                for (const auto& entry : fs::recursive_directory_iterator(dir)) {
+                    if (entry.is_regular_file() && entry.path().extension() == ".pxg") {
+                        std::string path = entry.path().string();
+                        // Normalize path separators
+                        std::replace(path.begin(), path.end(), '\\', '/');
+                        pxg_files.push_back(path);
+                    }
                 }
+            } catch (const std::exception&) {
+                // Ignore errors for individual directories
             }
-        } catch (const std::exception& e) {
-            ImGui::TextColored(ImVec4(1, 0, 0, 1), "Error scanning files: %s", e.what());
+        };
+
+        // Scan project Assets folder (capital A)
+        if (!project_path.empty()) {
+            scan_directory(fs::path(project_path) / "Assets");
         }
+
+        // Scan engine assets folder (lowercase a) - for engine-provided .pxg files
+        scan_directory("assets");
 
         // Sort alphabetically
         std::sort(pxg_files.begin(), pxg_files.end());
 
         // Display file list
         if (pxg_files.empty()) {
-            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "No .pxg files found in project");
+            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "No .pxg files found in Assets folder");
         } else {
             ImGui::BeginChild("AssetList", ImVec2(400, 300), true);
 

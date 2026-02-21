@@ -530,7 +530,12 @@ void EditorApplication::save_scene() {
 void EditorApplication::save_scene_as() {
     std::string initial_dir;
     if (has_project()) {
-        initial_dir = m_project_manager->project_path() + "/Assets";
+        std::filesystem::path assets_dir = std::filesystem::path(m_project_manager->project_path()) / "Assets";
+        if (std::filesystem::exists(assets_dir)) {
+            initial_dir = assets_dir.string();
+        } else {
+            initial_dir = m_project_manager->project_path();
+        }
     }
 
     std::string path = engine::platform::save_file_dialog(

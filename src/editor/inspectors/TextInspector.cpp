@@ -9,7 +9,7 @@ namespace editor {
 
 namespace fs = std::filesystem;
 
-bool TextInspector::draw(engine::render::Text& component) {
+bool TextInspector::draw(engine::render::Text& component, const std::string& project_path) {
     bool changed = false;
 
     // Enabled checkbox
@@ -79,7 +79,7 @@ bool TextInspector::draw(engine::render::Text& component) {
         ImGui::EndDragDropTarget();
     }
 
-    show_font_picker(component);
+    show_font_picker(component, project_path);
 
     ImGui::Spacing();
 
@@ -152,34 +152,46 @@ bool TextInspector::draw(engine::render::Text& component) {
     return changed;
 }
 
-void TextInspector::show_font_picker(engine::render::Text& component) {
+void TextInspector::show_font_picker(engine::render::Text& component, const std::string& project_path) {
     if (ImGui::BeginPopup("FontAssetPicker")) {
         ImGui::Text("Select Font");
         ImGui::Separator();
 
-        // Collect all font files
+        // Collect font files from valid asset folders
         std::vector<std::string> font_files;
 
-        try {
-            for (const auto& entry : fs::recursive_directory_iterator(".")) {
-                if (entry.is_regular_file()) {
-                    std::string ext = entry.path().extension().string();
-                    if (ext == ".ttf" || ext == ".TTF" || ext == ".otf" || ext == ".OTF") {
-                        std::string path = entry.path().string();
-                        std::replace(path.begin(), path.end(), '\\', '/');
-                        font_files.push_back(path);
+        // Helper to scan a directory for fonts
+        auto scan_directory = [&](const fs::path& dir) {
+            if (!fs::exists(dir)) return;
+            try {
+                for (const auto& entry : fs::recursive_directory_iterator(dir)) {
+                    if (entry.is_regular_file()) {
+                        std::string ext = entry.path().extension().string();
+                        if (ext == ".ttf" || ext == ".TTF" || ext == ".otf" || ext == ".OTF") {
+                            std::string path = entry.path().string();
+                            std::replace(path.begin(), path.end(), '\\', '/');
+                            font_files.push_back(path);
+                        }
                     }
                 }
+            } catch (const std::exception&) {
+                // Ignore errors for individual directories
             }
-        } catch (const std::exception& e) {
-            ImGui::TextColored(ImVec4(1, 0, 0, 1), "Error scanning files: %s", e.what());
+        };
+
+        // Scan project Assets folder (capital A)
+        if (!project_path.empty()) {
+            scan_directory(fs::path(project_path) / "Assets");
         }
+
+        // Scan engine assets folder (lowercase a) - for engine-provided fonts
+        scan_directory("assets");
 
         std::sort(font_files.begin(), font_files.end());
 
         if (font_files.empty()) {
-            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "No TTF or OTF fonts found");
-            ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Add .ttf or .otf files to your project");
+            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "No TTF or OTF fonts found in Assets folder");
+            ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Add .ttf or .otf files to your project's Assets folder");
         } else {
             ImGui::BeginChild("FontList", ImVec2(400, 300), true);
 

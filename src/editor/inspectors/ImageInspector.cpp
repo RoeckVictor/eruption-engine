@@ -14,7 +14,7 @@ static bool is_image_extension(const std::string& ext) {
            ext == ".PNG" || ext == ".JPG" || ext == ".JPEG";
 }
 
-bool ImageInspector::draw(engine::render::Image& component) {
+bool ImageInspector::draw(engine::render::Image& component, const std::string& project_path) {
     bool changed = false;
 
     // Enabled checkbox
@@ -70,7 +70,7 @@ bool ImageInspector::draw(engine::render::Image& component) {
     }
 
     // Asset picker popup
-    show_asset_picker(component);
+    show_asset_picker(component, project_path);
 
     ImGui::Spacing();
     ImGui::Separator();
@@ -107,7 +107,7 @@ bool ImageInspector::draw(engine::render::Image& component) {
     return changed;
 }
 
-void ImageInspector::show_asset_picker(engine::render::Image& component) {
+void ImageInspector::show_asset_picker(engine::render::Image& component, const std::string& project_path) {
     if (ImGui::BeginPopup("SpriteAssetPicker")) {
         ImGui::Text("Select Image Asset (.png, .jpg)");
         ImGui::Separator();
@@ -135,7 +135,9 @@ void ImageInspector::show_asset_picker(engine::render::Image& component) {
         };
 
         // Scan project Assets folder (capital A)
-        scan_directory("Assets");
+        if (!project_path.empty()) {
+            scan_directory(fs::path(project_path) / "Assets");
+        }
 
         // Scan engine assets folder (lowercase a) - for engine-provided images
         scan_directory("assets");
@@ -143,7 +145,7 @@ void ImageInspector::show_asset_picker(engine::render::Image& component) {
         std::sort(image_files.begin(), image_files.end());
 
         if (image_files.empty()) {
-            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "No image files found in project");
+            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "No image files found in Assets folder");
         } else {
             ImGui::BeginChild("AssetList", ImVec2(400, 300), true);
 

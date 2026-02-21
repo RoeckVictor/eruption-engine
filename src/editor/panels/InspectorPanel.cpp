@@ -388,13 +388,13 @@ void InspectorPanel::render_component_inspector(entt::entity entity, const engin
             changed = AnimatorInspector::draw(*static_cast<engine::animation::Animator*>(component_ptr));
         }
         else if (type_info.name() == "engine::simulation::PixelGridComponent") {
-            changed = PixelGridComponentInspector::draw(*static_cast<engine::simulation::PixelGridComponent*>(component_ptr));
+            changed = PixelGridComponentInspector::draw(*static_cast<engine::simulation::PixelGridComponent*>(component_ptr), m_context.project_path());
         }
         else if (type_info.name() == "engine::render::Image") {
-            changed = ImageInspector::draw(*static_cast<engine::render::Image*>(component_ptr));
+            changed = ImageInspector::draw(*static_cast<engine::render::Image*>(component_ptr), m_context.project_path());
         }
         else if (type_info.name() == "engine::render::Text") {
-            changed = TextInspector::draw(*static_cast<engine::render::Text*>(component_ptr));
+            changed = TextInspector::draw(*static_cast<engine::render::Text*>(component_ptr), m_context.project_path());
         }
         else {
             // Fall back to AutoInspector for components without custom inspectors

@@ -58,6 +58,7 @@ target_link_libraries(eruption_engine
 # Code shared between the editor and the standalone game runtime.
 # This eliminates compiling the same source files into two separate targets.
 set(RUNTIME_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime/ScriptEventDispatcher.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/core/EditorComponents.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/core/RuntimeContext.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/core/PhysicsPlayback.cpp"
