@@ -131,9 +131,14 @@ void SimulationPlayback::init(engine::physics::PhysicsWorld* physics_world) {
             shader.set_uint("u_mat_steam", mat_steam);
         };
 
+        // Pass chunk size to simulation for GPU dirty tracking
+        int chunk_size_x = sim_surface.chunk_size_x;
+        int chunk_size_y = sim_surface.chunk_size_y;
+
         if (!state->simulation.init(slots.data(), static_cast<int>(slots.size()),
                                      parsed.width, parsed.height,
-                                     "shaders/sim_step.comp", uniform_callback)) {
+                                     "shaders/sim_step.comp", uniform_callback,
+                                     256, chunk_size_x, chunk_size_y)) {
             engine::Logger::instance().error("Runtime", "Failed to init MargolusSimulation");
             state->pixel_grid.shutdown();
             continue;
@@ -243,8 +248,14 @@ void SimulationPlayback::update(uint64_t frame_count) {
                 et.origin_y = gc.origin_y;
             }
 
-            // Mark entire grid dirty (simulation changes every pixel every frame)
-            state->terrain_colliders->mark_dirty_region(0, 0, state->width, state->height);
+            // Use GPU dirty flags instead of marking entire grid dirty.
+            // This only updates chunks where pixels actually moved, dramatically
+            // reducing CPU readback and Box2D collider regeneration overhead.
+            auto dirty_flags = state->simulation.read_and_clear_dirty_chunks();
+            state->terrain_colliders->apply_gpu_dirty_flags(
+                dirty_flags,
+                state->simulation.num_chunks_x(),
+                state->simulation.num_chunks_y());
             state->terrain_colliders->update_terrain_colliders(state->pixel_grid, et);
         }
     }

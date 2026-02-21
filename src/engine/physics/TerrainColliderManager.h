@@ -84,6 +84,15 @@ public:
     /// @param h Height in pixels
     void mark_dirty_region(int x, int y, int w, int h);
 
+    /// Apply dirty flags from GPU simulation.
+    /// This is the preferred method for marking dirty chunks as it only marks
+    /// chunks where actual pixel movement occurred.
+    /// @param dirty_flags Vector of bools, one per chunk (row-major order)
+    /// @param num_chunks_x Number of chunks horizontally
+    /// @param num_chunks_y Number of chunks vertically
+    void apply_gpu_dirty_flags(const std::vector<bool>& dirty_flags,
+                                int num_chunks_x, int num_chunks_y);
+
     /// Mark terrain chunks near dynamic bodies as dirty (accounts for CA changes).
     /// @param bodies List of bodies to check
     /// @param world Physics world for coordinate queries

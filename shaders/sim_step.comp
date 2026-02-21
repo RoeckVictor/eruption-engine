@@ -16,11 +16,21 @@ layout(std430, binding = 2) readonly buffer MaterialTable {
     uint mat_props[512];
 };
 
+// Dirty chunk flags SSBO - one uint per chunk, set atomically when pixels move
+layout(std430, binding = 3) coherent buffer DirtyChunks {
+    uint dirty_chunks[];
+};
+
 uniform int u_phase;
 uniform int u_grid_width;
 uniform int u_grid_height;
 uniform uint u_frame;
 uniform uint u_pixel_size;  // bytes per pixel (4 for basic, more for extended)
+
+// Chunk tracking uniforms
+uniform int u_chunk_size_x;
+uniform int u_chunk_size_y;
+uniform int u_num_chunks_x;
 
 // Material ID uniforms (avoids hardcoded magic numbers)
 uniform uint u_mat_water;
@@ -66,6 +76,36 @@ uint hash(uvec3 v) {
     return h ^ (h >> 16);
 }
 
+// Mark the chunk containing pixel position (px, py) as dirty.
+// Uses atomicOr for thread-safe flag setting without race conditions.
+void markChunkDirty(ivec2 pixel_pos) {
+    int cx = pixel_pos.x / u_chunk_size_x;
+    int cy = pixel_pos.y / u_chunk_size_y;
+    int chunk_idx = cy * u_num_chunks_x + cx;
+    atomicOr(dirty_chunks[chunk_idx], 1u);
+}
+
+// Mark the chunk containing a 2x2 block as dirty (block_base is top-left corner)
+void markBlockChunksDirty(ivec2 block_base) {
+    // A 2x2 block can span up to 4 chunks at chunk boundaries.
+    // Mark all potentially affected chunks.
+    int cx0 = block_base.x / u_chunk_size_x;
+    int cy0 = block_base.y / u_chunk_size_y;
+    int cx1 = (block_base.x + 1) / u_chunk_size_x;
+    int cy1 = (block_base.y + 1) / u_chunk_size_y;
+
+    atomicOr(dirty_chunks[cy0 * u_num_chunks_x + cx0], 1u);
+    if (cx1 != cx0) atomicOr(dirty_chunks[cy0 * u_num_chunks_x + cx1], 1u);
+    if (cy1 != cy0) atomicOr(dirty_chunks[cy1 * u_num_chunks_x + cx0], 1u);
+    if (cx1 != cx0 && cy1 != cy0) atomicOr(dirty_chunks[cy1 * u_num_chunks_x + cx1], 1u);
+}
+
+// Fast category access using cached pixel.g (already stored during init/setMaterial)
+// This avoids the SSBO lookup in getCategory(pixel.r)
+uint getCategoryFast(uvec4 pixel) {
+    return pixel.g;
+}
+
 // ---- Direct contact reaction for specific material pairs ----
 // Returns true if a reaction occurred.
 bool tryContactReact(inout uvec4 a, inout uvec4 b, uint rng) {
@@ -102,8 +142,9 @@ bool tryReact(inout uvec4 a, inout uvec4 b, uint rng) {
     uint matA = a.r, matB = b.r;
     if (matA == matB) return false;
 
-    uint catA = getCategory(matA);
-    uint catB = getCategory(matB);
+    // Use cached category from pixel.g (faster than SSBO lookup)
+    uint catA = getCategoryFast(a);
+    uint catB = getCategoryFast(b);
 
     // Skip if either cell is air
     if (catA == CAT_EMPTY || catB == CAT_EMPTY) return false;
@@ -173,8 +214,9 @@ bool tryReact(inout uvec4 a, inout uvec4 b, uint rng) {
 // ---- Gravity swap: A is above, B is below ----
 // Falls into empty space, and powders sink through liquids.
 bool trySwapGravity(inout uvec4 a, inout uvec4 b) {
-    uint catA = getCategory(a.r);
-    uint catB = getCategory(b.r);
+    // Use cached category from pixel.g (faster than SSBO lookup)
+    uint catA = getCategoryFast(a);
+    uint catB = getCategoryFast(b);
 
     // Powder/liquid falls into empty
     if ((catA == CAT_POWDER || catA == CAT_LIQUID) && catB == CAT_EMPTY) {
@@ -216,6 +258,27 @@ void main() {
     uvec4 bl = loadPixel(block_base + ivec2(0, 1));
     uvec4 br = loadPixel(block_base + ivec2(1, 1));
 
+    // ---- EARLY-OUT: Skip processing if all pixels are empty or static ----
+    // These blocks cannot change, so we can write them unchanged immediately.
+    uint cat_tl = getCategoryFast(tl);
+    uint cat_tr = getCategoryFast(tr);
+    uint cat_bl = getCategoryFast(bl);
+    uint cat_br = getCategoryFast(br);
+
+    bool tl_static = (cat_tl == CAT_EMPTY || cat_tl == CAT_STATIC);
+    bool tr_static = (cat_tr == CAT_EMPTY || cat_tr == CAT_STATIC);
+    bool bl_static = (cat_bl == CAT_EMPTY || cat_bl == CAT_STATIC);
+    bool br_static = (cat_br == CAT_EMPTY || cat_br == CAT_STATIC);
+
+    if (tl_static && tr_static && bl_static && br_static) {
+        // All pixels are immobile - write unchanged and skip all physics
+        storePixel(block_base + ivec2(0, 0), tl);
+        storePixel(block_base + ivec2(1, 0), tr);
+        storePixel(block_base + ivec2(0, 1), bl);
+        storePixel(block_base + ivec2(1, 1), br);
+        return;
+    }
+
     // Single base hash, derive variants via XOR (cheaper than multiple hash() calls)
     uint base_rng = hash(uvec3(block_base, u_frame * 4u + u_phase));
     uint rng = base_rng;
@@ -231,70 +294,143 @@ void main() {
     tryReact(tr, bl, react_rng >> 10u);
 
     // ---- PASS 2: Gravity (vertical, heavy sinks) ----
-    trySwapGravity(tl, bl);
-    trySwapGravity(tr, br);
+    // Track if any movement occurred to mark chunks dirty
+    bool moved = false;
+
+    if (trySwapGravity(tl, bl)) moved = true;
+    if (trySwapGravity(tr, br)) moved = true;
 
     // ---- PASS 3: Diagonal slide for powders ----
+    // Re-read categories after potential swaps
+    cat_tl = getCategoryFast(tl);
+    cat_tr = getCategoryFast(tr);
+    cat_bl = getCategoryFast(bl);
+    cat_br = getCategoryFast(br);
+
     if ((rng & 2u) != 0u) {
-        if (getCategory(tl.r) == CAT_POWDER && getCategory(br.r) == CAT_EMPTY) {
+        if (cat_tl == CAT_POWDER && cat_br == CAT_EMPTY) {
             uvec4 tmp = tl; tl = br; br = tmp;
+            moved = true;
         }
-        if (getCategory(tr.r) == CAT_POWDER && getCategory(bl.r) == CAT_EMPTY) {
+        // Re-read after potential swap
+        cat_tr = getCategoryFast(tr);
+        cat_bl = getCategoryFast(bl);
+        if (cat_tr == CAT_POWDER && cat_bl == CAT_EMPTY) {
             uvec4 tmp = tr; tr = bl; bl = tmp;
+            moved = true;
         }
     } else {
-        if (getCategory(tr.r) == CAT_POWDER && getCategory(bl.r) == CAT_EMPTY) {
+        if (cat_tr == CAT_POWDER && cat_bl == CAT_EMPTY) {
             uvec4 tmp = tr; tr = bl; bl = tmp;
+            moved = true;
         }
-        if (getCategory(tl.r) == CAT_POWDER && getCategory(br.r) == CAT_EMPTY) {
+        // Re-read after potential swap
+        cat_tl = getCategoryFast(tl);
+        cat_br = getCategoryFast(br);
+        if (cat_tl == CAT_POWDER && cat_br == CAT_EMPTY) {
             uvec4 tmp = tl; tl = br; br = tmp;
+            moved = true;
         }
     }
 
     // ---- PASS 4: Lateral spread for liquids ----
     rng = base_rng ^ 0x85EBCA6Bu;  // Derived variant for liquid spread
+    // Re-read categories
+    cat_tl = getCategoryFast(tl);
+    cat_tr = getCategoryFast(tr);
+    cat_bl = getCategoryFast(bl);
+    cat_br = getCategoryFast(br);
+
     // Top row
-    if (getCategory(tl.r) == CAT_LIQUID && getCategory(tr.r) == CAT_EMPTY && (rng & 1u) == 0u) {
+    if (cat_tl == CAT_LIQUID && cat_tr == CAT_EMPTY && (rng & 1u) == 0u) {
         uvec4 tmp = tl; tl = tr; tr = tmp;
-    } else if (getCategory(tr.r) == CAT_LIQUID && getCategory(tl.r) == CAT_EMPTY && (rng & 1u) == 0u) {
+        moved = true;
+    } else if (cat_tr == CAT_LIQUID && cat_tl == CAT_EMPTY && (rng & 1u) == 0u) {
         uvec4 tmp = tl; tl = tr; tr = tmp;
+        moved = true;
     }
     // Bottom row
-    if (getCategory(bl.r) == CAT_LIQUID && getCategory(br.r) == CAT_EMPTY && (rng & 4u) == 0u) {
+    cat_bl = getCategoryFast(bl);
+    cat_br = getCategoryFast(br);
+    if (cat_bl == CAT_LIQUID && cat_br == CAT_EMPTY && (rng & 4u) == 0u) {
         uvec4 tmp = bl; bl = br; br = tmp;
-    } else if (getCategory(br.r) == CAT_LIQUID && getCategory(bl.r) == CAT_EMPTY && (rng & 4u) == 0u) {
+        moved = true;
+    } else if (cat_br == CAT_LIQUID && cat_bl == CAT_EMPTY && (rng & 4u) == 0u) {
         uvec4 tmp = bl; bl = br; br = tmp;
+        moved = true;
     }
 
     // ---- PASS 5: Gas rises ----
     rng = base_rng ^ 0xC2B2AE35u;  // Derived variant for gas movement
+    // Re-read categories
+    cat_tl = getCategoryFast(tl);
+    cat_tr = getCategoryFast(tr);
+    cat_bl = getCategoryFast(bl);
+    cat_br = getCategoryFast(br);
+
     // Gas rises (swap upward if above is empty or non-gas mobile)
-    if (getCategory(bl.r) == CAT_GAS && (getCategory(tl.r) == CAT_EMPTY ||
-        (isMobile(getCategory(tl.r)) && getCategory(tl.r) != CAT_GAS)) && (rng & 3u) != 0u) {
+    if (cat_bl == CAT_GAS && (cat_tl == CAT_EMPTY ||
+        (isMobile(cat_tl) && cat_tl != CAT_GAS)) && (rng & 3u) != 0u) {
         uvec4 tmp = tl; tl = bl; bl = tmp;
+        moved = true;
     }
-    if (getCategory(br.r) == CAT_GAS && (getCategory(tr.r) == CAT_EMPTY ||
-        (isMobile(getCategory(tr.r)) && getCategory(tr.r) != CAT_GAS)) && (rng & 12u) != 0u) {
+    cat_tr = getCategoryFast(tr);
+    cat_br = getCategoryFast(br);
+    if (cat_br == CAT_GAS && (cat_tr == CAT_EMPTY ||
+        (isMobile(cat_tr) && cat_tr != CAT_GAS)) && (rng & 12u) != 0u) {
         uvec4 tmp = tr; tr = br; br = tmp;
+        moved = true;
     }
     // Gas lateral spread
-    if (getCategory(tl.r) == CAT_GAS && getCategory(tr.r) == CAT_EMPTY && (rng & 16u) != 0u) {
+    cat_tl = getCategoryFast(tl);
+    cat_tr = getCategoryFast(tr);
+    if (cat_tl == CAT_GAS && cat_tr == CAT_EMPTY && (rng & 16u) != 0u) {
         uvec4 tmp = tl; tl = tr; tr = tmp;
-    } else if (getCategory(tr.r) == CAT_GAS && getCategory(tl.r) == CAT_EMPTY && (rng & 16u) != 0u) {
+        moved = true;
+    } else if (cat_tr == CAT_GAS && cat_tl == CAT_EMPTY && (rng & 16u) != 0u) {
         uvec4 tmp = tl; tl = tr; tr = tmp;
+        moved = true;
     }
 
     // ---- PASS 6: Gas dissipation ----
-    uvec4 cells[4] = uvec4[4](tl, tr, bl, br);
-    for (int i = 0; i < 4; i++) {
-        if (getCategory(cells[i].r) == CAT_GAS) {
-            uint drng = hash(uvec3(block_base + ivec2(i & 1, i >> 1), u_frame + 999u));
-            if ((drng & 63u) == 0u) {
-                cells[i] = uvec4(0u, 0u, 128u, 0u); // dissipate to AIR
-            }
+    // Process directly without temporary array (avoid extra indirection)
+    cat_tl = getCategoryFast(tl);
+    if (cat_tl == CAT_GAS) {
+        uint drng = hash(uvec3(block_base, u_frame + 999u));
+        if ((drng & 63u) == 0u) {
+            tl = uvec4(0u, 0u, 128u, 0u); // dissipate to AIR
+            moved = true;
         }
     }
-    tl = cells[0]; tr = cells[1]; bl = cells[2]; br = cells[3];
+    cat_tr = getCategoryFast(tr);
+    if (cat_tr == CAT_GAS) {
+        uint drng = hash(uvec3(block_base + ivec2(1, 0), u_frame + 999u));
+        if ((drng & 63u) == 0u) {
+            tr = uvec4(0u, 0u, 128u, 0u);
+            moved = true;
+        }
+    }
+    cat_bl = getCategoryFast(bl);
+    if (cat_bl == CAT_GAS) {
+        uint drng = hash(uvec3(block_base + ivec2(0, 1), u_frame + 999u));
+        if ((drng & 63u) == 0u) {
+            bl = uvec4(0u, 0u, 128u, 0u);
+            moved = true;
+        }
+    }
+    cat_br = getCategoryFast(br);
+    if (cat_br == CAT_GAS) {
+        uint drng = hash(uvec3(block_base + ivec2(1, 1), u_frame + 999u));
+        if ((drng & 63u) == 0u) {
+            br = uvec4(0u, 0u, 128u, 0u);
+            moved = true;
+        }
+    }
+
+    // Mark affected chunks as dirty if any pixel moved
+    if (moved) {
+        markBlockChunksDirty(block_base);
+    }
 
     // ---- Write results ----
     storePixel(block_base + ivec2(0, 0), tl);

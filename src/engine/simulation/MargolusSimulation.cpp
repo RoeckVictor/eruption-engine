@@ -3,6 +3,7 @@
 #include "engine/graphics/RenderContext.h"
 #include "engine/core/Log.h"
 #include <glad/gl.h>
+#include <cstring>
 
 namespace engine::simulation {
 
@@ -19,7 +20,15 @@ bool MargolusSimulation::init(const MaterialSlot* slots, int mat_count,
                             int grid_width, int grid_height,
                             const char* shader_path,
                             const UniformSetupCallback& setup_uniforms,
-                            int max_material_slots) {
+                            int max_material_slots,
+                            int chunk_size_x, int chunk_size_y) {
+    m_grid_width = grid_width;
+    m_grid_height = grid_height;
+    m_chunk_size_x = chunk_size_x;
+    m_chunk_size_y = chunk_size_y;
+    m_num_chunks_x = (grid_width + chunk_size_x - 1) / chunk_size_x;
+    m_num_chunks_y = (grid_height + chunk_size_y - 1) / chunk_size_y;
+
     // Pack material slots into SSBO format.
     //
     // Bit layout per material (2 uint32s):
@@ -48,6 +57,13 @@ bool MargolusSimulation::init(const MaterialSlot* slots, int mat_count,
     m_material_ssbo.create(packed.size() * sizeof(uint32_t), packed.data(),
                            graphics::BufferUsage::StaticDraw);
 
+    // Create dirty chunks SSBO - one uint32 per chunk, initialized to 0
+    // Using StreamRead for efficient GPU->CPU readback
+    int total_chunks = m_num_chunks_x * m_num_chunks_y;
+    std::vector<uint32_t> dirty_init(total_chunks, 0);
+    m_dirty_chunks_ssbo.create(total_chunks * sizeof(uint32_t), dirty_init.data(),
+                                graphics::BufferUsage::StreamRead);
+
     if (!m_sim_shader.load_compute(shader_path)) {
         ENGINE_ERR("MargolusSimulation: Failed to load compute shader '%s'", shader_path);
         return false;
@@ -57,24 +73,30 @@ bool MargolusSimulation::init(const MaterialSlot* slots, int mat_count,
     m_sim_shader.use();
     m_sim_shader.set_int("u_grid_width", grid_width);
     m_sim_shader.set_int("u_grid_height", grid_height);
+    m_sim_shader.set_int("u_chunk_size_x", chunk_size_x);
+    m_sim_shader.set_int("u_chunk_size_y", chunk_size_y);
+    m_sim_shader.set_int("u_num_chunks_x", m_num_chunks_x);
 
     // Allow game to set custom uniforms
     if (setup_uniforms) {
         setup_uniforms(m_sim_shader);
     }
 
-    ENGINE_LOG("Margolus simulation initialized");
+    ENGINE_LOG("Margolus simulation initialized: %dx%d grid, %dx%d chunks (%d total)",
+               grid_width, grid_height, m_num_chunks_x, m_num_chunks_y, total_chunks);
     return true;
 }
 
 void MargolusSimulation::shutdown() {
     m_material_ssbo.destroy();
+    m_dirty_chunks_ssbo.destroy();
     m_sim_shader.destroy();
 }
 
 void MargolusSimulation::simulate(PixelGrid& grid, graphics::RenderContext& ctx) {
     m_sim_shader.use();
     m_material_ssbo.bind_base(2);
+    m_dirty_chunks_ssbo.bind_base(3);  // Dirty chunk flags for terrain collider optimization
 
     // Set pixel size uniform (needed by shader for SSBO access)
     m_sim_shader.set_uint("u_pixel_size", static_cast<uint32_t>(grid.pixel_size()));
@@ -100,6 +122,25 @@ void MargolusSimulation::simulate(PixelGrid& grid, graphics::RenderContext& ctx)
     }
 
     grid.increment_frame();
+}
+
+std::vector<bool> MargolusSimulation::read_and_clear_dirty_chunks() {
+    int total_chunks = m_num_chunks_x * m_num_chunks_y;
+    std::vector<uint32_t> dirty_flags(total_chunks);
+    std::vector<bool> result(total_chunks, false);
+
+    // Read dirty flags from GPU
+    if (m_dirty_chunks_ssbo.readback(0, total_chunks * sizeof(uint32_t), dirty_flags.data())) {
+        for (int i = 0; i < total_chunks; i++) {
+            result[i] = (dirty_flags[i] != 0);
+        }
+
+        // Clear dirty flags for next frame
+        std::vector<uint32_t> zeros(total_chunks, 0);
+        m_dirty_chunks_ssbo.update(0, total_chunks * sizeof(uint32_t), zeros.data());
+    }
+
+    return result;
 }
 
 } // namespace engine::simulation

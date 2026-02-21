@@ -68,6 +68,29 @@ void TerrainColliderManager::mark_dirty_region(int x, int y, int w, int h) {
     }
 }
 
+void TerrainColliderManager::apply_gpu_dirty_flags(const std::vector<bool>& dirty_flags,
+                                                     int num_chunks_x, int num_chunks_y) {
+    // Apply dirty flags from GPU simulation
+    // Only chunks where pixels actually moved are marked dirty
+    for (int cy = 0; cy < num_chunks_y; cy++) {
+        for (int cx = 0; cx < num_chunks_x; cx++) {
+            int idx = cy * num_chunks_x + cx;
+            if (idx >= static_cast<int>(dirty_flags.size())) continue;
+
+            if (dirty_flags[idx]) {
+                ChunkCoord coord{cx, cy};
+                auto it = m_terrain_chunks.find(coord);
+                if (it != m_terrain_chunks.end()) {
+                    it->second.dirty = true;
+                } else {
+                    // Create chunk entry if it doesn't exist yet
+                    m_terrain_chunks[coord].dirty = true;
+                }
+            }
+        }
+    }
+}
+
 void TerrainColliderManager::mark_dirty_near_bodies(const std::vector<PixelBody*>& bodies,
                                                       PhysicsWorld& world,
                                                       float margin) {
