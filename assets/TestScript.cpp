@@ -264,7 +264,8 @@ void TestScript::on_player_damaged(const runtime::EventData& data) {
 // Inspector GUI
 // ============================================================================
 
-void TestScript::on_inspector_gui() {
+void TestScript::on_inspector_gui(nlohmann::json& properties) {
+    (void)properties;  // TestScript shows debug info, not serializable properties
     ImGui::Text("=== TestScript Debug Info ===");
     ImGui::Separator();
 

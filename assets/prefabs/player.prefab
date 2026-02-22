@@ -4,19 +4,6 @@
         {
             "type": "engine::Transform",
             "data": { "x": 0.0, "y": 0.0 }
-        },
-        {
-            "type": "engine::gameplay::PlayerController",
-            "data": {
-                "move_accel": 1500.0,
-                "max_move_speed": 100.0,
-                "jump_velocity": -180.0,
-                "friction": 10.0
-            }
-        },
-        {
-            "type": "engine::gameplay::CameraFollower",
-            "data": { "offset_y_fraction": 0.33 }
         }
     ]
 }

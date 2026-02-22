@@ -15,8 +15,6 @@
 #include "engine/simulation/SimSurface.h"
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
-#include "engine/gameplay/PlayerController.h"
-#include "engine/gameplay/CameraFollower.h"
 #include <cmath>
 #include <unordered_map>
 

@@ -267,13 +267,27 @@ nlohmann::json SceneSerializer::serialize_entity(entt::entity entity) const {
         json["components"].push_back(comp_json);
     }
 
-    // Scripts
+    // Scripts (with properties)
     if (m_registry.all_of<runtime::ScriptComponent>(entity)) {
         const auto& sc = m_registry.get<runtime::ScriptComponent>(entity);
         if (!sc.script_types.empty()) {
             json["scripts"] = nlohmann::json::array();
-            for (const auto& type_name : sc.script_types) {
-                json["scripts"].push_back(type_name);
+            for (size_t i = 0; i < sc.script_types.size(); ++i) {
+                nlohmann::json script_json;
+                script_json["type"] = sc.script_types[i];
+
+                // Get properties from live instance (play mode) or stored data (edit mode)
+                if (i < sc.scripts.size() && sc.scripts[i]) {
+                    nlohmann::json props;
+                    sc.scripts[i]->serialize_properties(props);
+                    script_json["properties"] = props;
+                } else if (i < sc.script_properties.size()) {
+                    script_json["properties"] = sc.script_properties[i];
+                } else {
+                    script_json["properties"] = nlohmann::json::object();
+                }
+
+                json["scripts"].push_back(script_json);
             }
         }
     }
@@ -427,11 +441,19 @@ entt::entity SceneSerializer::deserialize_entity(const nlohmann::json& json, ent
         m_registry.emplace<engine::Transform>(entity);
     }
 
-    // Scripts
+    // Scripts (with properties)
     if (json.contains("scripts") && json["scripts"].is_array()) {
         auto& sc = m_registry.emplace<runtime::ScriptComponent>(entity);
-        for (const auto& name : json["scripts"]) {
-            sc.script_types.push_back(name.get<std::string>());
+        for (const auto& script_json : json["scripts"]) {
+            if (!script_json.is_object()) continue;
+
+            std::string type_name = script_json.value("type", "");
+            nlohmann::json properties = script_json.value("properties", nlohmann::json::object());
+
+            if (!type_name.empty()) {
+                sc.script_types.push_back(type_name);
+                sc.script_properties.push_back(properties);
+            }
         }
     }
 

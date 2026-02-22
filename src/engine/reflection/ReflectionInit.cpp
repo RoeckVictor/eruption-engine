@@ -11,8 +11,6 @@
 #include "engine/simulation/PixelGridComponent.h"
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
-#include "engine/gameplay/PlayerController.h"
-#include "engine/gameplay/CameraFollower.h"
 #include "engine/simulation/SimSurface.h"
 #include "engine/core/Logger.h"
 #include "ReflectionMacros.h"
@@ -192,22 +190,6 @@ REFLECT_TYPE_BEGIN(engine::physics::DynamicCollider)
     REFLECT_PROPERTY_RANGE(restitution, "Restitution", 0.0f, 1.0f, 0.01f)
     REFLECT_PROPERTY(generated, "Generated")
     REFLECT_PROPERTY(triangle_count, "Triangle Count")
-REFLECT_TYPE_END()
-
-// PlayerController reflection
-REFLECT_TYPE_BEGIN(engine::gameplay::PlayerController)
-    REFLECT_PROPERTY_RANGE(move_accel, "Move Acceleration", 0.0f, 5000.0f, 10.0f)
-    REFLECT_PROPERTY_RANGE(max_move_speed, "Max Move Speed", 0.0f, 500.0f, 5.0f)
-    REFLECT_PROPERTY_RANGE(jump_velocity, "Jump Velocity", -500.0f, 0.0f, 5.0f)
-    REFLECT_PROPERTY_RANGE(friction, "Friction", 0.0f, 50.0f, 0.5f)
-    REFLECT_PROPERTY(move_dir, "Move Direction")
-    REFLECT_PROPERTY(jump_pressed, "Jump Pressed")
-REFLECT_TYPE_END()
-
-// CameraFollower reflection
-REFLECT_TYPE_BEGIN(engine::gameplay::CameraFollower)
-    REFLECT_PROPERTY_RANGE(offset_y_fraction, "Vertical Offset", 0.0f, 1.0f, 0.01f)
-    REFLECT_PROPERTY(active, "Active")
 REFLECT_TYPE_END()
 
 // SimSurface reflection

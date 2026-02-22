@@ -29,8 +29,8 @@ public:
     void on_trigger_enter(const runtime::CollisionInfo& info) override;
     void on_trigger_exit(const runtime::CollisionInfo& info) override;
 
-    // Custom inspector GUI
-    void on_inspector_gui() override;
+    // Custom inspector GUI (shows debug info, not serializable properties)
+    void on_inspector_gui(nlohmann::json& properties) override;
 
 private:
     // Coroutine examples

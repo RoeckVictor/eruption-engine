@@ -157,11 +157,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(ERUPTION_INCLUDE_PATH ")" << engine_include << R"(")
 set(ERUPTION_BUILD_PATH ")" << engine_build << R"(")
 
-# Collect all script sources from Assets folder
+# Collect all script sources from project Assets folder
 file(GLOB_RECURSE SCRIPT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/../Assets/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../Assets/*.h"
 )
+
+# Also include default engine scripts from engine assets folder
+file(GLOB_RECURSE ENGINE_SCRIPT_SOURCES
+    "${ERUPTION_INCLUDE_PATH}/../assets/*.cpp"
+    "${ERUPTION_INCLUDE_PATH}/../assets/*.h"
+)
+list(APPEND SCRIPT_SOURCES ${ENGINE_SCRIPT_SOURCES})
 
 # Also include the script registry
 list(APPEND SCRIPT_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/ScriptRegistry.cpp")
@@ -181,9 +188,11 @@ add_library(GameScripts SHARED ${SCRIPT_SOURCES})
 target_include_directories(GameScripts PRIVATE
     ${ERUPTION_INCLUDE_PATH}
     ${ERUPTION_BUILD_PATH}/_deps/entt-src/src
+    ${ERUPTION_BUILD_PATH}/_deps/nlohmann_json-src/include
     ${IMGUI_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../Assets
+    ${ERUPTION_INCLUDE_PATH}/../assets
 )
 
 # Export symbols

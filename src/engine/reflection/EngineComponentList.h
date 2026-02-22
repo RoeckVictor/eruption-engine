@@ -25,6 +25,4 @@
     X(engine::physics::CapsuleCollider) \
     X(engine::physics::CircleCollider) \
     X(engine::physics::DynamicCollider) \
-    X(engine::gameplay::PlayerController) \
-    X(engine::gameplay::CameraFollower) \
     X(engine::simulation::SimSurface)

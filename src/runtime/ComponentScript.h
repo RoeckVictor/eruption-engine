@@ -5,6 +5,7 @@
 #include <vector>
 #include <cmath>
 #include <functional>
+#include <nlohmann/json.hpp>
 
 #include "engine/platform/KeyCode.h"
 #include "engine/core/Transform.h"
@@ -61,6 +62,7 @@ struct ScriptHostAPI {
     void (*set_velocity)(ScriptHostAPI*, entt::registry*, entt::entity, float vx, float vy) = nullptr;
     void (*add_force)(ScriptHostAPI*, entt::registry*, entt::entity, float fx, float fy) = nullptr;
     void (*add_impulse)(ScriptHostAPI*, entt::registry*, entt::entity, float ix, float iy) = nullptr;
+    bool (*is_grounded)(ScriptHostAPI*, entt::registry*, entt::entity, float tolerance) = nullptr;
 
     // --- Entity Operations ---
     entt::entity (*find_entity_by_name)(ScriptHostAPI*, entt::registry*, const char* name) = nullptr;
@@ -184,11 +186,26 @@ public:
     // Editor Hooks (override these for editor integration)
     // =====================================================================
 
-    /// Custom inspector GUI (called in editor only).
-    virtual void on_inspector_gui() {}
+    /// Custom inspector GUI. Called in both edit mode and play mode.
+    /// @param properties JSON object storing this script's properties (read/write).
+    /// In edit mode, changes are persisted to the scene.
+    /// In play mode, changes apply to the live instance but are discarded on stop.
+    virtual void on_inspector_gui(nlohmann::json& properties) { (void)properties; }
 
     /// Custom gizmo rendering in viewport (not yet wired — future hook).
     virtual void on_gizmo() {}
+
+    // =====================================================================
+    // Property Serialization (override these for save/load support)
+    // =====================================================================
+
+    /// Serialize script properties to JSON (for scene/prefab saving).
+    /// Override this to save your script's custom properties.
+    virtual void serialize_properties(nlohmann::json& out) const { (void)out; }
+
+    /// Deserialize script properties from JSON (for scene/prefab loading).
+    /// Override this to restore your script's custom properties.
+    virtual void deserialize_properties(const nlohmann::json& data) { (void)data; }
 
     // =====================================================================
     // Time
@@ -344,6 +361,14 @@ public:
     void add_impulse(float ix, float iy) {
         if (m_host_api && m_host_api->add_impulse)
             m_host_api->add_impulse(m_host_api, m_registry, m_entity, ix, iy);
+    }
+
+    /// Check if the entity is grounded (requires Rigidbody).
+    /// @param tolerance Distance in pixels to check below the body (default 2.0).
+    bool is_grounded(float tolerance = 2.0f) {
+        if (m_host_api && m_host_api->is_grounded)
+            return m_host_api->is_grounded(m_host_api, m_registry, m_entity, tolerance);
+        return false;
     }
 
     // =====================================================================

@@ -224,10 +224,10 @@ bool PhysicsWorld::is_grounded(b2BodyId body, float tolerance_pixels) const {
         if (std::fabs(manifold.normal.y) < 0.3f) continue;
 
         // Verify the contact point is at or below the body center.
-        // In our Y-down coordinate system, greater Y = below.
+        // Box2D uses Y-up, so lower Y = below the body center.
         for (int j = 0; j < manifold.pointCount; j++) {
             float point_y = manifold.points[j].point.y;
-            if (point_y > body_pos.y - tolerance_m) {
+            if (point_y < body_pos.y + tolerance_m) {
                 return true;
             }
         }

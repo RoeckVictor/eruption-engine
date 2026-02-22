@@ -198,9 +198,35 @@ void InspectorPanel::render_entity_inspector(entt::entity entity) {
                 ImGui::Separator();
                 ImGui::Spacing();
 
-                // During play mode, call on_inspector_gui if script instance exists
+                // Script property inspector
                 if (i < sc.scripts.size() && sc.scripts[i]) {
-                    sc.scripts[i]->on_inspector_gui();
+                    // Play mode: serialize instance to temp JSON, render inspector, apply changes back
+                    nlohmann::json temp_props;
+                    sc.scripts[i]->serialize_properties(temp_props);
+                    sc.scripts[i]->on_inspector_gui(temp_props);
+                    sc.scripts[i]->deserialize_properties(temp_props);
+                    // Note: Changes are NOT saved to script_properties, so they reset on stop
+                } else {
+                    // Edit mode: create temporary script for inspector
+                    auto* sm = m_context.script_manager();
+                    if (sm && sm->are_scripts_loaded()) {
+                        auto* temp_script = sm->dll_manager().create_script(sc.script_types[i]);
+                        if (temp_script) {
+                            // Ensure properties vector is sized
+                            while (sc.script_properties.size() <= i) {
+                                sc.script_properties.push_back(nlohmann::json::object());
+                            }
+
+                            // Call inspector (modifies the JSON directly, persisted to scene)
+                            temp_script->on_inspector_gui(sc.script_properties[i]);
+
+                            delete temp_script;
+                        } else {
+                            ImGui::TextDisabled("Script not found in DLL");
+                        }
+                    } else {
+                        ImGui::TextDisabled("Scripts not compiled (Ctrl+B)");
+                    }
                 }
             }
             ImGui::PopID();

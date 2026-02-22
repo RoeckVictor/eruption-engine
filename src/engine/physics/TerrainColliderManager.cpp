@@ -204,10 +204,10 @@ void TerrainColliderManager::update_terrain_colliders(simulation::PixelGrid& gri
                             is_settled = at_grid_bottom;
                             if (!is_settled) has_moving = true;
                         } else {
-                            // Check the pixel directly below.
+                            // Check the pixel directly below
                             // Only consider the powder settled if it rests on a solid
                             // surface (static material) or another powder that could
-                            // itself be settled.  Liquids and gases are moving materials
+                            // itself be settled. Liquids and gases are moving materials
                             // and cannot support powder for collision purposes.
                             int below_i = (ly + 1) * chunk_w + lx;
                             uint8_t below_cat = m_terrain_readback_buf[below_i * pixel_size + 1];
@@ -254,9 +254,9 @@ void TerrainColliderManager::update_terrain_colliders(simulation::PixelGrid& gri
                 //   entity_y = (grid_height - gy - origin_y) * scale_y
                 // Then convert to meters for Box2D body-local space.
                 //
-                // Reverse vertex order: marching squares produces CW winding
-                // (negative signed area in Y-down), but Box2D chain shapes
-                // require CCW winding so normals point outward.
+                // Winding note: Marching squares produces CCW in Y-down (negative signed area).
+                // The Y-flip (Y-down → Y-up) reverses winding to CW, which gives inward-facing
+                // normals for Box2D chain shapes. This is correct for terrain collision
                 std::vector<b2Vec2> chain_verts(contour.vertices.size());
                 std::vector<b2Vec2> debug_world(contour.vertices.size());
 
@@ -276,8 +276,6 @@ void TerrainColliderManager::update_terrain_colliders(simulation::PixelGrid& gri
                     debug_world[i].x = transform.world_x + local_x * e_cos - local_y * e_sin;
                     debug_world[i].y = transform.world_y + local_x * e_sin + local_y * e_cos;
                 }
-                std::reverse(chain_verts.begin(), chain_verts.end());
-                std::reverse(debug_world.begin(), debug_world.end());
 
                 // Create static body at entity's world position with entity's rotation
                 if (!b2Body_IsValid(chunk->body_id)) {
@@ -296,4 +294,4 @@ void TerrainColliderManager::update_terrain_colliders(simulation::PixelGrid& gri
     }
 }
 
-} // namespace engine::physics
+}

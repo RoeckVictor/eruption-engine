@@ -115,6 +115,15 @@ static void host_add_impulse(runtime::ScriptHostAPI* api, entt::registry* reg, e
     rt->physics_world()->apply_impulse(rb.body_id, ix, iy);
 }
 
+static bool host_is_grounded(runtime::ScriptHostAPI* api, entt::registry* reg, entt::entity entity, float tolerance) {
+    auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
+    if (!reg || !reg->valid(entity) || !rt || !rt->physics_world()) return false;
+    if (!reg->all_of<engine::physics::Rigidbody>(entity)) return false;
+    auto& rb = reg->get<engine::physics::Rigidbody>(entity);
+    if (!b2Body_IsValid(rb.body_id)) return false;
+    return rt->physics_world()->is_grounded(rb.body_id, tolerance);
+}
+
 static entt::entity host_find_entity_by_name(runtime::ScriptHostAPI* /*api*/, entt::registry* reg, const char* name) {
     if (!reg || !name) return entt::null;
     auto view = reg->view<EntityInfo>();
@@ -418,6 +427,7 @@ void RuntimeContext::init(entt::registry* editor_registry, ScriptManager* script
     m_host_api.set_velocity = &host_set_velocity;
     m_host_api.add_force = &host_add_force;
     m_host_api.add_impulse = &host_add_impulse;
+    m_host_api.is_grounded = &host_is_grounded;
     m_host_api.find_entity_by_name = &host_find_entity_by_name;
     m_host_api.destroy_entity = &host_destroy_entity;
     m_host_api.add_component = &host_add_component;
@@ -563,6 +573,10 @@ void RuntimeContext::stop() {
     m_current_contacts.clear();
     m_previous_contact_pairs.clear();
 
+    // Note: We intentionally do NOT save script properties here.
+    // Play-mode changes are temporary and should reset when stopping.
+    // The original script_properties (from edit mode) will be restored with the scene.
+
     shutdown_scripts();
     m_previously_enabled_script_entities.clear();
     m_deferred_destroys.clear();
@@ -699,10 +713,17 @@ void RuntimeContext::init_scripts() {
     for (auto entity : view) {
         auto& sc = view.get<runtime::ScriptComponent>(entity);
 
-        for (const auto& type_name : sc.script_types) {
+        for (size_t i = 0; i < sc.script_types.size(); ++i) {
+            const auto& type_name = sc.script_types[i];
             auto* script = dll.create_script(type_name);
             if (script) {
                 script->init_context(entity, m_editor_registry, m_engine, &m_host_api);
+
+                // Apply stored properties to the script instance
+                if (i < sc.script_properties.size()) {
+                    script->deserialize_properties(sc.script_properties[i]);
+                }
+
                 sc.scripts.push_back(std::unique_ptr<runtime::ComponentScript>(script));
                 script_count++;
             } else {
