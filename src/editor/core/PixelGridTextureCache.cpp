@@ -8,31 +8,24 @@
 
 namespace editor {
 
-PixelGridTextureCache::~PixelGridTextureCache() {
-    clear();
-}
-
-GLuint PixelGridTextureCache::get(entt::entity entity, const std::string& path) {
-    if (path.empty()) return 0;
+void* PixelGridTextureCache::get(entt::entity entity, const std::string& path) {
+    if (path.empty()) return nullptr;
 
     // Check cache - return existing texture if path hasn't changed
     auto it = m_cache.find(entity);
     if (it != m_cache.end()) {
         if (it->second.source_path == path) {
-            return it->second.texture_id;
+            return it->second.texture ? it->second.texture->imgui_texture_id() : nullptr;
         }
-        // Path changed - delete old texture
-        if (it->second.texture_id) {
-            glDeleteTextures(1, &it->second.texture_id);
-        }
+        // Path changed - remove old entry (texture will be destroyed automatically)
         m_cache.erase(it);
     }
 
     auto pxg_file = engine::asset::pxg_load(path);
-    if (!pxg_file) return 0;
+    if (!pxg_file) return nullptr;
 
     auto parsed = engine::asset::parse_pxg(*pxg_file);
-    if (parsed.width <= 0 || parsed.height <= 0) return 0;
+    if (parsed.width <= 0 || parsed.height <= 0) return nullptr;
 
     std::vector<uint8_t> rgba;
 
@@ -64,19 +57,16 @@ GLuint PixelGridTextureCache::get(entt::entity entity, const std::string& path) 
         }
     }
 
-    GLuint tex = 0;
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, parsed.width, parsed.height, 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    // Create texture using graphics::Texture (RHI-based)
+    auto texture = std::make_unique<engine::graphics::Texture>();
+    texture->create_2d(parsed.width, parsed.height, engine::graphics::TextureFormat::RGBA8,
+                       engine::graphics::TextureFilter::Nearest,
+                       engine::graphics::TextureWrap::ClampToEdge,
+                       rgba.data());
 
-    m_cache[entity] = Entry{tex, path, parsed.width, parsed.height};
-    return tex;
+    void* handle = texture->imgui_texture_id();
+    m_cache[entity] = Entry{ std::move(texture), path, parsed.width, parsed.height };
+    return handle;
 }
 
 void PixelGridTextureCache::cleanup(entt::registry* registry) {
@@ -92,20 +82,11 @@ void PixelGridTextureCache::cleanup(entt::registry* registry) {
     }
 
     for (auto entity : to_remove) {
-        auto& cached = m_cache[entity];
-        if (cached.texture_id) {
-            glDeleteTextures(1, &cached.texture_id);
-        }
         m_cache.erase(entity);
     }
 }
 
 void PixelGridTextureCache::clear() {
-    for (auto& [entity, cached] : m_cache) {
-        if (cached.texture_id) {
-            glDeleteTextures(1, &cached.texture_id);
-        }
-    }
     m_cache.clear();
 }
 

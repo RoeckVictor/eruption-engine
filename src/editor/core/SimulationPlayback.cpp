@@ -10,7 +10,8 @@
 #include "engine/asset/PixelGridFile.h"
 #include "engine/asset/PxgDataParser.h"
 #include "engine/render/Camera2D.h"
-#include <glad/gl.h>
+#include "engine/rhi/RHIDevice.h"
+#include "engine/rhi/RHITypes.h"
 
 namespace editor {
 
@@ -24,6 +25,9 @@ SimulationPlayback::~SimulationPlayback() {
 void SimulationPlayback::init(engine::physics::PhysicsWorld* physics_world,
                                const engine::EngineConfig& config) {
     m_physics_world = physics_world;
+
+    // Set up RHI context for compute shader dispatch
+    m_render_context.set_rhi_context(engine::rhi::get_current_context());
 
     if (!m_color_shader.load_compute("shaders/ssbo_to_color.comp")) {
         engine::Logger::instance().error("Runtime",
@@ -346,7 +350,7 @@ void SimulationPlayback::update(uint64_t frame_count) {
         int groups_x = (state->width + 15) / 16;
         int groups_y = (state->height + 15) / 16;
         // TEXTURE_FETCH barrier: ImGui reads this via texture sampler, not imageLoad
-        m_render_context.dispatch_compute(groups_x, groups_y, 1, GL_TEXTURE_FETCH_BARRIER_BIT);
+        m_render_context.dispatch_compute(groups_x, groups_y, 1, engine::rhi::BarrierFlags::TextureRead);
 
         // Update terrain colliders from settled pixels
         if (state->terrain_colliders && m_registry.valid(state->entity)) {
@@ -412,13 +416,13 @@ void SimulationPlayback::shutdown() {
     m_color_shader.destroy();
 }
 
-uint32_t SimulationPlayback::get_sim_texture(entt::entity entity) const {
+void* SimulationPlayback::get_sim_texture(entt::entity entity) const {
     for (const auto& state : m_surfaces) {
         if (state->entity == entity) {
-            return state->color_texture.handle();
+            return state->color_texture.imgui_texture_id();
         }
     }
-    return 0;
+    return nullptr;
 }
 
 }

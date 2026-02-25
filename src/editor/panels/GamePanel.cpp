@@ -132,7 +132,7 @@ void GamePanel::render_world_image(ImDrawList* draw_list, entt::entity entity,
     if (!image.enabled) return;
 
     int tex_width, tex_height;
-    GLuint texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
+    void* texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
 
     WorldToScreen wts(panel_pos, panel_size, cam_x, cam_y, cam_zoom);
     auto quad = compute_image_quad(transform, tex_width, tex_height, image, wts);
@@ -170,7 +170,7 @@ void GamePanel::render_screen_image(ImDrawList* draw_list, entt::entity entity,
     if (!rect.enabled || !image.enabled) return;
 
     int tex_width, tex_height;
-    GLuint texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
+    void* texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
 
     // Map screen coordinates to panel (assuming reference resolution matches panel size for now)
     // For proper scaling, we'd need to know the reference resolution
@@ -250,7 +250,7 @@ void GamePanel::render_game_view(ImVec2 panel_pos, ImVec2 panel_size) {
                 auto& renderer = registry->get<engine::render::PixelGridRenderer>(item.entity);
 
                 auto quad = compute_pixel_grid_quad(transform, grid_comp, renderer, wts);
-                GLuint grid_tex = resolve_grid_texture(
+                void* grid_tex = resolve_grid_texture(
                     item.entity, grid_comp.pixel_grid_path, m_context.runtime(), m_grid_textures);
                 draw_pixel_grid_quad(draw_list, quad, grid_tex);
                 break;

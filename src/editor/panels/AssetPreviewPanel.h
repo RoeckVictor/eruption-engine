@@ -1,8 +1,8 @@
 #pragma once
 
 #include "Panel.h"
+#include "engine/graphics/Texture.h"
 #include <string>
-#include <glad/gl.h>
 
 namespace editor {
 
@@ -30,9 +30,7 @@ private:
     std::string m_asset_type;  // "texture", "scene", "prefab", etc.
 
     // For texture preview
-    GLuint m_preview_texture = 0;
-    int m_texture_width = 0;
-    int m_texture_height = 0;
+    engine::graphics::Texture m_preview_texture;
 };
 
 } // namespace editor

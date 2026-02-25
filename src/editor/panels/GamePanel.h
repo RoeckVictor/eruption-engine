@@ -5,7 +5,6 @@
 #include "editor/render/EditorTextureCache.h"
 #include "editor/render/EditorTextRenderer.h"
 #include <imgui.h>
-#include <glad/gl.h>
 #include <entt/entt.hpp>
 #include <string>
 #include <memory>

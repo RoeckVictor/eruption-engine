@@ -1,8 +1,8 @@
 #include "engine/simulation/MargolusSimulation.h"
 #include "engine/simulation/PixelGrid.h"
 #include "engine/graphics/RenderContext.h"
+#include "engine/rhi/RHITypes.h"
 #include "engine/core/Log.h"
-#include <glad/gl.h>
 #include <cstring>
 
 namespace engine::simulation {
@@ -116,7 +116,7 @@ void MargolusSimulation::simulate(PixelGrid& grid, graphics::RenderContext& ctx)
         m_sim_shader.set_uint("u_frame", grid.frame_counter());
 
         // Dispatch with SSBO barrier (simulation writes to grid SSBO, next phase reads it)
-        ctx.dispatch_compute(dispatch_x, dispatch_y, 1, GL_SHADER_STORAGE_BARRIER_BIT);
+        ctx.dispatch_compute(dispatch_x, dispatch_y, 1, rhi::BarrierFlags::StorageBuffer);
 
         grid.swap();
     }

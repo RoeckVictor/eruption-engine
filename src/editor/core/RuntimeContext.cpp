@@ -840,8 +840,8 @@ void RuntimeContext::restore_scene() {
     m_scene_snapshot.clear();
 }
 
-uint32_t RuntimeContext::get_sim_texture(entt::entity entity) const {
-    return m_sim_playback ? m_sim_playback->get_sim_texture(entity) : 0;
+void* RuntimeContext::get_sim_texture(entt::entity entity) const {
+    return m_sim_playback ? m_sim_playback->get_sim_texture(entity) : nullptr;
 }
 
 const std::vector<std::unique_ptr<SimSurfaceState>>& RuntimeContext::sim_surfaces() const {

@@ -12,7 +12,6 @@
 #include "editor/core/EditorComponents.h"
 
 #include <imgui.h>
-#include <glad/gl.h>
 #include <entt/entt.hpp>
 #include <cstdint>
 #include <cmath>
@@ -87,10 +86,10 @@ inline PixelGridQuad compute_pixel_grid_quad(
     return quad;
 }
 
-inline void draw_pixel_grid_quad(ImDrawList* draw_list, const PixelGridQuad& quad, GLuint texture_id) {
-    if (texture_id != 0) {
+inline void draw_pixel_grid_quad(ImDrawList* draw_list, const PixelGridQuad& quad, void* texture_handle) {
+    if (texture_handle != nullptr) {
         draw_list->AddImageQuad(
-            (ImTextureID)(uintptr_t)texture_id,
+            (ImTextureID)(uintptr_t)texture_handle,
             quad.corners[0], quad.corners[1], quad.corners[2], quad.corners[3],
             ImVec2(0, 0), ImVec2(1, 0), ImVec2(1, 1), ImVec2(0, 1),
             quad.tint
@@ -111,14 +110,14 @@ inline void draw_selection_outline(ImDrawList* draw_list, const PixelGridQuad& q
     );
 }
 
-// Resolve the GL texture for a pixel grid entity.
+// Resolve the texture handle for a pixel grid entity.
 // Prefers the live simulation texture (during play mode), falling back to the
 // cached static texture loaded from the .pxg file on disk.
-inline GLuint resolve_grid_texture(entt::entity entity,
-                                    const std::string& pxg_path,
-                                    RuntimeContext* runtime,
-                                    PixelGridTextureCache& cache) {
-    GLuint tex = runtime ? runtime->get_sim_texture(entity) : 0;
+inline void* resolve_grid_texture(entt::entity entity,
+                                   const std::string& pxg_path,
+                                   RuntimeContext* runtime,
+                                   PixelGridTextureCache& cache) {
+    void* tex = runtime ? runtime->get_sim_texture(entity) : nullptr;
     return tex ? tex : cache.get(entity, pxg_path);
 }
 
@@ -185,9 +184,9 @@ inline ImageQuad compute_image_quad(
     return quad;
 }
 
-inline void draw_image_quad(ImDrawList* draw_list, const ImageQuad& quad, GLuint texture_id) {
+inline void draw_image_quad(ImDrawList* draw_list, const ImageQuad& quad, void* texture_handle) {
     draw_list->AddImageQuad(
-        (ImTextureID)(uintptr_t)texture_id,
+        (ImTextureID)(uintptr_t)texture_handle,
         quad.corners[0], quad.corners[1], quad.corners[2], quad.corners[3],
         ImVec2(quad.uv.u0, quad.uv.v0),
         ImVec2(quad.uv.u1, quad.uv.v0),

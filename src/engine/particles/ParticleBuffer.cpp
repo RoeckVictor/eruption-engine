@@ -1,6 +1,5 @@
 #include "engine/particles/ParticleBuffer.h"
 #include "engine/core/Log.h"
-#include <glad/gl.h>
 #include <algorithm>
 #include <cstring>
 
@@ -62,19 +61,10 @@ void ParticleBuffer::reclaim_dead() {
 
     // Read back the dead count from offset 0
     uint32_t dead_count = 0;
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_dead_list_ssbo.handle());
-    glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(uint32_t), &dead_count);
-
-#ifndef NDEBUG
-    {
-        GLenum err = glGetError();
-        if (err != GL_NO_ERROR) {
-            ENGINE_ERR("GL error 0x%X reading dead count from SSBO", err);
-            glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-            return;
-        }
+    if (!m_dead_list_ssbo.readback(0, sizeof(uint32_t), &dead_count)) {
+        ENGINE_ERR("Failed to read dead count from SSBO");
+        return;
     }
-#endif
 
     if (dead_count > 0) {
         // Clamp to avoid buffer overrun
@@ -84,26 +74,21 @@ void ParticleBuffer::reclaim_dead() {
 
         // Read back dead indices
         std::vector<uint32_t> dead_indices(dead_count);
-        glGetBufferSubData(GL_SHADER_STORAGE_BUFFER,
-                           sizeof(uint32_t),
-                           dead_count * sizeof(uint32_t),
-                           dead_indices.data());
-
-        // Add dead indices back to free list
-        for (uint32_t idx : dead_indices) {
-            if (static_cast<int>(idx) < m_max_particles) {
-                m_free_list.push_back(static_cast<int>(idx));
+        if (m_dead_list_ssbo.readback(sizeof(uint32_t),
+                                       dead_count * sizeof(uint32_t),
+                                       dead_indices.data())) {
+            // Add dead indices back to free list
+            for (uint32_t idx : dead_indices) {
+                if (static_cast<int>(idx) < m_max_particles) {
+                    m_free_list.push_back(static_cast<int>(idx));
+                }
             }
         }
     }
-
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
 
 void ParticleBuffer::flush_spawns() {
     if (m_spawn_queue.empty()) return;
-
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_particle_ssbo.handle());
 
     for (const auto& req : m_spawn_queue) {
         if (m_free_list.empty()) break; // No free slots
@@ -122,10 +107,9 @@ void ParticleBuffer::flush_spawns() {
         p._pad = 0.0f;
 
         size_t offset = static_cast<size_t>(slot) * sizeof(GpuParticle);
-        glBufferSubData(GL_SHADER_STORAGE_BUFFER, offset, sizeof(GpuParticle), &p);
+        m_particle_ssbo.update(offset, sizeof(GpuParticle), &p);
     }
 
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
     m_spawn_queue.clear();
 }
 
@@ -139,9 +123,7 @@ void ParticleBuffer::bind_dead_list() const {
 
 void ParticleBuffer::reset_dead_counter() {
     uint32_t zero = 0;
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_dead_list_ssbo.handle());
-    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(uint32_t), &zero);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+    m_dead_list_ssbo.update(0, sizeof(uint32_t), &zero);
 }
 
 } // namespace engine::particles

@@ -8,7 +8,8 @@
 #include "engine/render/Image.h"
 #include "engine/asset/AssetDatabase.h"
 #include "engine/asset/loaders/TextureLoader.h"
-#include <glad/gl.h>
+#include "engine/rhi/RHIDevice.h"
+#include "engine/rhi/RHIContext.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -33,7 +34,13 @@ bool ImageRenderSystem::init(Engine& engine) {
         return false;
     }
 
-    // Create quad VAO/VBO
+    auto* device = rhi::get_current_device();
+    if (!device) {
+        Logger::instance().error("ImageRender", "No RHI device available");
+        return false;
+    }
+
+    // Create quad VBO
     // Vertices: position (x, y), UV (u, v), color (r, g, b, a)
     float quad_vertices[] = {
         // pos      // uv       // color
@@ -45,44 +52,63 @@ bool ImageRenderSystem::init(Engine& engine) {
         0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
     };
 
-    glGenVertexArrays(1, &m_quad_vao);
-    glGenBuffers(1, &m_quad_vbo);
+    rhi::BufferDesc vbo_desc{};
+    vbo_desc.type = rhi::BufferType::Vertex;
+    vbo_desc.usage = rhi::BufferUsage::Dynamic;
+    vbo_desc.size = sizeof(quad_vertices);
+    vbo_desc.initial_data = quad_vertices;
+    m_quad_vbo = device->create_buffer(vbo_desc);
+    if (!m_quad_vbo || !m_quad_vbo->valid()) {
+        Logger::instance().error("ImageRender", "Failed to create quad VBO");
+        m_shader.destroy();
+        return false;
+    }
 
-    glBindVertexArray(m_quad_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_quad_vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(quad_vertices), quad_vertices, GL_DYNAMIC_DRAW);
+    // Create pipeline with vertex layout: position + UV + color
+    rhi::VertexAttribute attrs[] = {
+        { 0, rhi::VertexFormat::Float2, 0, 0 },   // Position
+        { 1, rhi::VertexFormat::Float2, 8, 0 },   // UV
+        { 2, rhi::VertexFormat::Float4, 16, 0 },  // Color
+    };
+    rhi::VertexBinding bindings[] = {
+        { 0, 8 * sizeof(float), false },
+    };
 
-    // Position attribute (location 0)
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    rhi::PipelineDesc desc{};
+    desc.shader = m_shader.rhi_shader();
+    desc.topology = rhi::PrimitiveTopology::Triangles;
+    desc.attributes = attrs;
+    desc.attribute_count = 3;
+    desc.bindings = bindings;
+    desc.binding_count = 1;
 
-    // UV attribute (location 1)
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(2 * sizeof(float)));
+    // Enable alpha blending
+    desc.blend.enabled = true;
+    desc.blend.src_color = rhi::BlendFactor::SrcAlpha;
+    desc.blend.dst_color = rhi::BlendFactor::OneMinusSrcAlpha;
+    desc.blend.src_alpha = rhi::BlendFactor::One;
+    desc.blend.dst_alpha = rhi::BlendFactor::OneMinusSrcAlpha;
 
-    // Color attribute (location 2)
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(4 * sizeof(float)));
+    // No culling for 2D sprites
+    desc.rasterizer.cull_mode = rhi::CullMode::None;
 
-    glBindVertexArray(0);
+    m_pipeline = device->create_pipeline(desc);
+    if (!m_pipeline || !m_pipeline->valid()) {
+        Logger::instance().error("ImageRender", "Failed to create pipeline");
+        m_quad_vbo.reset();
+        m_shader.destroy();
+        return false;
+    }
 
     Logger::instance().info("ImageRender", "ImageRenderSystem initialized");
     return true;
 }
 
 void ImageRenderSystem::shutdown() {
+    m_pipeline.reset();
+    m_quad_vbo.reset();
     m_shader.destroy();
     m_white_texture.destroy();
-
-    if (m_quad_vao) {
-        glDeleteVertexArrays(1, &m_quad_vao);
-        m_quad_vao = 0;
-    }
-    if (m_quad_vbo) {
-        glDeleteBuffers(1, &m_quad_vbo);
-        m_quad_vbo = 0;
-    }
-
     m_texture_cache.clear();
 }
 
@@ -249,8 +275,11 @@ void ImageRenderSystem::render(Engine& engine) {
         return a.layer < b.layer;
     });
 
-    // Begin rendering
-    m_shader.use();
+    auto* ctx = rhi::get_current_context();
+    if (!ctx) return;
+
+    // Bind pipeline and set shader uniforms
+    ctx->bind_pipeline(m_pipeline.get());
 
     // Set common uniforms
     m_shader.set_vec2("u_camera_pos", m_camera->x, m_camera->y);
@@ -260,9 +289,8 @@ void ImageRenderSystem::render(Engine& engine) {
     m_shader.set_float("u_zoom", m_camera->zoom);
     m_shader.set_int("u_texture", 0);
 
-    glBindVertexArray(m_quad_vao);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    // Bind vertex buffer
+    ctx->bind_vertex_buffer(m_quad_vbo.get(), 0, 0);
 
     constexpr float DEG_TO_RAD = 3.14159265358979323846f / 180.0f;
 
@@ -271,7 +299,7 @@ void ImageRenderSystem::render(Engine& engine) {
         m_shader.set_bool("u_screen_space", item.is_screen_space);
 
         // Bind texture
-        item.texture->bind(0);
+        ctx->bind_texture(item.texture->rhi_texture(), 0);
 
         // Compute quad vertices
         float w = item.w * item.scale_x;
@@ -323,15 +351,11 @@ void ImageRenderSystem::render(Engine& engine) {
             p3x, p3y,      item.u0, item.v1,  item.r, item.g, item.b, item.a,
         };
 
-        glBindBuffer(GL_ARRAY_BUFFER, m_quad_vbo);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(quad_vertices), quad_vertices);
+        m_quad_vbo->update(0, sizeof(quad_vertices), quad_vertices);
 
         // Draw quad
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+        ctx->draw(6, 0, 1);
     }
-
-    glBindVertexArray(0);
-    glDisable(GL_BLEND);
 }
 
 } // namespace engine

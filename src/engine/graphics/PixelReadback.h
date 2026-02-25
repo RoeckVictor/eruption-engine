@@ -1,19 +1,23 @@
 #pragma once
 
-#include <cstdint>
+#include <memory>
+
+namespace engine::rhi {
+class RHIBuffer;
+}
 
 namespace engine::graphics {
 
 class Texture;
 
-/// Asynchronous GPU texture readback using double-buffered Pixel Buffer Objects.
+/// Asynchronous GPU texture readback using double-buffered staging buffers.
 ///
-/// Overlaps GPU→CPU transfer with CPU processing by using two PBOs:
+/// Overlaps GPU→CPU transfer with CPU processing by using two staging buffers:
 /// one being filled by the GPU while the other is read by the CPU.
 ///
 /// Typical workflow:
-///   Frame N:   begin() starts a non-blocking GPU→PBO transfer
-///   Frame N+1: read() maps the completed PBO and copies data to CPU
+///   Frame N:   begin() starts a non-blocking GPU→buffer transfer
+///   Frame N+1: read() maps the completed buffer and copies data to CPU
 ///
 /// The first call to read() after init returns false (no data yet).
 /// Callers should handle this with a synchronous fallback on the first frame.
@@ -25,7 +29,7 @@ public:
     PixelReadback(const PixelReadback&) = delete;
     PixelReadback& operator=(const PixelReadback&) = delete;
 
-    /// Allocate two PBOs of max_bytes each.
+    /// Allocate two staging buffers of max_bytes each.
     void init(int max_bytes);
     void shutdown();
 
@@ -37,7 +41,7 @@ public:
     void begin(const Texture& tex, int x, int y, int w, int h);
 
     /// Split region (for ring-buffer wrap): reads two texture sub-regions
-    /// into the same PBO contiguously.
+    /// into the same buffer contiguously.
     void begin_split(const Texture& tex,
                      int x1, int y1, int w1, int h1,
                      int x2, int y2, int w2, int h2);
@@ -50,11 +54,11 @@ public:
     bool has_result() const { return m_has_data[1 - m_write_idx]; }
 
 private:
-    uint32_t m_pbos[2] = {};
-    int m_write_idx = 0;        // PBO currently being written by GPU
+    std::unique_ptr<rhi::RHIBuffer> m_buffers[2];
+    int m_write_idx = 0;        // Buffer currently being written by GPU
     int m_max_bytes = 0;
-    bool m_has_data[2] = {};    // whether each PBO has valid data
-    int m_data_size[2] = {};    // bytes of valid data in each PBO
+    bool m_has_data[2] = {};    // whether each buffer has valid data
+    int m_data_size[2] = {};    // bytes of valid data in each buffer
 };
 
 } // namespace engine::graphics

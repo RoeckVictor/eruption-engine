@@ -3,9 +3,12 @@
 #include "engine/core/System.h"
 #include "engine/graphics/Shader.h"
 #include "engine/graphics/Texture.h"
+#include "engine/rhi/RHIPipeline.h"
+#include "engine/rhi/RHIBuffer.h"
 #include <entt/fwd.hpp>
 #include <unordered_map>
 #include <cstdint>
+#include <memory>
 
 namespace engine {
 
@@ -14,6 +17,7 @@ class PixelGridLoaderSystem;
 namespace render { struct Camera2D; }
 namespace simulation { struct PixelGridComponent; class MaterialLibrary; }
 namespace render { struct PixelGridRenderer; }
+namespace rhi { class RHITexture; }
 
 /// Renders entities with PixelGridRenderer + PixelGridComponent.
 ///
@@ -34,13 +38,13 @@ public:
     void set_loader(PixelGridLoaderSystem* loader) { m_loader = loader; }
 
     /// Set a texture override for an entity (e.g. from a live simulation).
-    /// The override is a raw GL texture handle — caller retains ownership.
-    /// Pass 0 to clear the override.
-    void set_texture_override(entt::entity entity, uint32_t gl_handle) {
-        if (gl_handle == 0)
+    /// The override is an RHI texture — caller retains ownership.
+    /// Pass nullptr to clear the override.
+    void set_texture_override(entt::entity entity, const rhi::RHITexture* texture) {
+        if (texture == nullptr)
             m_texture_overrides.erase(entity);
         else
-            m_texture_overrides[entity] = gl_handle;
+            m_texture_overrides[entity] = texture;
     }
 
 private:
@@ -50,14 +54,14 @@ private:
     simulation::MaterialLibrary* m_material_lib = nullptr;  // Cached for legacy palette fallback
 
     graphics::Shader m_sprite_shader;
-    uint32_t m_quad_vao = 0;
-    uint32_t m_quad_vbo = 0;
+    std::unique_ptr<rhi::RHIPipeline> m_pipeline;
+    std::unique_ptr<rhi::RHIBuffer> m_quad_vbo;
 
     // Texture cache (entity → texture)
     std::unordered_map<entt::entity, graphics::Texture> m_cached_textures;
 
-    // External texture overrides (e.g. simulation textures) — raw GL handles, not owned
-    std::unordered_map<entt::entity, uint32_t> m_texture_overrides;
+    // External texture overrides (e.g. simulation textures) — not owned
+    std::unordered_map<entt::entity, const rhi::RHITexture*> m_texture_overrides;
 
     void ensure_texture_for_entity(entt::entity entity, const simulation::PixelGridComponent& grid_comp);
 

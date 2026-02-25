@@ -10,9 +10,11 @@
 #include "engine/asset/AssetDatabase.h"
 #include "engine/scene/SceneManager.h"
 #include "engine/core/Logger.h"
+#include "engine/rhi/RHIDevice.h"
 #include <any>
 #include <optional>
 #include <stdexcept>
+#include <memory>
 
 namespace engine {
 
@@ -22,6 +24,7 @@ class Engine {
 public:
     Engine() = default;
     explicit Engine(const EngineConfig& cfg) : m_config(cfg) {}
+    ~Engine();  // Defined in .cpp where RHIDevice is complete
 
     Engine(const Engine&) = delete;
     Engine& operator=(const Engine&) = delete;
@@ -42,6 +45,13 @@ public:
     const platform::Timer& timer() const { return m_timer; }
     graphics::RenderContext& render_context() { return m_render_context; }
     const graphics::RenderContext& render_context() const { return m_render_context; }
+
+    /// Access the RHI device (for creating GPU resources)
+    rhi::RHIDevice* rhi_device() { return m_rhi_device.get(); }
+    const rhi::RHIDevice* rhi_device() const { return m_rhi_device.get(); }
+
+    /// Access the RHI context (for rendering commands)
+    rhi::RHIContext* rhi_context();
 
     EventBus& events() { return m_events; }
     asset::AssetDatabase& assets() { return m_assets; }
@@ -89,6 +99,7 @@ private:
     platform::Window m_window;
     platform::Input m_input;
     platform::Timer m_timer;
+    std::unique_ptr<rhi::RHIDevice> m_rhi_device;
     graphics::RenderContext m_render_context;
     EventBus m_events;
     asset::AssetDatabase m_assets;

@@ -1,5 +1,6 @@
 #include "engine/render/FullscreenPass.h"
-#include <glad/gl.h>
+#include "engine/rhi/RHIDevice.h"
+#include "engine/rhi/RHIContext.h"
 
 namespace engine::render {
 
@@ -8,36 +9,48 @@ FullscreenPass::~FullscreenPass() {
 }
 
 FullscreenPass::FullscreenPass(FullscreenPass&& other) noexcept
-    : m_vao(other.m_vao)
+    : m_pipeline(std::move(other.m_pipeline))
 {
-    other.m_vao = 0;
 }
 
 FullscreenPass& FullscreenPass::operator=(FullscreenPass&& other) noexcept {
     if (this != &other) {
         shutdown();
-        m_vao = other.m_vao;
-        other.m_vao = 0;
+        m_pipeline = std::move(other.m_pipeline);
     }
     return *this;
 }
 
 bool FullscreenPass::init() {
-    glGenVertexArrays(1, &m_vao);
-    return m_vao != 0;
+    auto* device = rhi::get_current_device();
+    if (!device) return false;
+
+    // Create a minimal pipeline with just an empty VAO for fullscreen triangles
+    // The shader is managed separately by the caller
+    rhi::PipelineDesc desc{};
+    desc.shader = nullptr;  // No shader - caller binds their own
+    desc.topology = rhi::PrimitiveTopology::Triangles;
+    desc.attribute_count = 0;
+    desc.binding_count = 0;
+    desc.rasterizer.cull_mode = rhi::CullMode::None;
+
+    m_pipeline = device->create_pipeline(desc);
+    return m_pipeline != nullptr && m_pipeline->valid();
 }
 
 void FullscreenPass::shutdown() {
-    if (m_vao) {
-        glDeleteVertexArrays(1, &m_vao);
-        m_vao = 0;
-    }
+    m_pipeline.reset();
 }
 
 void FullscreenPass::draw() const {
-    glBindVertexArray(m_vao);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
-    glBindVertexArray(0);
+    if (!m_pipeline) return;
+
+    auto* ctx = rhi::get_current_context();
+    if (!ctx) return;
+
+    // Bind pipeline (VAO and state, shader already bound by caller)
+    ctx->bind_pipeline(m_pipeline.get());
+    ctx->draw(3, 0, 1);  // Draw fullscreen triangle
 }
 
 } // namespace engine::render

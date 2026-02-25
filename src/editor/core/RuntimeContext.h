@@ -73,7 +73,7 @@ public:
     void step_frame();
     void update(float dt);
 
-    uint32_t get_sim_texture(entt::entity entity) const;
+    void* get_sim_texture(entt::entity entity) const;
 
     float play_time() const { return m_play_time; }
     uint64_t frame_count() const { return m_frame_count; }

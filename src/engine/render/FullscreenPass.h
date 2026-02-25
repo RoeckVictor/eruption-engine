@@ -1,8 +1,12 @@
 #pragma once
+#include "engine/rhi/RHIPipeline.h"
 #include <cstdint>
+#include <memory>
 
 namespace engine::render {
 
+/// Utility class for drawing a fullscreen triangle.
+/// The caller is responsible for binding the shader and setting uniforms.
 class FullscreenPass {
 public:
     FullscreenPass() = default;
@@ -18,7 +22,7 @@ public:
     void draw() const;
 
 private:
-    uint32_t m_vao = 0;
+    std::unique_ptr<rhi::RHIPipeline> m_pipeline;
 };
 
 } // namespace engine::render

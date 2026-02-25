@@ -1,37 +1,46 @@
 #include "engine/graphics/Texture.h"
-#include "engine/graphics/GLFormatInfo.h"
+#include "engine/rhi/RHI.h"
 #include "engine/core/Log.h"
-#include <glad/gl.h>
 
 namespace engine::graphics {
 
-using detail::GLFormatInfo;
-using detail::gl_format;
-
 namespace {
 
-GLenum gl_filter(TextureFilter f) {
-    switch (f) {
-        case TextureFilter::Nearest: return GL_NEAREST;
-        case TextureFilter::Linear:  return GL_LINEAR;
-    }
-    return GL_NEAREST;
-}
-
-GLenum gl_wrap(TextureWrap w) {
-    switch (w) {
-        case TextureWrap::ClampToEdge: return GL_CLAMP_TO_EDGE;
-        case TextureWrap::Repeat:      return GL_REPEAT;
-    }
-    return GL_CLAMP_TO_EDGE;
-}
-
-GLenum gl_image_format(TextureFormat fmt) {
+// Convert graphics TextureFormat to RHI TextureFormat
+rhi::TextureFormat to_rhi_format(TextureFormat fmt) {
     switch (fmt) {
-        case TextureFormat::RGBA8:   return GL_RGBA8;
-        case TextureFormat::RGBA8UI: return GL_RGBA8UI;
+        case TextureFormat::RGBA8:   return rhi::TextureFormat::RGBA8;
+        case TextureFormat::RGBA8UI: return rhi::TextureFormat::RGBA8UI;
+        default:                     return rhi::TextureFormat::RGBA8;
     }
-    return GL_RGBA8;
+}
+
+// Convert graphics TextureFilter to RHI TextureFilter
+rhi::TextureFilter to_rhi_filter(TextureFilter f) {
+    switch (f) {
+        case TextureFilter::Nearest: return rhi::TextureFilter::Nearest;
+        case TextureFilter::Linear:  return rhi::TextureFilter::Linear;
+        default:                     return rhi::TextureFilter::Nearest;
+    }
+}
+
+// Convert graphics TextureWrap to RHI TextureWrap
+rhi::TextureWrap to_rhi_wrap(TextureWrap w) {
+    switch (w) {
+        case TextureWrap::ClampToEdge: return rhi::TextureWrap::Clamp;
+        case TextureWrap::Repeat:      return rhi::TextureWrap::Repeat;
+        default:                       return rhi::TextureWrap::Clamp;
+    }
+}
+
+// Convert graphics ImageAccess to RHI ImageAccess
+rhi::ImageAccess to_rhi_access(ImageAccess a) {
+    switch (a) {
+        case ImageAccess::ReadOnly:  return rhi::ImageAccess::ReadOnly;
+        case ImageAccess::WriteOnly: return rhi::ImageAccess::WriteOnly;
+        case ImageAccess::ReadWrite: return rhi::ImageAccess::ReadWrite;
+        default:                     return rhi::ImageAccess::ReadOnly;
+    }
 }
 
 } // anonymous namespace
@@ -41,30 +50,15 @@ Texture::~Texture() {
 }
 
 Texture::Texture(Texture&& other) noexcept
-    : m_handle(other.m_handle)
-    , m_width(other.m_width)
-    , m_height(other.m_height)
+    : m_texture(std::move(other.m_texture))
     , m_format(other.m_format)
-    , m_is_1d(other.m_is_1d)
 {
-    other.m_handle = 0;
-    other.m_width = 0;
-    other.m_height = 0;
-    other.m_is_1d = false;
 }
 
 Texture& Texture::operator=(Texture&& other) noexcept {
     if (this != &other) {
-        destroy();
-        m_handle = other.m_handle;
-        m_width = other.m_width;
-        m_height = other.m_height;
+        m_texture = std::move(other.m_texture);
         m_format = other.m_format;
-        m_is_1d = other.m_is_1d;
-        other.m_handle = 0;
-        other.m_width = 0;
-        other.m_height = 0;
-        other.m_is_1d = false;
     }
     return *this;
 }
@@ -80,33 +74,31 @@ bool Texture::create_2d(int width, int height, TextureFormat format,
 
     destroy();
 
-    GLFormatInfo fi = gl_format(format);
-    GLenum min_mag = gl_filter(filter);
-    GLenum wrap_mode = gl_wrap(wrap);
-
-    glGenTextures(1, &m_handle);
-    glBindTexture(GL_TEXTURE_2D, m_handle);
-    glTexImage2D(GL_TEXTURE_2D, 0, fi.internal_format,
-                 width, height, 0,
-                 fi.pixel_format, fi.pixel_type, initial_data);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_mag);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, min_mag);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap_mode);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap_mode);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    GLenum err = glGetError();
-    if (err != GL_NO_ERROR) {
-        ENGINE_ERR("GL error 0x%X creating 2D texture (%dx%d)", err, width, height);
-        destroy();
+    auto* device = rhi::get_current_device();
+    if (!device) {
+        ENGINE_ERR("No RHI device available for texture creation");
         return false;
     }
 
-    m_width = width;
-    m_height = height;
-    m_format = format;
-    m_is_1d = false;
+    rhi::TextureDesc desc;
+    desc.width = width;
+    desc.height = height;
+    desc.depth = 1;
+    desc.dimension = rhi::TextureDimension::Tex2D;
+    desc.format = to_rhi_format(format);
+    desc.min_filter = to_rhi_filter(filter);
+    desc.mag_filter = to_rhi_filter(filter);
+    desc.wrap_u = to_rhi_wrap(wrap);
+    desc.wrap_v = to_rhi_wrap(wrap);
+    desc.initial_data = initial_data;
 
+    m_texture = device->create_texture(desc);
+    if (!m_texture || !m_texture->valid()) {
+        ENGINE_ERR("Failed to create 2D texture (%dx%d)", width, height);
+        return false;
+    }
+
+    m_format = format;
     return true;
 }
 
@@ -121,77 +113,81 @@ bool Texture::create_1d(int width, TextureFormat format,
 
     destroy();
 
-    GLFormatInfo fi = gl_format(format);
-    GLenum min_mag = gl_filter(filter);
-    GLenum wrap_mode = gl_wrap(wrap);
-
-    glGenTextures(1, &m_handle);
-    glBindTexture(GL_TEXTURE_1D, m_handle);
-    glTexImage1D(GL_TEXTURE_1D, 0, fi.internal_format,
-                 width, 0,
-                 fi.pixel_format, fi.pixel_type, initial_data);
-    glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, min_mag);
-    glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, min_mag);
-    glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, wrap_mode);
-    glBindTexture(GL_TEXTURE_1D, 0);
-
-    GLenum err = glGetError();
-    if (err != GL_NO_ERROR) {
-        ENGINE_ERR("GL error 0x%X creating 1D texture (width=%d)", err, width);
-        destroy();
+    auto* device = rhi::get_current_device();
+    if (!device) {
+        ENGINE_ERR("No RHI device available for texture creation");
         return false;
     }
 
-    m_width = width;
-    m_height = 1;
-    m_format = format;
-    m_is_1d = true;
+    rhi::TextureDesc desc;
+    desc.width = width;
+    desc.height = 1;
+    desc.depth = 1;
+    desc.dimension = rhi::TextureDimension::Tex1D;
+    desc.format = to_rhi_format(format);
+    desc.min_filter = to_rhi_filter(filter);
+    desc.mag_filter = to_rhi_filter(filter);
+    desc.wrap_u = to_rhi_wrap(wrap);
+    desc.initial_data = initial_data;
 
+    m_texture = device->create_texture(desc);
+    if (!m_texture || !m_texture->valid()) {
+        ENGINE_ERR("Failed to create 1D texture (width=%d)", width);
+        return false;
+    }
+
+    m_format = format;
     return true;
 }
 
 void Texture::destroy() {
-    if (m_handle) {
-        glDeleteTextures(1, &m_handle);
-        m_handle = 0;
-        m_width = 0;
-        m_height = 0;
-    }
+    m_texture.reset();
 }
 
 void Texture::upload_sub_2d(int x, int y, int w, int h, const void* data) {
-    GLFormatInfo fi = gl_format(m_format);
-    glBindTexture(GL_TEXTURE_2D, m_handle);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h,
-                    fi.pixel_format, fi.pixel_type, data);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    if (m_texture) {
+        m_texture->upload(x, y, w, h, data);
+    }
 }
 
 void Texture::readback_sub_2d(int x, int y, int w, int h, void* dst, int dst_size) const {
-    GLFormatInfo fi = gl_format(m_format);
-    glGetTextureSubImage(m_handle, 0,
-                         x, y, 0,
-                         w, h, 1,
-                         fi.pixel_format, fi.pixel_type,
-                         dst_size, dst);
+    if (m_texture) {
+        m_texture->readback(x, y, w, h, dst, static_cast<size_t>(dst_size));
+    }
 }
 
 void Texture::bind(int unit) const {
-    GLenum target = m_is_1d ? GL_TEXTURE_1D : GL_TEXTURE_2D;
-    glActiveTexture(GL_TEXTURE0 + unit);
-    glBindTexture(target, m_handle);
+    if (m_texture) {
+        m_texture->bind(static_cast<uint32_t>(unit));
+    }
 }
 
 void Texture::bind_as_image(int unit, ImageAccess access) const {
-    GLenum gl_access;
-    switch (access) {
-        case ImageAccess::ReadOnly:  gl_access = GL_READ_ONLY;  break;
-        case ImageAccess::WriteOnly: gl_access = GL_WRITE_ONLY; break;
-        case ImageAccess::ReadWrite: gl_access = GL_READ_WRITE; break;
-        default:                     gl_access = GL_READ_ONLY;  break;
+    if (m_texture) {
+        m_texture->bind_as_image(static_cast<uint32_t>(unit), to_rhi_access(access));
     }
-    glBindImageTexture(unit, m_handle, 0, GL_FALSE, 0,
-                       gl_access, gl_image_format(m_format));
+}
+
+void* Texture::imgui_texture_id() const {
+    if (!m_texture) return nullptr;
+    return m_texture->native_handle();
+}
+
+uint32_t Texture::handle() const {
+    if (!m_texture) return 0;
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(m_texture->native_handle()));
+}
+
+int Texture::width() const {
+    return m_texture ? m_texture->width() : 0;
+}
+
+int Texture::height() const {
+    return m_texture ? m_texture->height() : 0;
+}
+
+bool Texture::valid() const {
+    return m_texture != nullptr && m_texture->valid();
 }
 
 } // namespace engine::graphics

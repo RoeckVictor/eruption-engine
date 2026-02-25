@@ -1,7 +1,8 @@
 #include "engine/render/TexturedSpriteRenderer.h"
 #include "engine/graphics/Texture.h"
+#include "engine/rhi/RHIDevice.h"
+#include "engine/rhi/RHIContext.h"
 #include "engine/core/Log.h"
-#include <glad/gl.h>
 
 namespace engine::render {
 
@@ -11,9 +12,9 @@ TexturedSpriteRenderer::~TexturedSpriteRenderer() {
 
 TexturedSpriteRenderer::TexturedSpriteRenderer(TexturedSpriteRenderer&& other) noexcept
     : m_shader(std::move(other.m_shader))
-    , m_vao(other.m_vao)
-    , m_vbo(other.m_vbo)
-    , m_ebo(other.m_ebo)
+    , m_pipeline(std::move(other.m_pipeline))
+    , m_vbo(std::move(other.m_vbo))
+    , m_ebo(std::move(other.m_ebo))
     , m_vertices(std::move(other.m_vertices))
     , m_indices(std::move(other.m_indices))
     , m_vbo_capacity(other.m_vbo_capacity)
@@ -25,9 +26,6 @@ TexturedSpriteRenderer::TexturedSpriteRenderer(TexturedSpriteRenderer&& other) n
     , m_screen_h(other.m_screen_h)
     , m_bound_texture(other.m_bound_texture)
 {
-    other.m_vao = 0;
-    other.m_vbo = 0;
-    other.m_ebo = 0;
     other.m_vbo_capacity = 0;
     other.m_ebo_capacity = 0;
     other.m_bound_texture = nullptr;
@@ -37,9 +35,9 @@ TexturedSpriteRenderer& TexturedSpriteRenderer::operator=(TexturedSpriteRenderer
     if (this != &other) {
         shutdown();
         m_shader = std::move(other.m_shader);
-        m_vao = other.m_vao;
-        m_vbo = other.m_vbo;
-        m_ebo = other.m_ebo;
+        m_pipeline = std::move(other.m_pipeline);
+        m_vbo = std::move(other.m_vbo);
+        m_ebo = std::move(other.m_ebo);
         m_vertices = std::move(other.m_vertices);
         m_indices = std::move(other.m_indices);
         m_vbo_capacity = other.m_vbo_capacity;
@@ -50,9 +48,6 @@ TexturedSpriteRenderer& TexturedSpriteRenderer::operator=(TexturedSpriteRenderer
         m_screen_w = other.m_screen_w;
         m_screen_h = other.m_screen_h;
         m_bound_texture = other.m_bound_texture;
-        other.m_vao = 0;
-        other.m_vbo = 0;
-        other.m_ebo = 0;
         other.m_vbo_capacity = 0;
         other.m_ebo_capacity = 0;
         other.m_bound_texture = nullptr;
@@ -65,39 +60,86 @@ bool TexturedSpriteRenderer::init(const char* vert_path, const char* frag_path) 
         return false;
     }
 
-    glGenVertexArrays(1, &m_vao);
-    glGenBuffers(1, &m_vbo);
-    glGenBuffers(1, &m_ebo);
+    auto* device = rhi::get_current_device();
+    if (!device) {
+        ENGINE_ERR("TexturedSpriteRenderer::init - No RHI device available");
+        return false;
+    }
 
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
+    // Create initial vertex and index buffers
+    constexpr size_t INITIAL_VBO_SIZE = 4096 * sizeof(Vertex);
+    constexpr size_t INITIAL_EBO_SIZE = 4096 * 6 * sizeof(uint32_t);
 
-    // Position (vec2)
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-                          (void*)offsetof(Vertex, x));
+    rhi::BufferDesc vbo_desc{};
+    vbo_desc.type = rhi::BufferType::Vertex;
+    vbo_desc.usage = rhi::BufferUsage::Dynamic;
+    vbo_desc.size = INITIAL_VBO_SIZE;
+    m_vbo = device->create_buffer(vbo_desc);
+    if (!m_vbo || !m_vbo->valid()) {
+        ENGINE_ERR("TexturedSpriteRenderer::init - Failed to create VBO");
+        m_shader.destroy();
+        return false;
+    }
+    m_vbo_capacity = INITIAL_VBO_SIZE;
 
-    // UV (vec2)
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-                          (void*)offsetof(Vertex, u));
+    rhi::BufferDesc ebo_desc{};
+    ebo_desc.type = rhi::BufferType::Index;
+    ebo_desc.usage = rhi::BufferUsage::Dynamic;
+    ebo_desc.size = INITIAL_EBO_SIZE;
+    m_ebo = device->create_buffer(ebo_desc);
+    if (!m_ebo || !m_ebo->valid()) {
+        ENGINE_ERR("TexturedSpriteRenderer::init - Failed to create EBO");
+        m_vbo.reset();
+        m_shader.destroy();
+        return false;
+    }
+    m_ebo_capacity = INITIAL_EBO_SIZE;
 
-    // Color tint (vec4)
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex),
-                          (void*)offsetof(Vertex, r));
+    // Create pipeline with vertex layout: position + UV + color
+    rhi::VertexAttribute attrs[] = {
+        { 0, rhi::VertexFormat::Float2, 0, 0 },   // Position
+        { 1, rhi::VertexFormat::Float2, 8, 0 },   // UV
+        { 2, rhi::VertexFormat::Float4, 16, 0 },  // Color
+    };
+    rhi::VertexBinding bindings[] = {
+        { 0, sizeof(Vertex), false },
+    };
 
-    glBindVertexArray(0);
+    rhi::PipelineDesc desc{};
+    desc.shader = m_shader.rhi_shader();
+    desc.topology = rhi::PrimitiveTopology::Triangles;
+    desc.attributes = attrs;
+    desc.attribute_count = 3;
+    desc.bindings = bindings;
+    desc.binding_count = 1;
+
+    // Enable alpha blending
+    desc.blend.enabled = true;
+    desc.blend.src_color = rhi::BlendFactor::SrcAlpha;
+    desc.blend.dst_color = rhi::BlendFactor::OneMinusSrcAlpha;
+    desc.blend.src_alpha = rhi::BlendFactor::One;
+    desc.blend.dst_alpha = rhi::BlendFactor::OneMinusSrcAlpha;
+
+    // No depth test, no culling for 2D sprites
+    desc.rasterizer.cull_mode = rhi::CullMode::None;
+
+    m_pipeline = device->create_pipeline(desc);
+    if (!m_pipeline || !m_pipeline->valid()) {
+        ENGINE_ERR("TexturedSpriteRenderer::init - Failed to create pipeline");
+        m_ebo.reset();
+        m_vbo.reset();
+        m_shader.destroy();
+        return false;
+    }
 
     ENGINE_LOG("Textured sprite renderer initialized");
     return true;
 }
 
 void TexturedSpriteRenderer::shutdown() {
-    if (m_ebo) { glDeleteBuffers(1, &m_ebo); m_ebo = 0; }
-    if (m_vbo) { glDeleteBuffers(1, &m_vbo); m_vbo = 0; }
-    if (m_vao) { glDeleteVertexArrays(1, &m_vao); m_vao = 0; }
+    m_pipeline.reset();
+    m_ebo.reset();
+    m_vbo.reset();
     m_vbo_capacity = 0;
     m_ebo_capacity = 0;
     m_shader.destroy();
@@ -138,6 +180,10 @@ void TexturedSpriteRenderer::draw_sprite(float min_x, float min_y,
 void TexturedSpriteRenderer::end() {
     if (m_indices.empty() || !m_bound_texture) return;
 
+    auto* ctx = rhi::get_current_context();
+    if (!ctx) return;
+
+    // Update shader uniforms
     m_shader.use();
     m_shader.set_vec2("u_camera_pos", m_cam_x, m_cam_y);
     m_shader.set_vec2("u_screen_size", static_cast<float>(m_screen_w),
@@ -145,42 +191,32 @@ void TexturedSpriteRenderer::end() {
     m_shader.set_float("u_zoom", m_zoom);
     m_shader.set_int("u_texture", 0);
 
-    m_bound_texture->bind(0);
-
-    glBindVertexArray(m_vao);
-
+    // Update vertex buffer
     size_t vbo_size = m_vertices.size() * sizeof(Vertex);
-    size_t ebo_size = m_indices.size() * sizeof(uint32_t);
-
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
     if (vbo_size > m_vbo_capacity) {
-        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vbo_size),
-                     m_vertices.data(), GL_DYNAMIC_DRAW);
+        m_vbo->resize(vbo_size, m_vertices.data());
         m_vbo_capacity = vbo_size;
     } else {
-        glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(vbo_size),
-                        m_vertices.data());
+        m_vbo->update(0, vbo_size, m_vertices.data());
     }
 
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
+    // Update index buffer
+    size_t ebo_size = m_indices.size() * sizeof(uint32_t);
     if (ebo_size > m_ebo_capacity) {
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(ebo_size),
-                     m_indices.data(), GL_DYNAMIC_DRAW);
+        m_ebo->resize(ebo_size, m_indices.data());
         m_ebo_capacity = ebo_size;
     } else {
-        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(ebo_size),
-                        m_indices.data());
+        m_ebo->update(0, ebo_size, m_indices.data());
     }
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    // Bind pipeline, texture, and buffers
+    ctx->bind_pipeline(m_pipeline.get());
+    ctx->bind_texture(m_bound_texture->rhi_texture(), 0);
+    ctx->bind_vertex_buffer(m_vbo.get(), 0, 0);
+    ctx->bind_index_buffer(m_ebo.get(), 4);
 
-    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(m_indices.size()),
-                   GL_UNSIGNED_INT, nullptr);
-
-    glDisable(GL_BLEND);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
+    // Draw
+    ctx->draw_indexed(static_cast<uint32_t>(m_indices.size()), 0, 0, 1);
 
     m_bound_texture = nullptr;
 }

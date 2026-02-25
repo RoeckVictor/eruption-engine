@@ -41,14 +41,14 @@ void AssetPreviewPanel::on_gui() {
     ImGui::TextDisabled("Type: %s", m_asset_type.c_str());
     ImGui::Separator();
 
-    if (m_asset_type == "texture" && m_preview_texture != 0) {
+    if (m_asset_type == "texture" && m_preview_texture.valid()) {
         // Show texture dimensions
-        ImGui::Text("Size: %d x %d", m_texture_width, m_texture_height);
+        ImGui::Text("Size: %d x %d", m_preview_texture.width(), m_preview_texture.height());
         ImGui::Separator();
 
         // Calculate size to fit in panel while maintaining aspect ratio
         ImVec2 available = ImGui::GetContentRegionAvail();
-        float aspect = static_cast<float>(m_texture_width) / static_cast<float>(m_texture_height);
+        float aspect = static_cast<float>(m_preview_texture.width()) / static_cast<float>(m_preview_texture.height());
 
         float display_width = available.x;
         float display_height = display_width / aspect;
@@ -64,9 +64,9 @@ void AssetPreviewPanel::on_gui() {
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offset_x);
         }
 
-        // Show the texture
+        // Show the texture using backend-independent imgui_texture_id()
         ImGui::Image(
-            (ImTextureID)(uintptr_t)m_preview_texture,
+            (ImTextureID)(uintptr_t)(m_preview_texture.imgui_texture_id()),
             ImVec2(display_width, display_height),
             ImVec2(0, 0),
             ImVec2(1, 1)
@@ -141,19 +141,16 @@ void AssetPreviewPanel::load_texture(const std::string& path) {
         return;
     }
 
-    // Create OpenGL texture
-    glGenTextures(1, &m_preview_texture);
-    glBindTexture(GL_TEXTURE_2D, m_preview_texture);
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-
-    m_texture_width = width;
-    m_texture_height = height;
+    // Create texture using RHI-backed graphics::Texture
+    if (!m_preview_texture.create_2d(width, height,
+                                     engine::graphics::TextureFormat::RGBA8,
+                                     engine::graphics::TextureFilter::Linear,
+                                     engine::graphics::TextureWrap::ClampToEdge,
+                                     data)) {
+        engine::Logger::instance().warning("AssetPreview", "Failed to create texture: %s", path.c_str());
+        stbi_image_free(data);
+        return;
+    }
 
     stbi_image_free(data);
 
@@ -161,12 +158,7 @@ void AssetPreviewPanel::load_texture(const std::string& path) {
 }
 
 void AssetPreviewPanel::unload_texture() {
-    if (m_preview_texture != 0) {
-        glDeleteTextures(1, &m_preview_texture);
-        m_preview_texture = 0;
-    }
-    m_texture_width = 0;
-    m_texture_height = 0;
+    m_preview_texture.destroy();
 }
 
 } // namespace editor

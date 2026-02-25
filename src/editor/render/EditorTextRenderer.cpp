@@ -132,7 +132,7 @@ void EditorTextRenderer::render(
     // Start position adjusted for ascent (Y-down in screen space)
     float cursor_y = pos.y + atlas->ascent * render_scale;
 
-    ImTextureID tex_id = (ImTextureID)(uintptr_t)atlas->texture.handle();
+    ImTextureID tex_id = (ImTextureID)(uintptr_t)(atlas->texture.imgui_texture_id());
 
     for (const auto& line : lines) {
         // Calculate alignment offset

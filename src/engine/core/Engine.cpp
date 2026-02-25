@@ -1,8 +1,15 @@
 #include "engine/core/Engine.h"
 #include "engine/core/Application.h"
 #include "engine/core/Log.h"
+#include "engine/rhi/RHI.h"
 
 namespace engine {
+
+Engine::~Engine() = default;
+
+rhi::RHIContext* Engine::rhi_context() {
+    return m_rhi_device ? m_rhi_device->context() : nullptr;
+}
 
 bool Engine::init(const char* title, int width, int height, const char* config_file_path) {
     // Load config if provided, otherwise use defaults
@@ -23,11 +30,27 @@ bool Engine::init(const char* title, int width, int height, const char* config_f
         return false;
     }
 
-    if (!m_window.init(title, width, height)) {
+    if (!m_window.init(title, width, height, platform::GraphicsAPI::OpenGL)) {
         ENGINE_ERR("Failed to initialize window");
         platform::Window::shutdown_platform();
         return false;
     }
+
+    // Initialize RHI device (GLAD is loaded inside create_rhi_device)
+    m_rhi_device = rhi::create_rhi_device(rhi::Backend::OpenGL, platform::Window::get_gl_proc_address);
+    if (!m_rhi_device) {
+        ENGINE_ERR("Failed to initialize RHI device");
+        m_window.shutdown();
+        platform::Window::shutdown_platform();
+        return false;
+    }
+    ENGINE_LOG("RHI initialized: %s (%s)", m_rhi_device->backend_name(), m_rhi_device->renderer_name());
+
+    // Set global RHI device for graphics classes to access
+    rhi::set_current_device(m_rhi_device.get());
+
+    // Wire up legacy RenderContext to use RHI
+    m_render_context.set_rhi_context(m_rhi_device->context());
 
     m_timer.init(m_config.max_delta_time, m_config.fixed_timestep);
 
@@ -105,10 +128,13 @@ void Engine::run(Application& app) {
         }
 
         // Render: clear, render scene, then application hook
-        m_render_context.set_viewport(0, 0, m_window.width(), m_window.height());
-        m_render_context.clear(m_clear_r, m_clear_g, m_clear_b);
+        auto* ctx = m_rhi_device->context();
+        ctx->begin_frame();
+        ctx->set_viewport(0, 0, m_window.width(), m_window.height());
+        ctx->clear(m_clear_r, m_clear_g, m_clear_b);
         m_scenes.render(*this);
         app.on_render(*this);
+        ctx->end_frame();
 
         m_window.swap_buffers();
     }
@@ -120,6 +146,8 @@ void Engine::run(Application& app) {
 void Engine::shutdown() {
     m_subsystems.clear();
     m_assets.shutdown();
+    rhi::set_current_device(nullptr);  // Clear global before destroying
+    m_rhi_device.reset();  // Destroy RHI device before window
     m_window.shutdown();
     platform::Window::shutdown_platform();
     ENGINE_LOG("Engine shut down");

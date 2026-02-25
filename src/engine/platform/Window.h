@@ -9,6 +9,14 @@ namespace engine::platform {
 
 class Input; // friend
 
+/// Graphics API that the window should be configured for.
+/// This determines what GLFW hints are set during window creation.
+enum class GraphicsAPI {
+    OpenGL,     // Request OpenGL 4.5 Core context
+    Vulkan,     // No graphics context (Vulkan creates its own surface)
+    None        // No graphics context
+};
+
 class Window {
 public:
     Window() = default;
@@ -20,7 +28,9 @@ public:
     static bool init_platform();
     static void shutdown_platform();
 
-    bool init(const char* title, int width, int height);
+    /// Initialize the window for a specific graphics API.
+    /// @param api The graphics API to configure the window for
+    bool init(const char* title, int width, int height, GraphicsAPI api = GraphicsAPI::OpenGL);
     void shutdown();
     bool should_close() const;
     void set_should_close(bool close);
@@ -34,8 +44,13 @@ public:
     /// Get the window position on screen (top-left corner).
     void get_position(int& x, int& y) const;
 
-    /// Get the native GLFW window handle (for ImGui, etc.)
+    /// Get the native GLFW window handle (for ImGui, RHI surface creation, etc.)
     GLFWwindow* glfw_handle() const;
+
+    /// Get the OpenGL proc address loader function.
+    /// Use this to initialize GLAD or similar GL loaders.
+    /// Returns a function pointer with signature: void* (const char* name)
+    static void* get_gl_proc_address(const char* name);
 
     // --- Internal event handlers (public for C callback access) ---
     // These are called from GLFW callbacks in Window.cpp. Do not call directly.

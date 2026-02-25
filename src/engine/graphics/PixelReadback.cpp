@@ -1,14 +1,12 @@
 #include "engine/graphics/PixelReadback.h"
 #include "engine/graphics/Texture.h"
-#include "engine/graphics/GLFormatInfo.h"
+#include "engine/rhi/RHIDevice.h"
+#include "engine/rhi/RHIBuffer.h"
+#include "engine/rhi/RHIContext.h"
 #include "engine/core/Log.h"
-#include <glad/gl.h>
 #include <cstring>
 
 namespace engine::graphics {
-
-using detail::GLFormatInfo;
-using detail::gl_format;
 
 PixelReadback::~PixelReadback() {
     shutdown();
@@ -18,23 +16,33 @@ void PixelReadback::init(int max_bytes) {
     shutdown();
     m_max_bytes = max_bytes;
 
-    glGenBuffers(2, m_pbos);
+    auto* device = rhi::get_current_device();
+    if (!device) {
+        ENGINE_ERR("PixelReadback::init failed: no RHI device available");
+        return;
+    }
+
+    rhi::BufferDesc desc;
+    desc.type = rhi::BufferType::PixelPack;
+    desc.usage = rhi::BufferUsage::Stream;
+    desc.size = static_cast<size_t>(max_bytes);
+    desc.initial_data = nullptr;
+
     for (int i = 0; i < 2; i++) {
-        glBindBuffer(GL_PIXEL_PACK_BUFFER, m_pbos[i]);
-        glBufferData(GL_PIXEL_PACK_BUFFER, max_bytes, nullptr, GL_STREAM_READ);
+        m_buffers[i] = device->create_buffer(desc);
+        if (!m_buffers[i]) {
+            ENGINE_ERR("PixelReadback::init failed to create buffer %d", i);
+        }
         m_has_data[i] = false;
         m_data_size[i] = 0;
     }
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 
     m_write_idx = 0;
 }
 
 void PixelReadback::shutdown() {
-    if (m_pbos[0] || m_pbos[1]) {
-        glDeleteBuffers(2, m_pbos);
-        m_pbos[0] = m_pbos[1] = 0;
-    }
+    m_buffers[0].reset();
+    m_buffers[1].reset();
     m_has_data[0] = m_has_data[1] = false;
     m_data_size[0] = m_data_size[1] = 0;
     m_max_bytes = 0;
@@ -43,31 +51,30 @@ void PixelReadback::shutdown() {
 void PixelReadback::begin(const Texture& tex, int x, int y, int w, int h) {
     int bytes = w * h * 4;
     if (bytes > m_max_bytes) {
-        ENGINE_ERR("PBO readback too large: %d > %d", bytes, m_max_bytes);
+        ENGINE_ERR("PixelReadback too large: %d > %d", bytes, m_max_bytes);
         return;
     }
 
-    GLFormatInfo fi = gl_format(tex.format());
-
-    // Bind the write PBO as pack target. glGetTextureSubImage will write
-    // into the PBO instead of CPU memory (offset 0).
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, m_pbos[m_write_idx]);
-    glGetTextureSubImage(tex.handle(), 0,
-                         x, y, 0, w, h, 1,
-                         fi.pixel_format, fi.pixel_type,
-                         m_max_bytes, nullptr);
-#ifndef NDEBUG
-    GLenum err = glGetError();
-    if (err != GL_NO_ERROR) {
-        ENGINE_ERR("glGetTextureSubImage failed (GL error=0x%X)", err);
+    auto* context = rhi::get_current_context();
+    if (!context || !m_buffers[m_write_idx]) {
+        ENGINE_ERR("PixelReadback::begin failed: no context or buffer");
+        return;
     }
+
+    context->copy_texture_to_buffer(
+        tex.rhi_texture(),
+        x, y, w, h,
+        m_buffers[m_write_idx].get(),
+        0);
+
+#ifndef NDEBUG
+    context->check_error("PixelReadback::begin");
 #endif
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 
     m_has_data[m_write_idx] = true;
     m_data_size[m_write_idx] = bytes;
 
-    // Swap: next begin() writes to the other PBO
+    // Swap: next begin() writes to the other buffer
     m_write_idx = 1 - m_write_idx;
 }
 
@@ -78,29 +85,29 @@ void PixelReadback::begin_split(const Texture& tex,
     int bytes2 = w2 * h2 * 4;
     int total = bytes1 + bytes2;
     if (total > m_max_bytes) {
-        ENGINE_ERR("PBO split readback too large: %d > %d", total, m_max_bytes);
+        ENGINE_ERR("PixelReadback split too large: %d > %d", total, m_max_bytes);
         return;
     }
 
-    GLFormatInfo fi = gl_format(tex.format());
-
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, m_pbos[m_write_idx]);
+    auto* context = rhi::get_current_context();
+    if (!context || !m_buffers[m_write_idx]) {
+        ENGINE_ERR("PixelReadback::begin_split failed: no context or buffer");
+        return;
+    }
 
     // First region at offset 0
-    glGetTextureSubImage(tex.handle(), 0,
-                         x1, y1, 0, w1, h1, 1,
-                         fi.pixel_format, fi.pixel_type,
-                         m_max_bytes, nullptr);
+    context->copy_texture_to_buffer(
+        tex.rhi_texture(),
+        x1, y1, w1, h1,
+        m_buffers[m_write_idx].get(),
+        0);
 
-    // Second region immediately after the first in the PBO.
-    // When a PBO is bound, the pointer argument is treated as a byte offset into the buffer.
-    glGetTextureSubImage(tex.handle(), 0,
-                         x2, y2, 0, w2, h2, 1,
-                         fi.pixel_format, fi.pixel_type,
-                         m_max_bytes - bytes1,
-                         reinterpret_cast<void*>(static_cast<uintptr_t>(bytes1)));
-
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    // Second region immediately after the first
+    context->copy_texture_to_buffer(
+        tex.rhi_texture(),
+        x2, y2, w2, h2,
+        m_buffers[m_write_idx].get(),
+        static_cast<size_t>(bytes1));
 
     m_has_data[m_write_idx] = true;
     m_data_size[m_write_idx] = total;
@@ -111,20 +118,18 @@ void PixelReadback::begin_split(const Texture& tex,
 bool PixelReadback::read(void* dst, int dst_size) {
     int read_idx = 1 - m_write_idx;
     if (!m_has_data[read_idx]) return false;
+    if (!m_buffers[read_idx]) return false;
 
     int copy_size = m_data_size[read_idx];
     if (copy_size > dst_size) copy_size = dst_size;
 
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, m_pbos[read_idx]);
-    void* ptr = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, copy_size, GL_MAP_READ_BIT);
+    void* ptr = m_buffers[read_idx]->map_read(0, static_cast<size_t>(copy_size));
     if (ptr) {
         memcpy(dst, ptr, copy_size);
-        glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+        m_buffers[read_idx]->unmap();
     } else {
-        GLenum err = glGetError();
-        ENGINE_ERR("PBO map failed (size=%d, GL error=0x%X)", copy_size, err);
+        ENGINE_ERR("PixelReadback::read map failed (size=%d)", copy_size);
     }
-    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 
     // Mark as consumed so stale data isn't returned on subsequent reads
     m_has_data[read_idx] = false;

@@ -3,7 +3,7 @@
 #include "Panel.h"
 #include "editor/render/EditorTextureCache.h"
 #include "editor/render/EditorTextRenderer.h"
-#include <glad/gl.h>
+#include "engine/rhi/RHIFramebuffer.h"
 #include <entt/entt.hpp>
 #include <imgui.h>
 #include <string>
@@ -53,9 +53,7 @@ private:
 
     EditorContext& m_context;
 
-    GLuint m_framebuffer = 0;
-    GLuint m_texture = 0;
-    GLuint m_depth_buffer = 0;
+    std::unique_ptr<engine::rhi::RHIFramebuffer> m_framebuffer;
 
     int m_canvas_width = 0;
     int m_canvas_height = 0;

@@ -10,6 +10,8 @@
 #include "engine/render/Image.h"
 #include "engine/render/Text.h"
 #include "engine/asset/VFS.h"
+#include "engine/rhi/RHIDevice.h"
+#include "engine/rhi/RHIContext.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -83,8 +85,11 @@ void ScreenPanel::on_gui() {
     render_scene();
 
     // Display the framebuffer texture
+    ImTextureID texture_id = m_framebuffer
+        ? (ImTextureID)(uintptr_t)(m_framebuffer->color_attachment(0)->native_handle())
+        : 0;
     ImGui::Image(
-        (ImTextureID)(uintptr_t)m_texture,
+        texture_id,
         size,
         ImVec2(0, 1),
         ImVec2(1, 0)
@@ -197,45 +202,38 @@ void ScreenPanel::create_framebuffer(int width, int height) {
     m_canvas_width = width;
     m_canvas_height = height;
 
-    glGenFramebuffers(1, &m_framebuffer);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
+    auto* runtime = m_context.runtime();
+    if (!runtime) {
+        m_framebuffer_failed = true;
+        return;
+    }
 
-    glGenTextures(1, &m_texture);
-    glBindTexture(GL_TEXTURE_2D, m_texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_texture, 0);
+    auto* eng = runtime->engine();
+    if (!eng) {
+        m_framebuffer_failed = true;
+        return;
+    }
 
-    glGenRenderbuffers(1, &m_depth_buffer);
-    glBindRenderbuffer(GL_RENDERBUFFER, m_depth_buffer);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, m_depth_buffer);
+    auto* device = eng->rhi_device();
+    if (!device) {
+        m_framebuffer_failed = true;
+        return;
+    }
 
-    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    m_framebuffer = device->create_simple_framebuffer(
+        width, height,
+        engine::rhi::TextureFormat::RGBA8,
+        true
+    );
 
-    if (status != GL_FRAMEBUFFER_COMPLETE) {
-        engine::Logger::instance().error("ScreenPanel", "Framebuffer incomplete (status=0x%X)", status);
-        destroy_framebuffer();
+    if (!m_framebuffer) {
+        engine::Logger::instance().error("ScreenPanel", "Failed to create framebuffer");
         m_framebuffer_failed = true;
     }
 }
 
 void ScreenPanel::destroy_framebuffer() {
-    if (m_framebuffer) {
-        glDeleteFramebuffers(1, &m_framebuffer);
-        m_framebuffer = 0;
-    }
-    if (m_texture) {
-        glDeleteTextures(1, &m_texture);
-        m_texture = 0;
-    }
-    if (m_depth_buffer) {
-        glDeleteRenderbuffers(1, &m_depth_buffer);
-        m_depth_buffer = 0;
-    }
-
+    m_framebuffer.reset();
     m_canvas_width = 0;
     m_canvas_height = 0;
 }
@@ -245,14 +243,24 @@ void ScreenPanel::render_scene() {
         return;
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
-    glViewport(0, 0, m_canvas_width, m_canvas_height);
+    auto* runtime = m_context.runtime();
+    if (!runtime) return;
+
+    auto* eng = runtime->engine();
+    if (!eng) return;
+
+    auto* device = eng->rhi_device();
+    if (!device) return;
+
+    auto* ctx = device->context();
+    ctx->bind_framebuffer(m_framebuffer.get());
+    ctx->set_viewport(0, 0, m_canvas_width, m_canvas_height);
 
     // Dark background with subtle grid pattern suggestion
-    glClearColor(0.12f, 0.12f, 0.15f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    ctx->clear(0.12f, 0.12f, 0.15f, 1.0f);
+    ctx->clear_depth(1.0f);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    ctx->bind_framebuffer(nullptr);
 }
 
 ImVec2 ScreenPanel::screen_to_canvas(float sx, float sy, ImVec2 canvas_pos, ImVec2 canvas_size) const {
@@ -620,7 +628,7 @@ void ScreenPanel::render_image_entity(ImDrawList* draw_list, entt::entity entity
 
     // Get texture
     int tex_width, tex_height;
-    GLuint texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
+    void* texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
 
     // Compute canvas positions
     ImVec2 tl = screen_to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);

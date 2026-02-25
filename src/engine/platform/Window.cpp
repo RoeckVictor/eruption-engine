@@ -1,6 +1,5 @@
 #include "engine/platform/Window.h"
 #include "engine/core/Log.h"
-#include <glad/gl.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -173,13 +172,23 @@ void Window::shutdown_platform() {
 
 // ---- Window lifecycle ----
 
-bool Window::init(const char* title, int width, int height) {
+bool Window::init(const char* title, int width, int height, GraphicsAPI api) {
     m_width = width;
     m_height = height;
 
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    // Set GLFW hints based on graphics API
+    switch (api) {
+        case GraphicsAPI::OpenGL:
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+            glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
+            glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+            break;
+
+        case GraphicsAPI::Vulkan:
+        case GraphicsAPI::None:
+            glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+            break;
+    }
 
     auto* handle = glfwCreateWindow(width, height, title, nullptr, nullptr);
     if (!handle) {
@@ -188,21 +197,19 @@ bool Window::init(const char* title, int width, int height) {
     }
     m_handle = handle;
 
-    glfwMakeContextCurrent(handle);
+    // For OpenGL, make context current (Vulkan/None don't have a GL context)
+    if (api == GraphicsAPI::OpenGL) {
+        glfwMakeContextCurrent(handle);
+    }
+
     glfwSetWindowUserPointer(handle, this);
     glfwSetFramebufferSizeCallback(handle, glfw_framebuffer_callback);
     glfwSetScrollCallback(handle, glfw_scroll_callback);
-    set_vsync(true); // vsync on by default
 
-    int version = gladLoadGL(glfwGetProcAddress);
-    if (!version) {
-        ENGINE_ERR("Failed to load OpenGL functions");
-        glfwDestroyWindow(handle);
-        m_handle = nullptr;
-        return false;
+    if (api == GraphicsAPI::OpenGL) {
+        set_vsync(true); // vsync on by default for OpenGL
     }
 
-    ENGINE_LOG("OpenGL %d.%d loaded", GLAD_VERSION_MAJOR(version), GLAD_VERSION_MINOR(version));
     return true;
 }
 
@@ -263,6 +270,10 @@ GLFWwindow* Window::glfw_handle() const {
 
 void Window::get_position(int& x, int& y) const {
     glfwGetWindowPos(native(m_handle), &x, &y);
+}
+
+void* Window::get_gl_proc_address(const char* name) {
+    return reinterpret_cast<void*>(glfwGetProcAddress(name));
 }
 
 } // namespace engine::platform

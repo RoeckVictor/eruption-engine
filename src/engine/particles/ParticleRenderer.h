@@ -1,7 +1,9 @@
 #pragma once
 
 #include "engine/graphics/Shader.h"
+#include "engine/rhi/RHIPipeline.h"
 #include <cstdint>
+#include <memory>
 
 namespace engine::graphics { class Texture; }
 namespace engine::render { struct Camera2D; }
@@ -25,7 +27,7 @@ public:
 
 private:
     graphics::Shader m_shader;
-    uint32_t m_vao = 0;
+    std::unique_ptr<rhi::RHIPipeline> m_pipeline;
 };
 
 }

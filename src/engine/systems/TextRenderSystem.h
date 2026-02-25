@@ -6,11 +6,14 @@
 #include "engine/render/Text.h"
 #include "engine/render/TextUtilities.h"
 #include "engine/asset/AssetHandle.h"
+#include "engine/rhi/RHIPipeline.h"
+#include "engine/rhi/RHIBuffer.h"
 #include <entt/fwd.hpp>
 #include <unordered_map>
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <memory>
 
 namespace engine {
 
@@ -34,8 +37,8 @@ private:
 
     graphics::Shader m_shader;
 
-    uint32_t m_vao = 0;
-    uint32_t m_vbo = 0;
+    std::unique_ptr<rhi::RHIPipeline> m_pipeline;
+    std::unique_ptr<rhi::RHIBuffer> m_vbo;
     size_t m_vbo_capacity = 0;
 
     // Font cache: font_path -> handle (safe across hot-reloads)

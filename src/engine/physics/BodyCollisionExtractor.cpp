@@ -4,8 +4,8 @@
 #include "engine/simulation/PixelGrid.h"
 #include "engine/particles/ParticleBuffer.h"
 #include "engine/graphics/RenderContext.h"
+#include "engine/rhi/RHITypes.h"
 #include "engine/core/Log.h"
-#include <glad/gl.h>
 #include <random>
 
 namespace engine::physics {
@@ -90,7 +90,7 @@ void BodyCollisionExtractor::extract(simulation::PixelGrid& grid, graphics::Rend
     // Dispatch compute shader
     int groups_x = (m_grid_width + 15) / 16;
     int groups_y = (m_grid_height + 15) / 16;
-    ctx.dispatch_compute(groups_x, groups_y, 1, GL_SHADER_STORAGE_BARRIER_BIT);
+    ctx.dispatch_compute(groups_x, groups_y, 1, rhi::BarrierFlags::StorageBuffer);
 
     m_last_count = 0;  // Will be set after readback in spawn_particles()
 }

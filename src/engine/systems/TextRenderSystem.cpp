@@ -7,7 +7,8 @@
 #include "engine/render/Camera2D.h"
 #include "engine/asset/AssetDatabase.h"
 #include "engine/asset/loaders/DynamicFontLoader.h"
-#include <glad/gl.h>
+#include "engine/rhi/RHIDevice.h"
+#include "engine/rhi/RHIContext.h"
 #include <algorithm>
 #include <cmath>
 
@@ -25,43 +26,71 @@ bool TextRenderSystem::init(Engine& engine) {
         return false;
     }
 
-    // Create VAO/VBO for text quads (dynamic)
-    glGenVertexArrays(1, &m_vao);
-    glGenBuffers(1, &m_vbo);
+    auto* device = rhi::get_current_device();
+    if (!device) {
+        Logger::instance().error("TextRender", "No RHI device available");
+        return false;
+    }
 
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+    // Create initial VBO (will grow dynamically)
+    constexpr size_t INITIAL_VBO_SIZE = 4096 * sizeof(TextVertex);
+    rhi::BufferDesc vbo_desc{};
+    vbo_desc.type = rhi::BufferType::Vertex;
+    vbo_desc.usage = rhi::BufferUsage::Dynamic;
+    vbo_desc.size = INITIAL_VBO_SIZE;
+    vbo_desc.initial_data = nullptr;
+    m_vbo = device->create_buffer(vbo_desc);
+    if (!m_vbo || !m_vbo->valid()) {
+        Logger::instance().error("TextRender", "Failed to create VBO");
+        m_shader.destroy();
+        return false;
+    }
+    m_vbo_capacity = INITIAL_VBO_SIZE;
 
-    // Position attribute (location 0)
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(TextVertex), (void*)offsetof(TextVertex, x));
+    // Create pipeline with vertex layout: position + UV + color
+    rhi::VertexAttribute attrs[] = {
+        { 0, rhi::VertexFormat::Float2, static_cast<uint32_t>(offsetof(TextVertex, x)), 0 },   // Position
+        { 1, rhi::VertexFormat::Float2, static_cast<uint32_t>(offsetof(TextVertex, u)), 0 },   // UV
+        { 2, rhi::VertexFormat::Float4, static_cast<uint32_t>(offsetof(TextVertex, r)), 0 },   // Color
+    };
+    rhi::VertexBinding bindings[] = {
+        { 0, sizeof(TextVertex), false },
+    };
 
-    // UV attribute (location 1)
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(TextVertex), (void*)offsetof(TextVertex, u));
+    rhi::PipelineDesc desc{};
+    desc.shader = m_shader.rhi_shader();
+    desc.topology = rhi::PrimitiveTopology::Triangles;
+    desc.attributes = attrs;
+    desc.attribute_count = 3;
+    desc.bindings = bindings;
+    desc.binding_count = 1;
 
-    // Color attribute (location 2)
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(TextVertex), (void*)offsetof(TextVertex, r));
+    // Enable alpha blending
+    desc.blend.enabled = true;
+    desc.blend.src_color = rhi::BlendFactor::SrcAlpha;
+    desc.blend.dst_color = rhi::BlendFactor::OneMinusSrcAlpha;
+    desc.blend.src_alpha = rhi::BlendFactor::One;
+    desc.blend.dst_alpha = rhi::BlendFactor::OneMinusSrcAlpha;
 
-    glBindVertexArray(0);
+    // No culling for 2D sprites
+    desc.rasterizer.cull_mode = rhi::CullMode::None;
+
+    m_pipeline = device->create_pipeline(desc);
+    if (!m_pipeline || !m_pipeline->valid()) {
+        Logger::instance().error("TextRender", "Failed to create pipeline");
+        m_vbo.reset();
+        m_shader.destroy();
+        return false;
+    }
 
     Logger::instance().info("TextRender", "TextRenderSystem initialized");
     return true;
 }
 
 void TextRenderSystem::shutdown() {
+    m_pipeline.reset();
+    m_vbo.reset();
     m_shader.destroy();
-
-    if (m_vao) {
-        glDeleteVertexArrays(1, &m_vao);
-        m_vao = 0;
-    }
-    if (m_vbo) {
-        glDeleteBuffers(1, &m_vbo);
-        m_vbo = 0;
-    }
-
     m_font_cache.clear();
 }
 
@@ -413,15 +442,17 @@ void TextRenderSystem::render(Engine& engine) {
 
     // Upload vertex data
     size_t data_size = all_vertices.size() * sizeof(TextVertex);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
     if (data_size > m_vbo_capacity) {
         m_vbo_capacity = data_size * 2;
-        glBufferData(GL_ARRAY_BUFFER, m_vbo_capacity, nullptr, GL_DYNAMIC_DRAW);
+        m_vbo->resize(m_vbo_capacity, nullptr);
     }
-    glBufferSubData(GL_ARRAY_BUFFER, 0, data_size, all_vertices.data());
+    m_vbo->update(0, data_size, all_vertices.data());
 
-    // Begin rendering
-    m_shader.use();
+    auto* ctx = rhi::get_current_context();
+    if (!ctx) return;
+
+    // Bind pipeline and set shader uniforms
+    ctx->bind_pipeline(m_pipeline.get());
 
     m_shader.set_vec2("u_camera_pos", m_camera->x, m_camera->y);
     m_shader.set_vec2("u_screen_size",
@@ -430,25 +461,20 @@ void TextRenderSystem::render(Engine& engine) {
     m_shader.set_float("u_zoom", m_camera->zoom);
     m_shader.set_int("u_texture", 0);
 
-    glBindVertexArray(m_vao);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    // Bind vertex buffer
+    ctx->bind_vertex_buffer(m_vbo.get(), 0, 0);
 
     for (const auto& batch : batches) {
         m_shader.set_bool("u_screen_space", batch.is_screen_space);
 
         auto* atlas = batch.font->get_atlas(batch.font_size);
         if (atlas) {
-            atlas->texture.bind(0);
+            ctx->bind_texture(atlas->texture.rhi_texture(), 0);
         }
 
-        glDrawArrays(GL_TRIANGLES,
-                     static_cast<GLint>(batch.start_vertex),
-                     static_cast<GLsizei>(batch.vertex_count));
+        ctx->draw(static_cast<uint32_t>(batch.vertex_count),
+                  static_cast<uint32_t>(batch.start_vertex), 1);
     }
-
-    glBindVertexArray(0);
-    glDisable(GL_BLEND);
 }
 
 } // namespace engine

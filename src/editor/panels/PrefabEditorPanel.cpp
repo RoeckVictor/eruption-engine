@@ -242,7 +242,7 @@ void PrefabEditorPanel::render_viewport() {
             if (!renderer.enabled) continue;
 
             auto quad = compute_pixel_grid_quad(transform, grid_comp, renderer, wts);
-            GLuint grid_tex = m_grid_textures.get(entity, grid_comp.pixel_grid_path);
+            void* grid_tex = m_grid_textures.get(entity, grid_comp.pixel_grid_path);
             draw_pixel_grid_quad(draw_list, quad, grid_tex);
 
             if (m_main_context.is_selected(entity)) {

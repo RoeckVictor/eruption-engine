@@ -58,7 +58,7 @@ public:
     void render_particles(const engine::render::Camera2D& camera,
                           float screen_w, float screen_h);
 
-    uint32_t get_sim_texture(entt::entity entity) const;
+    void* get_sim_texture(entt::entity entity) const;
 
     const std::vector<std::unique_ptr<SimSurfaceState>>& surfaces() const { return m_surfaces; }
 

@@ -6,7 +6,7 @@
 #include "editor/render/EditorTextureCache.h"
 #include "editor/render/EditorTextRenderer.h"
 #include "editor/core/PixelGridTextureCache.h"
-#include <glad/gl.h>
+#include "engine/rhi/RHIFramebuffer.h"
 #include <entt/entt.hpp>
 #include <imgui.h>
 #include <string>
@@ -44,9 +44,7 @@ private:
     GizmoRenderer m_gizmo_renderer;
     PixelGridTextureCache m_grid_textures;
 
-    GLuint m_framebuffer = 0;
-    GLuint m_texture = 0;
-    GLuint m_depth_buffer = 0;
+    std::unique_ptr<engine::rhi::RHIFramebuffer> m_framebuffer;
 
     int m_viewport_width = 0;
     int m_viewport_height = 0;

@@ -1,11 +1,12 @@
 #pragma once
 #include <cstdint>
-#include <filesystem>
-#include <string>
-#include <unordered_map>
+#include <memory>
+#include "engine/rhi/RHIShader.h"
 
 namespace engine::graphics {
 
+/// Shader wrapper that delegates to RHI
+/// @note For new code, consider using engine::rhi::RHIShader directly
 class Shader {
 public:
     Shader() = default;
@@ -36,30 +37,16 @@ public:
     void set_mat3(const char* name, const float* value, bool transpose = false) const;
     void set_mat4(const char* name, const float* value, bool transpose = false) const;
 
-    uint32_t handle() const { return m_program; }
-    bool valid() const { return m_program != 0; }
+    /// Get native handle (for legacy code that needs direct GL access)
+    uint32_t handle() const;
+    bool valid() const;
+
+    /// Get the underlying RHI shader
+    rhi::RHIShader* rhi_shader() { return m_shader.get(); }
+    const rhi::RHIShader* rhi_shader() const { return m_shader.get(); }
 
 private:
-    int get_location(const char* name) const;
-    void snapshot_times();
-    bool files_changed() const;
-
-    uint32_t m_program = 0;
-    mutable std::unordered_map<std::string, int> m_uniform_cache;
-
-    // Source paths for hot-reload
-    std::string m_vert_path;
-    std::string m_frag_path;
-    std::string m_comp_path;
-
-    using FileTime = std::filesystem::file_time_type;
-    FileTime m_vert_time{};
-    FileTime m_frag_time{};
-    FileTime m_comp_time{};
-
-    static std::string read_file(const char* path);
-    static uint32_t compile_shader(uint32_t type, const char* source, const char* path);
-    static FileTime safe_last_write(const std::string& path);
+    std::unique_ptr<rhi::RHIShader> m_shader;
 };
 
 } // namespace engine::graphics

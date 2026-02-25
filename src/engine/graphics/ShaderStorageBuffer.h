@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 #include <cstddef>
+#include <memory>
+#include "engine/rhi/RHIBuffer.h"
 
 namespace engine::graphics {
 
@@ -10,6 +12,8 @@ enum class BufferUsage {
     StreamRead,  // For readback-friendly buffers
 };
 
+/// Shader storage buffer wrapper that delegates to RHI
+/// @note For new code, consider using engine::rhi::RHIBuffer directly
 class ShaderStorageBuffer {
 public:
     ShaderStorageBuffer() = default;
@@ -32,13 +36,17 @@ public:
     /// @return true if readback succeeded
     bool readback(size_t offset, size_t size, void* dst) const;
 
-    uint32_t handle() const { return m_handle; }
-    size_t size() const { return m_size; }
-    bool valid() const { return m_handle != 0; }
+    /// Get native handle (for legacy code that needs direct GL access)
+    uint32_t handle() const;
+    size_t size() const;
+    bool valid() const;
+
+    /// Get the underlying RHI buffer
+    rhi::RHIBuffer* rhi_buffer() { return m_buffer.get(); }
+    const rhi::RHIBuffer* rhi_buffer() const { return m_buffer.get(); }
 
 private:
-    uint32_t m_handle = 0;
-    size_t m_size = 0;
+    std::unique_ptr<rhi::RHIBuffer> m_buffer;
 };
 
 } // namespace engine::graphics

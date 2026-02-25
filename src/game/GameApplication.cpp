@@ -202,8 +202,8 @@ void GameApplication::on_update(engine::Engine& engine, float dt) {
         // push them as overrides so PixelGridRenderSystem uses them instead of
         // static textures loaded from disk.
         for (const auto& sim : m_runtime->sim_surfaces()) {
-            uint32_t tex = sim->color_texture.handle();
-            if (tex != 0) {
+            auto* tex = sim->color_texture.rhi_texture();
+            if (tex) {
                 m_render_system.set_texture_override(sim->entity, tex);
             }
         }

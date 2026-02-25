@@ -4,10 +4,13 @@
 #include "engine/graphics/Shader.h"
 #include "engine/graphics/Texture.h"
 #include "engine/asset/AssetHandle.h"
+#include "engine/rhi/RHIPipeline.h"
+#include "engine/rhi/RHIBuffer.h"
 #include <entt/fwd.hpp>
 #include <unordered_map>
 #include <string>
 #include <cstdint>
+#include <memory>
 
 namespace engine {
 
@@ -33,8 +36,8 @@ private:
     graphics::Shader m_shader;
     graphics::Texture m_white_texture;  // 1x1 white pixel for solid color quads
 
-    uint32_t m_quad_vao = 0;
-    uint32_t m_quad_vbo = 0;
+    std::unique_ptr<rhi::RHIPipeline> m_pipeline;
+    std::unique_ptr<rhi::RHIBuffer> m_quad_vbo;
 
     // Texture cache: sprite_path -> handle (safe across hot-reloads)
     std::unordered_map<std::string, asset::Handle<graphics::Texture>> m_texture_cache;

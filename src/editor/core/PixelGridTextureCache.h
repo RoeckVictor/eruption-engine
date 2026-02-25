@@ -1,17 +1,19 @@
 #pragma once
 
-#include <glad/gl.h>
+#include "engine/graphics/Texture.h"
 #include <entt/entt.hpp>
 #include <string>
 #include <unordered_map>
+#include <memory>
 
 namespace editor {
 
 class PixelGridTextureCache {
 public:
-    ~PixelGridTextureCache();
+    ~PixelGridTextureCache() = default;
 
-    GLuint get(entt::entity entity, const std::string& path);
+    // Get or load a texture for a pixel grid entity
+    void* get(entt::entity entity, const std::string& path);
 
     void cleanup(entt::registry* registry);
 
@@ -19,7 +21,7 @@ public:
 
 private:
     struct Entry {
-        GLuint texture_id = 0;
+        std::unique_ptr<engine::graphics::Texture> texture;
         std::string source_path;
         int width = 0;
         int height = 0;

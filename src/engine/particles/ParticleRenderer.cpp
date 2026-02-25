@@ -2,8 +2,9 @@
 #include "engine/particles/ParticleBuffer.h"
 #include "engine/graphics/Texture.h"
 #include "engine/render/Camera2D.h"
+#include "engine/rhi/RHIDevice.h"
+#include "engine/rhi/RHIContext.h"
 #include "engine/core/Log.h"
-#include <glad/gl.h>
 
 namespace engine::particles {
 
@@ -12,8 +13,38 @@ bool ParticleRenderer::init() {
         return false;
     }
 
-    // Create empty VAO (required by GL core profile for glDrawArrays)
-    glGenVertexArrays(1, &m_vao);
+    // Create pipeline with points topology, blending, and program point size
+    auto* device = rhi::get_current_device();
+    if (!device) {
+        ENGINE_ERR("ParticleRenderer::init - No RHI device available");
+        return false;
+    }
+
+    rhi::PipelineDesc desc{};
+    desc.shader = m_shader.rhi_shader();
+    desc.topology = rhi::PrimitiveTopology::Points;
+
+    // Enable alpha blending
+    desc.blend.enabled = true;
+    desc.blend.src_color = rhi::BlendFactor::SrcAlpha;
+    desc.blend.dst_color = rhi::BlendFactor::OneMinusSrcAlpha;
+    desc.blend.src_alpha = rhi::BlendFactor::One;
+    desc.blend.dst_alpha = rhi::BlendFactor::OneMinusSrcAlpha;
+
+    // Enable program point size and disable culling (points don't need it)
+    desc.rasterizer.program_point_size = true;
+    desc.rasterizer.cull_mode = rhi::CullMode::None;
+
+    // No vertex attributes - particle data comes from SSBO
+    desc.attribute_count = 0;
+    desc.binding_count = 0;
+
+    m_pipeline = device->create_pipeline(desc);
+    if (!m_pipeline || !m_pipeline->valid()) {
+        ENGINE_ERR("ParticleRenderer::init - Failed to create pipeline");
+        m_shader.destroy();
+        return false;
+    }
 
     // Set constant uniforms
     m_shader.use();
@@ -24,11 +55,8 @@ bool ParticleRenderer::init() {
 }
 
 void ParticleRenderer::shutdown() {
+    m_pipeline.reset();
     m_shader.destroy();
-    if (m_vao) {
-        glDeleteVertexArrays(1, &m_vao);
-        m_vao = 0;
-    }
 }
 
 void ParticleRenderer::draw(ParticleBuffer& buffer,
@@ -39,27 +67,25 @@ void ParticleRenderer::draw(ParticleBuffer& buffer,
     int alive = buffer.alive_count();
     if (alive == 0) return;
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glEnable(GL_PROGRAM_POINT_SIZE);
+    auto* ctx = rhi::get_current_context();
+    if (!ctx) return;
 
-    m_shader.use();
+    // Bind pipeline (sets shader, blend state, point size, VAO)
+    ctx->bind_pipeline(m_pipeline.get());
 
-    palette.bind(0);
+    // Bind texture and SSBO
+    ctx->bind_texture(palette.rhi_texture(), 0);
     buffer.bind_particles();
 
+    // Set per-draw uniforms
     m_shader.set_vec2("u_camera_pos", camera.x, camera.y);
     m_shader.set_vec2("u_screen_size", screen_w, screen_h);
     m_shader.set_float("u_zoom", camera.zoom);
     m_shader.set_vec2("u_grid_origin", grid_origin_x, grid_origin_y);
     m_shader.set_int("u_grid_height", grid_height);
 
-    glBindVertexArray(m_vao);
-    glDrawArrays(GL_POINTS, 0, alive);
-    glBindVertexArray(0);
-
-    glDisable(GL_PROGRAM_POINT_SIZE);
-    glDisable(GL_BLEND);
+    // Draw particles
+    ctx->draw(static_cast<uint32_t>(alive), 0, 1);
 }
 
 } // namespace engine::particles

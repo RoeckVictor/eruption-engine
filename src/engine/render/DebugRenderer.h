@@ -1,7 +1,10 @@
 #pragma once
 
 #include "engine/graphics/Shader.h"
+#include "engine/rhi/RHIPipeline.h"
+#include "engine/rhi/RHIBuffer.h"
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace engine::render {
@@ -30,8 +33,8 @@ public:
 
 private:
     graphics::Shader m_shader;
-    uint32_t m_vao = 0;
-    uint32_t m_vbo = 0;
+    std::unique_ptr<rhi::RHIPipeline> m_pipeline;
+    std::unique_ptr<rhi::RHIBuffer> m_vbo;
     size_t m_vbo_capacity = 0;  // Current VBO capacity in bytes
 
     struct Vertex {

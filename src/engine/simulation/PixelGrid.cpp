@@ -1,7 +1,7 @@
 #include "engine/simulation/PixelGrid.h"
 #include "engine/graphics/RenderContext.h"
+#include "engine/rhi/RHITypes.h"
 #include "engine/core/Log.h"
-#include <glad/gl.h>
 #include <cstring>
 
 namespace engine::simulation {
@@ -92,7 +92,7 @@ void PixelGrid::update_render_texture() {
 
     graphics::RenderContext ctx;
     // Dispatch with image barrier (shader writes to texture, rendering will read it)
-    ctx.dispatch_compute(groups_x, groups_y, 1, GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+    ctx.dispatch_compute(groups_x, groups_y, 1, rhi::BarrierFlags::ImageAccess);
 }
 
 void PixelGrid::upload_both(int x, int y, int w, int h, const void* data) {

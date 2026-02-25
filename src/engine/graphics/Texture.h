@@ -1,5 +1,7 @@
 #pragma once
 #include <cstdint>
+#include <memory>
+#include "engine/rhi/RHITexture.h"
 
 namespace engine::graphics {
 
@@ -24,6 +26,8 @@ enum class ImageAccess {
     ReadWrite,
 };
 
+/// Texture wrapper that delegates to RHI
+/// @note For new code, consider using engine::rhi::RHITexture directly
 class Texture {
 public:
     Texture() = default;
@@ -51,18 +55,26 @@ public:
     void bind(int unit) const;
     void bind_as_image(int unit, ImageAccess access) const;
 
-    uint32_t handle() const { return m_handle; }
-    int width() const { return m_width; }
-    int height() const { return m_height; }
+    /// Get native handle as void* for ImGui texture rendering.
+    /// This is backend-independent and works with any RHI backend.
+    void* imgui_texture_id() const;
+
+    /// Get native handle (for legacy code that needs direct GL access)
+    /// @deprecated Use imgui_texture_id() for ImGui or rhi_texture()->native_handle() for direct access
+    uint32_t handle() const;
+
+    int width() const;
+    int height() const;
     TextureFormat format() const { return m_format; }
-    bool valid() const { return m_handle != 0; }
+    bool valid() const;
+
+    /// Get the underlying RHI texture
+    rhi::RHITexture* rhi_texture() { return m_texture.get(); }
+    const rhi::RHITexture* rhi_texture() const { return m_texture.get(); }
 
 private:
-    uint32_t m_handle = 0;
-    int m_width = 0;
-    int m_height = 0;
+    std::unique_ptr<rhi::RHITexture> m_texture;
     TextureFormat m_format = TextureFormat::RGBA8;
-    bool m_is_1d = false;
 };
 
 } // namespace engine::graphics

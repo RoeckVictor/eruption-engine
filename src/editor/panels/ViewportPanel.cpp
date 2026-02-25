@@ -21,6 +21,8 @@
 #include "engine/physics/Colliders.h"
 #include "engine/physics/PhysicsWorld.h"
 #include "engine/render/Camera2D.h"
+#include "engine/rhi/RHIDevice.h"
+#include "engine/rhi/RHIContext.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -88,8 +90,11 @@ void ViewportPanel::on_gui() {
     render_scene();
 
     // Display the framebuffer texture
+    ImTextureID texture_id = m_framebuffer
+        ? (ImTextureID)(uintptr_t)(m_framebuffer->color_attachment(0)->native_handle())
+        : 0;
     ImGui::Image(
-        (ImTextureID)(uintptr_t)m_texture,
+        texture_id,
         size,
         ImVec2(0, 1),  // UV flipped for OpenGL
         ImVec2(1, 0)
@@ -121,49 +126,26 @@ void ViewportPanel::create_framebuffer(int width, int height) {
     m_viewport_width = width;
     m_viewport_height = height;
 
-    // Create framebuffer
-    glGenFramebuffers(1, &m_framebuffer);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
+    auto* device = engine::rhi::get_current_device();
+    if (!device) {
+        engine::Logger::instance().error("Viewport", "No RHI device available");
+        m_framebuffer_failed = true;
+        return;
+    }
 
-    // Create color texture
-    glGenTextures(1, &m_texture);
-    glBindTexture(GL_TEXTURE_2D, m_texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_texture, 0);
-
-    // Create depth buffer
-    glGenRenderbuffers(1, &m_depth_buffer);
-    glBindRenderbuffer(GL_RENDERBUFFER, m_depth_buffer);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, m_depth_buffer);
-
-    // Check framebuffer status
-    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    if (status != GL_FRAMEBUFFER_COMPLETE) {
-        engine::Logger::instance().error("Viewport", "Framebuffer incomplete (status=0x%X)", status);
-        destroy_framebuffer();
-        m_framebuffer_failed = true;  // Prevent retry loop until size changes
+    // Create framebuffer with color and depth attachments using convenience method
+    m_framebuffer = device->create_simple_framebuffer(width, height,
+                                                       engine::rhi::TextureFormat::RGBA8,
+                                                       true);
+    if (!m_framebuffer || !m_framebuffer->valid()) {
+        engine::Logger::instance().error("Viewport", "Failed to create framebuffer");
+        m_framebuffer.reset();
+        m_framebuffer_failed = true;
     }
 }
 
 void ViewportPanel::destroy_framebuffer() {
-    if (m_framebuffer) {
-        glDeleteFramebuffers(1, &m_framebuffer);
-        m_framebuffer = 0;
-    }
-    if (m_texture) {
-        glDeleteTextures(1, &m_texture);
-        m_texture = 0;
-    }
-    if (m_depth_buffer) {
-        glDeleteRenderbuffers(1, &m_depth_buffer);
-        m_depth_buffer = 0;
-    }
-
+    m_framebuffer.reset();
     m_viewport_width = 0;
     m_viewport_height = 0;
 }
@@ -173,12 +155,15 @@ void ViewportPanel::render_scene() {
         return;
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
-    glViewport(0, 0, m_viewport_width, m_viewport_height);
+    auto* ctx = engine::rhi::get_current_context();
+    if (!ctx) return;
+
+    ctx->bind_framebuffer(m_framebuffer.get());
+    ctx->set_viewport(0, 0, m_viewport_width, m_viewport_height);
 
     // Clear with a dark color
-    glClearColor(0.15f, 0.15f, 0.18f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    ctx->clear(0.15f, 0.15f, 0.18f, 1.0f);
+    ctx->clear_depth(1.0f);
 
     // Render grid
     render_grid();
@@ -203,7 +188,7 @@ void ViewportPanel::render_scene() {
         }
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    ctx->bind_framebuffer(nullptr);
 }
 
 void ViewportPanel::render_grid() {
@@ -240,7 +225,7 @@ void ViewportPanel::render_world_image(ImDrawList* draw_list, entt::entity entit
     if (!image.enabled) return;
 
     int tex_width, tex_height;
-    GLuint texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
+    void* texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
 
     // Cache dimensions for hit detection
     image._cached_width = tex_width;
@@ -371,7 +356,7 @@ void ViewportPanel::render_overlay() {
                     auto& renderer = registry->get<engine::render::PixelGridRenderer>(item.entity);
 
                     auto quad = compute_pixel_grid_quad(transform, grid_comp, renderer, wts);
-                    GLuint grid_tex = resolve_grid_texture(
+                    void* grid_tex = resolve_grid_texture(
                         item.entity, grid_comp.pixel_grid_path, m_context.runtime(), m_grid_textures);
 
                     draw_pixel_grid_quad(draw_list, quad, grid_tex);

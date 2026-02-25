@@ -2,8 +2,8 @@
 #include "engine/particles/ParticleBuffer.h"
 #include "engine/simulation/PixelGrid.h"
 #include "engine/graphics/RenderContext.h"
+#include "engine/rhi/RHITypes.h"
 #include "engine/core/Log.h"
-#include <glad/gl.h>
 
 namespace engine::particles {
 
@@ -69,7 +69,7 @@ void ParticleSimulation::update(ParticleBuffer& buffer,
 
     // Dispatch with SSBO barrier (updates particle buffer, rendering will read it)
     int groups = (max_p + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-    ctx.dispatch_compute(groups, 1, 1, GL_SHADER_STORAGE_BARRIER_BIT);
+    ctx.dispatch_compute(groups, 1, 1, rhi::BarrierFlags::StorageBuffer);
 }
 
 void ParticleSimulation::reintegrate(ParticleBuffer& buffer,
@@ -95,7 +95,7 @@ void ParticleSimulation::reintegrate(ParticleBuffer& buffer,
     // Dispatch with both barriers (writes to grid SSBO and particle buffer)
     int groups = (max_p + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
     ctx.dispatch_compute(groups, 1, 1,
-                         GL_SHADER_STORAGE_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+                         rhi::BarrierFlags::StorageBuffer | rhi::BarrierFlags::ImageAccess);
 }
 
 } // namespace engine::particles

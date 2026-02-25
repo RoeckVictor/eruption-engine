@@ -1,60 +1,30 @@
 #include "EditorTextureCache.h"
 #include <stb_image.h>
-#include <utility>
 
 namespace editor {
 
-EditorTextureCache::~EditorTextureCache() {
-    clear();
-    if (m_white_texture) {
-        glDeleteTextures(1, &m_white_texture);
-        m_white_texture = 0;
-    }
-}
-
-EditorTextureCache::EditorTextureCache(EditorTextureCache&& other) noexcept
-    : m_cache(std::move(other.m_cache))
-    , m_white_texture(other.m_white_texture)
-{
-    other.m_white_texture = 0;
-}
-
-EditorTextureCache& EditorTextureCache::operator=(EditorTextureCache&& other) noexcept {
-    if (this != &other) {
-        clear();
-        if (m_white_texture) {
-            glDeleteTextures(1, &m_white_texture);
-        }
-        m_cache = std::move(other.m_cache);
-        m_white_texture = other.m_white_texture;
-        other.m_white_texture = 0;
-    }
-    return *this;
-}
-
 void EditorTextureCache::ensure_white_texture() {
-    if (m_white_texture != 0) return;
+    if (m_white_texture) return;
 
+    m_white_texture = std::make_unique<engine::graphics::Texture>();
     uint8_t white_pixel[4] = { 255, 255, 255, 255 };
-    glGenTextures(1, &m_white_texture);
-    glBindTexture(GL_TEXTURE_2D, m_white_texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white_pixel);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    m_white_texture->create_2d(1, 1, engine::graphics::TextureFormat::RGBA8,
+                               engine::graphics::TextureFilter::Nearest,
+                               engine::graphics::TextureWrap::ClampToEdge,
+                               white_pixel);
 }
 
-GLuint EditorTextureCache::white_texture() {
+void* EditorTextureCache::white_texture() {
     ensure_white_texture();
-    return m_white_texture;
+    return m_white_texture ? m_white_texture->imgui_texture_id() : nullptr;
 }
 
-GLuint EditorTextureCache::get(const std::string& path, int& out_width, int& out_height) {
+void* EditorTextureCache::get(const std::string& path, int& out_width, int& out_height) {
     if (path.empty()) {
         ensure_white_texture();
         out_width = 1;
         out_height = 1;
-        return m_white_texture;
+        return m_white_texture ? m_white_texture->imgui_texture_id() : nullptr;
     }
 
     // Check cache
@@ -62,7 +32,7 @@ GLuint EditorTextureCache::get(const std::string& path, int& out_width, int& out
     if (it != m_cache.end()) {
         out_width = it->second.width;
         out_height = it->second.height;
-        return it->second.handle;
+        return it->second.texture ? it->second.texture->imgui_texture_id() : nullptr;
     }
 
     // Try to load from disk - first with assets/ prefix
@@ -79,46 +49,32 @@ GLuint EditorTextureCache::get(const std::string& path, int& out_width, int& out
         ensure_white_texture();
         out_width = 1;
         out_height = 1;
-        return m_white_texture;
+        return m_white_texture ? m_white_texture->imgui_texture_id() : nullptr;
     }
 
-    // Create OpenGL texture
-    GLuint texture;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    // Create texture using graphics::Texture (RHI-based)
+    auto texture = std::make_unique<engine::graphics::Texture>();
+    texture->create_2d(width, height, engine::graphics::TextureFormat::RGBA8,
+                       engine::graphics::TextureFilter::Linear,
+                       engine::graphics::TextureWrap::ClampToEdge,
+                       pixels);
 
     stbi_image_free(pixels);
 
-    m_cache[path] = { texture, width, height };
+    void* handle = texture->imgui_texture_id();
+    m_cache[path] = CachedTexture{ std::move(texture), width, height };
 
     out_width = width;
     out_height = height;
-    return texture;
+    return handle;
 }
 
 void EditorTextureCache::clear() {
-    for (auto& [path, tex] : m_cache) {
-        if (tex.handle) {
-            glDeleteTextures(1, &tex.handle);
-        }
-    }
     m_cache.clear();
 }
 
 void EditorTextureCache::invalidate(const std::string& path) {
-    auto it = m_cache.find(path);
-    if (it != m_cache.end()) {
-        if (it->second.handle) {
-            glDeleteTextures(1, &it->second.handle);
-        }
-        m_cache.erase(it);
-    }
+    m_cache.erase(path);
 }
 
 } // namespace editor
