@@ -1,0 +1,100 @@
+#version 450 core
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Pixel data SSBOs (read-write both for ping-pong sync)
+layout(std430, binding = 0) buffer PixelBufferA {
+    uint pixels_a[];
+};
+
+layout(std430, binding = 1) buffer PixelBufferB {
+    uint pixels_b[];
+};
+
+// Extraction buffer: stores extracted pixel data for CPU readback
+// Format: [count, capacity, entries...]
+// Each entry is 2 uints: (x | y << 16), material_id
+layout(std430, binding = 5) coherent buffer ExtractionBuffer {
+    uint extract_count;     // Atomic counter for extracted pixels
+    uint extract_capacity;  // Max entries (set by CPU)
+    uint extract_data[];    // Packed entries: 2 uints per pixel
+};
+
+uniform int u_grid_width;
+uniform int u_grid_height;
+uniform uint u_pixel_size;
+
+#define PIXEL_READ_SSBO pixels_a
+#include "include/pixel_access.glsl"
+
+// Category constants
+const uint CAT_EMPTY  = 0u;
+const uint CAT_STATIC = 1u;
+const uint CAT_POWDER = 2u;
+const uint CAT_LIQUID = 3u;
+const uint CAT_GAS    = 4u;
+
+// Pixel flags
+const uint FLAG_RIGIDBODY = 0x01u;
+const uint FLAG_CONVERT_TO_PARTICLE = 0x02u;
+
+bool hasFlag(uvec4 pixel, uint flag) {
+    return (pixel.a & flag) != 0u;
+}
+
+bool isMobile(uint cat) {
+    return cat == CAT_POWDER || cat == CAT_LIQUID || cat == CAT_GAS;
+}
+
+// Load pixel from SSBO A
+uvec4 loadPixel(ivec2 pos) {
+    return unpackPixel(readPackedPixel(pos));
+}
+
+// Store pixel to both SSBOs (clears the extracted pixel)
+void storePixelBoth(ivec2 pos, uvec4 pixel) {
+    uint idx = uint(pos.y) * uint(u_grid_width) + uint(pos.x);
+    uint byte_offset = idx * u_pixel_size;
+    uint word_offset = byte_offset / 4u;
+
+    uint packed = packPixel(pixel);
+
+    pixels_a[word_offset] = packed;
+    pixels_b[word_offset] = packed;
+}
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+
+    // Bounds check
+    if (pos.x >= u_grid_width || pos.y >= u_grid_height) return;
+
+    uvec4 pixel = loadPixel(pos);
+
+    // Check if this pixel is marked for extraction
+    if (!hasFlag(pixel, FLAG_CONVERT_TO_PARTICLE)) return;
+
+    // Skip if not actually a movable material (safety check)
+    // Category is stored in pixel.g (byte 1)
+    uint cat = pixel.g;
+    if (!isMobile(cat)) return;
+
+    // Atomically allocate a slot in the extraction buffer
+    uint slot = atomicAdd(extract_count, 1u);
+
+    // Check if we have space
+    if (slot < extract_capacity) {
+        // Pack position: x in low 16 bits, y in high 16 bits
+        uint packed_pos = uint(pos.x) | (uint(pos.y) << 16);
+        uint material = pixel.r;
+
+        // Write to extraction buffer (2 uints per entry)
+        uint entry_offset = slot * 2u;
+        extract_data[entry_offset + 0u] = packed_pos;
+        extract_data[entry_offset + 1u] = material;
+    }
+
+    // Clear the pixel from the grid (replace with air)
+    uvec4 air = uvec4(0u, CAT_EMPTY, 128u, 0u);
+    storePixelBoth(pos, air);
+}

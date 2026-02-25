@@ -1,5 +1,6 @@
 #include "SimulationPlayback.h"
 #include "EditorComponents.h"
+#include "engine/core/EngineConfig.h"
 #include "engine/core/Logger.h"
 #include "engine/core/Transform.h"
 #include "engine/physics/PhysicsWorld.h"
@@ -8,6 +9,7 @@
 #include "engine/simulation/MaterialLibrary.h"
 #include "engine/asset/PixelGridFile.h"
 #include "engine/asset/PxgDataParser.h"
+#include "engine/render/Camera2D.h"
 #include <glad/gl.h>
 
 namespace editor {
@@ -19,7 +21,8 @@ SimulationPlayback::~SimulationPlayback() {
     shutdown();
 }
 
-void SimulationPlayback::init(engine::physics::PhysicsWorld* physics_world) {
+void SimulationPlayback::init(engine::physics::PhysicsWorld* physics_world,
+                               const engine::EngineConfig& config) {
     m_physics_world = physics_world;
 
     if (!m_color_shader.load_compute("shaders/ssbo_to_color.comp")) {
@@ -159,6 +162,23 @@ void SimulationPlayback::init(engine::physics::PhysicsWorld* physics_world) {
         state->palette_ssbo.create(palette.size() * sizeof(uint32_t), palette.data(),
                                     engine::graphics::BufferUsage::StaticDraw);
 
+        // Create 1D palette texture for particle rendering
+        // Palette format is 0xRRGGBBAA, convert to RGBA byte array for OpenGL
+        std::vector<uint8_t> palette_rgba(256 * 4);
+        for (size_t i = 0; i < 256; i++) {
+            uint32_t packed = palette[i];
+            palette_rgba[i * 4 + 0] = (packed >> 24) & 0xFF;  // R
+            palette_rgba[i * 4 + 1] = (packed >> 16) & 0xFF;  // G
+            palette_rgba[i * 4 + 2] = (packed >> 8) & 0xFF;   // B
+            palette_rgba[i * 4 + 3] = (packed >> 0) & 0xFF;   // A
+        }
+        if (!state->palette_texture.create_1d(256, engine::graphics::TextureFormat::RGBA8,
+                                               engine::graphics::TextureFilter::Nearest,
+                                               engine::graphics::TextureWrap::ClampToEdge,
+                                               palette_rgba.data())) {
+            engine::Logger::instance().warning("Runtime", "Failed to create palette texture");
+        }
+
         // Initialize terrain collider generation if requested
         if (sim_surface.generate_colliders && m_physics_world) {
             state->terrain_colliders = std::make_unique<engine::physics::TerrainColliderManager>();
@@ -170,6 +190,52 @@ void SimulationPlayback::init(engine::physics::PhysicsWorld* physics_world) {
             } else {
                 engine::Logger::instance().error("Runtime", "Failed to init TerrainColliderManager");
                 state->terrain_colliders.reset();
+            }
+        }
+
+        // Store grid origin for coordinate conversion
+        if (m_registry.all_of<engine::Transform>(entity)) {
+            auto& t = m_registry.get<engine::Transform>(entity);
+            state->origin_x = t.world_x;
+            state->origin_y = t.world_y;
+        }
+        if (m_registry.all_of<engine::simulation::PixelGridComponent>(entity)) {
+            auto& gc = m_registry.get<engine::simulation::PixelGridComponent>(entity);
+            // Adjust origin by grid component offset
+            state->origin_x -= gc.origin_x;
+            state->origin_y -= gc.origin_y;
+        }
+
+        // Initialize particle system for rigidbody collisions
+        if (m_physics_world) {
+            if (!state->particle_buffer.init(config.max_particles)) {
+                engine::Logger::instance().error("Runtime", "Failed to init ParticleBuffer");
+            } else if (!state->particle_simulation.init(parsed.width, parsed.height)) {
+                engine::Logger::instance().error("Runtime", "Failed to init ParticleSimulation");
+                state->particle_buffer.shutdown();
+            } else if (!state->collision_extractor.init(parsed.width, parsed.height,
+                                                         config.max_particle_extractions,
+                                                         config.particle_scatter_min,
+                                                         config.particle_scatter_max,
+                                                         config.particle_lifetime)) {
+                engine::Logger::instance().error("Runtime", "Failed to init BodyCollisionExtractor");
+                state->particle_simulation.shutdown();
+                state->particle_buffer.shutdown();
+            } else if (!state->particle_renderer.init()) {
+                engine::Logger::instance().error("Runtime", "Failed to init ParticleRenderer");
+                state->collision_extractor.shutdown();
+                state->particle_simulation.shutdown();
+                state->particle_buffer.shutdown();
+            } else {
+                // Configure collider stamper with scatter/lifetime from config
+                state->collider_stamper.configure(
+                    config.displacement_scatter_min,
+                    config.displacement_scatter_max,
+                    config.particle_lifetime);
+
+                engine::Logger::instance().info("Runtime",
+                    "Particle system initialized: max %d particles, %d extractions",
+                    config.max_particles, config.max_particle_extractions);
             }
         }
 
@@ -214,7 +280,58 @@ void SimulationPlayback::update(uint64_t frame_count) {
                 state->color_texture.handle());
         }
 
+        // Update grid origin from transform (in case entity moved)
+        if (m_registry.all_of<engine::Transform>(state->entity)) {
+            auto& t = m_registry.get<engine::Transform>(state->entity);
+            state->origin_x = t.world_x;
+            state->origin_y = t.world_y;
+            if (m_registry.all_of<engine::simulation::PixelGridComponent>(state->entity)) {
+                auto& gc = m_registry.get<engine::simulation::PixelGridComponent>(state->entity);
+                state->origin_x -= gc.origin_x;
+                state->origin_y -= gc.origin_y;
+            }
+        }
+
+        // --- Particle buffer maintenance ---
+        // Reclaim dead particles from previous frame
+        state->particle_buffer.reclaim_dead();
+        // Flush any pending spawns (from previous frame's extractions)
+        state->particle_buffer.flush_spawns();
+
+        // --- Stamp rigidbody colliders into the grid ---
+        // This marks collider pixels with FLAG_RIGIDBODY so sim_step can detect collisions
+        if (m_physics_world) {
+            state->collider_stamper.stamp_colliders(
+                *m_physics_world, state->pixel_grid,
+                state->origin_x, state->origin_y,
+                &state->particle_buffer);
+        }
+
+        // --- Run CA simulation ---
+        // sim_step.comp will mark movables blocked by rigidbodies with FLAG_CONVERT_TO_PARTICLE
         state->simulation.simulate(state->pixel_grid, m_render_context);
+
+        // --- Extract marked pixels and spawn as particles ---
+        if (m_physics_world) {
+            state->collision_extractor.extract(state->pixel_grid, m_render_context);
+            state->collision_extractor.spawn_particles(
+                state->collider_stamper, state->particle_buffer);
+        }
+
+        // --- Update particles (physics, collision, settling) ---
+        // Note: We use a fixed dt of 1/60 since we're called per simulation tick
+        state->particle_simulation.update(
+            state->particle_buffer, state->pixel_grid,
+            m_render_context, 1.0f / 60.0f);
+
+        // --- Clear stamped colliders from grid ---
+        if (m_physics_world) {
+            state->collider_stamper.clear_colliders(state->pixel_grid);
+        }
+
+        // --- Reintegrate settled particles back into the grid ---
+        state->particle_simulation.reintegrate(
+            state->particle_buffer, state->pixel_grid, m_render_context);
 
         // Convert SSBO -> RGBA8 color texture via palette lookup compute shader
         m_color_shader.use();
@@ -261,15 +378,34 @@ void SimulationPlayback::update(uint64_t frame_count) {
     }
 }
 
+void SimulationPlayback::render_particles(const engine::render::Camera2D& camera,
+                                            float screen_w, float screen_h) {
+    for (auto& state : m_surfaces) {
+        if (state->particle_buffer.alive_count() == 0) continue;
+
+        state->particle_renderer.draw(
+            state->particle_buffer,
+            state->palette_texture,
+            camera,
+            screen_w, screen_h,
+            state->origin_x, state->origin_y, state->pixel_grid.height());
+    }
+}
+
 void SimulationPlayback::shutdown() {
     for (auto& state : m_surfaces) {
         if (state->terrain_colliders) {
             state->terrain_colliders->shutdown();
             state->terrain_colliders.reset();
         }
+        state->particle_renderer.shutdown();
+        state->collision_extractor.shutdown();
+        state->particle_simulation.shutdown();
+        state->particle_buffer.shutdown();
         state->simulation.shutdown();
         state->pixel_grid.shutdown();
         state->color_texture.destroy();
+        state->palette_texture.destroy();
         state->palette_ssbo.destroy();
     }
     m_surfaces.clear();

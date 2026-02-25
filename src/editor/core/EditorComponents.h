@@ -40,6 +40,8 @@ void update_enabled_in_hierarchy(entt::registry& registry, entt::entity entity);
 
 void init_component_type_registry();
 
+std::string generate_entity_guid();
+
 entt::entity create_entity(entt::registry& registry, const std::string& name = "Entity");
 entt::entity create_screen_entity(entt::registry& registry, const std::string& name = "Screen Entity");
 void destroy_entity_recursive(entt::registry& registry, entt::entity entity);

@@ -203,6 +203,27 @@ void InspectorPanel::render_entity_inspector(entt::entity entity) {
                     // Play mode: serialize instance to temp JSON, render inspector, apply changes back
                     nlohmann::json temp_props;
                     sc.scripts[i]->serialize_properties(temp_props);
+
+                    // Inject available camera entities with names and GUIDs for entity pickers
+                    auto* reg = m_context.registry();
+                    if (reg) {
+                        nlohmann::json camera_list = nlohmann::json::array();
+                        auto view = reg->view<engine::render::Camera2D>();
+                        for (auto cam_entity : view) {
+                            nlohmann::json cam_info;
+                            cam_info["id"] = static_cast<uint32_t>(cam_entity);
+                            if (auto* info = reg->try_get<EntityInfo>(cam_entity)) {
+                                cam_info["name"] = info->name;
+                                cam_info["guid"] = info->guid;
+                            } else {
+                                cam_info["name"] = "Camera " + std::to_string(static_cast<uint32_t>(cam_entity));
+                                cam_info["guid"] = "";
+                            }
+                            camera_list.push_back(cam_info);
+                        }
+                        temp_props["__available_cameras__"] = camera_list;
+                    }
+
                     sc.scripts[i]->on_inspector_gui(temp_props);
                     sc.scripts[i]->deserialize_properties(temp_props);
                     // Note: Changes are NOT saved to script_properties, so they reset on stop
@@ -212,13 +233,40 @@ void InspectorPanel::render_entity_inspector(entt::entity entity) {
                     if (sm && sm->are_scripts_loaded()) {
                         auto* temp_script = sm->dll_manager().create_script(sc.script_types[i]);
                         if (temp_script) {
+                            // Initialize script context so it can access registry for entity pickers
+                            temp_script->init_context(entity, m_context.registry(), nullptr, nullptr);
+
                             // Ensure properties vector is sized
                             while (sc.script_properties.size() <= i) {
                                 sc.script_properties.push_back(nlohmann::json::object());
                             }
 
+                            // Inject available camera entities with names and GUIDs for entity pickers
+                            // (Scripts can't access EntityInfo due to DLL boundary type hash mismatch)
+                            nlohmann::json camera_list = nlohmann::json::array();
+                            auto* reg = m_context.registry();
+                            if (reg) {
+                                auto view = reg->view<engine::render::Camera2D>();
+                                for (auto cam_entity : view) {
+                                    nlohmann::json cam_info;
+                                    cam_info["id"] = static_cast<uint32_t>(cam_entity);
+                                    if (auto* info = reg->try_get<EntityInfo>(cam_entity)) {
+                                        cam_info["name"] = info->name;
+                                        cam_info["guid"] = info->guid;
+                                    } else {
+                                        cam_info["name"] = "Camera " + std::to_string(static_cast<uint32_t>(cam_entity));
+                                        cam_info["guid"] = "";
+                                    }
+                                    camera_list.push_back(cam_info);
+                                }
+                            }
+                            sc.script_properties[i]["__available_cameras__"] = camera_list;
+
                             // Call inspector (modifies the JSON directly, persisted to scene)
                             temp_script->on_inspector_gui(sc.script_properties[i]);
+
+                            // Clean up injected data (not needed in saved scene)
+                            sc.script_properties[i].erase("__available_cameras__");
 
                             delete temp_script;
                         } else {

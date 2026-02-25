@@ -1,6 +1,7 @@
 #include "GamePanel.h"
 #include "editor/core/EditorContext.h"
 #include "editor/core/EditorComponents.h"
+#include "editor/core/RuntimeContext.h"
 #include "editor/render/SceneRenderUtils.h"
 #include "editor/render/EditorTextRenderer.h"
 #include "engine/core/MathConstants.h"
@@ -75,6 +76,19 @@ void GamePanel::on_gui() {
         );
         draw_list->AddText(text_pos, IM_COL32(200, 150, 50, 200), msg);
         return;
+    }
+
+    // Update viewport info for correct screen-to-world conversion in scripts
+    // Convert ImGui screen coordinates to GLFW window-relative coordinates
+    // With ImGuiConfigFlags_ViewportsEnable, GetCursorScreenPos returns OS screen coords
+    // but mouse_x/y from GLFW are window-relative
+    if (auto* runtime = m_context.runtime()) {
+        // Get the main ImGui viewport (corresponds to the main GLFW window)
+        ImGuiViewport* main_viewport = ImGui::GetMainViewport();
+        float vp_x = panel_pos.x - main_viewport->Pos.x;
+        float vp_y = panel_pos.y - main_viewport->Pos.y;
+
+        runtime->set_viewport(vp_x, vp_y, panel_size.x, panel_size.y);
     }
 
     render_game_view(panel_pos, panel_size);

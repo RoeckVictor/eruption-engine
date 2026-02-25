@@ -17,6 +17,9 @@
 #include "engine/physics/Colliders.h"
 #include <cmath>
 #include <unordered_map>
+#include <random>
+#include <sstream>
+#include <iomanip>
 
 namespace editor {
 
@@ -173,9 +176,25 @@ void update_enabled_in_hierarchy(entt::registry& registry, entt::entity entity) 
     }
 }
 
+std::string generate_entity_guid() {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<uint32_t> dist(0, 0xFFFFFFFF);
+
+    auto hex = [&](int bytes) {
+        std::ostringstream oss;
+        uint32_t val = dist(gen);
+        oss << std::hex << std::setfill('0') << std::setw(bytes * 2) << (val & ((1ull << (bytes * 8)) - 1));
+        return oss.str();
+    };
+
+    return hex(4) + "-" + hex(2) + "-" + hex(2) + "-" + hex(2) + "-" + hex(4) + hex(2);
+}
+
 entt::entity create_entity(entt::registry& registry, const std::string& name) {
     auto entity = registry.create();
-    registry.emplace<EntityInfo>(entity, EntityInfo{name, "", true, true, "", false});
+    std::string guid = generate_entity_guid();
+    registry.emplace<EntityInfo>(entity, EntityInfo{name, guid, true, true, "", false});
     registry.emplace<engine::Transform>(entity);
     registry.emplace<Hierarchy>(entity);
     return entity;
@@ -183,7 +202,8 @@ entt::entity create_entity(entt::registry& registry, const std::string& name) {
 
 entt::entity create_screen_entity(entt::registry& registry, const std::string& name) {
     auto entity = registry.create();
-    registry.emplace<EntityInfo>(entity, EntityInfo{name, "", true, true, "", false});
+    std::string guid = generate_entity_guid();
+    registry.emplace<EntityInfo>(entity, EntityInfo{name, guid, true, true, "", false});
     registry.emplace<engine::ScreenRect>(entity);
     registry.emplace<Hierarchy>(entity);
     return entity;

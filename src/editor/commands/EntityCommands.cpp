@@ -2,7 +2,6 @@
 #include "editor/core/EditorContext.h"
 #include "editor/serialization/SceneSerializer.h"
 #include "engine/core/Logger.h"
-#include <atomic>
 
 namespace editor {
 
@@ -76,7 +75,7 @@ void DeleteEntityCommand::undo() {
         entt::entity new_entity = m_registry->create();
 
         // Restore EntityInfo (enabled_in_hierarchy will be computed after hierarchy is restored)
-        m_registry->emplace<EntityInfo>(new_entity, EntityInfo{stored.name, "", stored.enabled, true, "", false});
+        m_registry->emplace<EntityInfo>(new_entity, EntityInfo{stored.name, stored.guid, stored.enabled, true, "", false});
 
         // Restore engine::Transform (world-space) or engine::ScreenRect (screen-space)
         if (stored.has_transform) {
@@ -128,9 +127,11 @@ void DeleteEntityCommand::store_entity_recursive(entt::entity entity, entt::enti
     if (m_registry->all_of<EntityInfo>(entity)) {
         const auto& info = m_registry->get<EntityInfo>(entity);
         stored.name = info.name;
+        stored.guid = info.guid;
         stored.enabled = info.enabled;
     } else {
         stored.name = "Entity";
+        stored.guid = "";
         stored.enabled = true;
     }
 
@@ -159,6 +160,24 @@ void DeleteEntityCommand::store_entity_recursive(entt::entity entity, entt::enti
     }
 }
 
+void PasteEntitiesCommand::regenerate_guids_recursive(entt::entity entity) {
+    if (!m_registry->valid(entity)) return;
+
+    // Generate new GUID for this entity
+    if (m_registry->all_of<EntityInfo>(entity)) {
+        auto& info = m_registry->get<EntityInfo>(entity);
+        info.guid = generate_entity_guid();
+    }
+
+    // Recursively process children
+    if (m_registry->all_of<Hierarchy>(entity)) {
+        const auto& hierarchy = m_registry->get<Hierarchy>(entity);
+        for (auto child : hierarchy.children) {
+            regenerate_guids_recursive(child);
+        }
+    }
+}
+
 void PasteEntitiesCommand::execute() {
     if (!m_registry || m_clipboard_data.empty()) return;
 
@@ -179,12 +198,8 @@ void PasteEntitiesCommand::execute() {
                 rect.offset_y += 20.0f;
             }
 
-            // Generate new GUIDs for pasted entities
-            if (m_registry->all_of<EntityInfo>(entity)) {
-                auto& info = m_registry->get<EntityInfo>(entity);
-                static std::atomic<uint64_t> s_guid_counter{0};
-                info.guid = "e_" + std::to_string(++s_guid_counter);
-            }
+            // Generate new GUIDs for pasted entities AND all their children
+            regenerate_guids_recursive(entity);
         }
 
         // Save previous selection for undo, then select pasted entities

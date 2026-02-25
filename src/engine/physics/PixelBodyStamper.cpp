@@ -182,9 +182,13 @@ void PixelBodyStamper::stamp_all(const std::vector<PixelBody*>& bodies,
                 stamped[ri + 0] = mat;                      // R = material ID
                 stamped[ri + 1] = categories[local_idx];   // G = category
                 stamped[ri + 2] = 128;                     // B = temperature (default)
-                stamped[ri + 3] = 0;                       // A = reserved
+                stamped[ri + 3] = simulation::PixelFlags::FLAG_RIGIDBODY;  // Mark as rigidbody pixel
             }
         }
+
+        // Store body velocity for later lookup by BodyCollisionExtractor
+        stamp_rec.vel_x = body_vel.x;
+        stamp_rec.vel_y = body_vel.y;
 
         // Single upload of the stamped region
         grid.upload_both(min_wx, min_wy, region_w, region_h, stamped.data());
@@ -205,6 +209,19 @@ void PixelBodyStamper::clear_all(simulation::PixelGrid& grid) {
                          stamp.original_pixels.data());
     }
     m_body_stamps.clear();
+}
+
+bool PixelBodyStamper::get_body_velocity_at_position(int x, int y, float& out_vx, float& out_vy) const {
+    // Find which body's stamped region contains this position
+    for (const auto& stamp : m_body_stamps) {
+        if (x >= stamp.region_x && x < stamp.region_x + stamp.region_w &&
+            y >= stamp.region_y && y < stamp.region_y + stamp.region_h) {
+            out_vx = stamp.vel_x;
+            out_vy = stamp.vel_y;
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace engine::physics

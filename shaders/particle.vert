@@ -1,7 +1,7 @@
 #version 450 core
 
 struct Particle {
-    vec2 pos;
+    vec2 pos;  // Y-down grid coords
     vec2 vel;
     uint material;
     float lifetime;
@@ -16,6 +16,8 @@ layout(std430, binding = 3) readonly buffer ParticleBuffer {
 uniform vec2  u_camera_pos;
 uniform vec2  u_screen_size;
 uniform float u_zoom;
+uniform vec2  u_grid_origin;
+uniform int   u_grid_height;
 
 flat out uint v_material;
 flat out uint v_alive;
@@ -33,8 +35,13 @@ void main() {
         return;
     }
 
-    // World pixel position to NDC (Y-up world matches Y-up NDC)
-    vec2 rel = p.pos - u_camera_pos;
+    // Convert grid coords (Y-down) to world coords (Y-up)
+    vec2 world_pos;
+    world_pos.x = u_grid_origin.x + p.pos.x;
+    world_pos.y = u_grid_origin.y + float(u_grid_height - 1) - p.pos.y;
+
+    // World pixel position to NDC
+    vec2 rel = world_pos - u_camera_pos;
     vec2 ndc;
     ndc.x = rel.x * 2.0 * u_zoom / u_screen_size.x;
     ndc.y = rel.y * 2.0 * u_zoom / u_screen_size.y;

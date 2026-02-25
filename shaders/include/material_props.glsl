@@ -21,6 +21,18 @@ const uint CAT_POWDER = 2u;
 const uint CAT_LIQUID = 3u;
 const uint CAT_GAS    = 4u;
 
+// Pixel flags (stored in byte 3 / .a component of pixel data)
+const uint FLAG_RIGIDBODY = 0x01u;            // Pixel is part of a rigidbody
+const uint FLAG_CONVERT_TO_PARTICLE = 0x02u;  // Movable pixel should become a particle
+
 bool isMobile(uint cat) {
     return cat == CAT_POWDER || cat == CAT_LIQUID || cat == CAT_GAS;
+}
+
+bool hasFlag(uvec4 pixel, uint flag) {
+    return (pixel.a & flag) != 0u;
+}
+
+void setFlag(inout uvec4 pixel, uint flag) {
+    pixel.a |= flag;
 }

@@ -101,6 +101,11 @@ public:
     using ContactCallback = std::function<void(const ContactInfo&)>;
     void for_each_contact(const ContactCallback& callback) const;
 
+    /// Enumerate all bodies in the world.
+    /// Callback is invoked for each body.
+    using BodyCallback = std::function<void(b2BodyId)>;
+    void for_each_body(const BodyCallback& callback) const;
+
     /// Cast a ray and return the first hit.
     struct RaycastHit {
         bool hit = false;

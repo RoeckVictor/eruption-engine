@@ -31,6 +31,9 @@ public:
     int width() const { return m_width; }
     int height() const { return m_height; }
 
+    /// Get the window position on screen (top-left corner).
+    void get_position(int& x, int& y) const;
+
     /// Get the native GLFW window handle (for ImGui, etc.)
     GLFWwindow* glfw_handle() const;
 

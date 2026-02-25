@@ -58,6 +58,7 @@ private:
     struct StoredEntity {
         entt::entity entity;
         std::string name;
+        std::string guid;
         bool enabled;
         bool has_transform = false;
         engine::Transform transform;
@@ -156,6 +157,8 @@ public:
     const std::vector<entt::entity>& pasted_entities() const { return m_pasted_entities; }
 
 private:
+    void regenerate_guids_recursive(entt::entity entity);
+
     entt::registry* m_registry;
     EditorContext* m_context;
     std::string m_clipboard_data;

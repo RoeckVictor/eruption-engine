@@ -34,7 +34,8 @@ void ParticleRenderer::shutdown() {
 void ParticleRenderer::draw(ParticleBuffer& buffer,
                              const graphics::Texture& palette,
                              const render::Camera2D& camera,
-                             float screen_w, float screen_h) {
+                             float screen_w, float screen_h,
+                             float grid_origin_x, float grid_origin_y, int grid_height) {
     int alive = buffer.alive_count();
     if (alive == 0) return;
 
@@ -50,6 +51,8 @@ void ParticleRenderer::draw(ParticleBuffer& buffer,
     m_shader.set_vec2("u_camera_pos", camera.x, camera.y);
     m_shader.set_vec2("u_screen_size", screen_w, screen_h);
     m_shader.set_float("u_zoom", camera.zoom);
+    m_shader.set_vec2("u_grid_origin", grid_origin_x, grid_origin_y);
+    m_shader.set_int("u_grid_height", grid_height);
 
     glBindVertexArray(m_vao);
     glDrawArrays(GL_POINTS, 0, alive);

@@ -86,11 +86,26 @@ public:
 
     const std::vector<std::unique_ptr<SimSurfaceState>>& sim_surfaces() const;
 
+    SimulationPlayback* sim_playback() { return m_sim_playback.get(); }
+    const SimulationPlayback* sim_playback() const { return m_sim_playback.get(); }
+
     runtime::ScriptEventDispatcher& event_dispatcher() { return m_event_dispatcher; }
 
     void queue_destroy(entt::entity entity) { m_deferred_destroys.push_back(entity); }
 
     void set_project_assets_path(const std::string& path) { m_project_assets_path = path; }
+
+    void set_viewport(float x, float y, float width, float height) {
+        m_viewport_x = x;
+        m_viewport_y = y;
+        m_viewport_w = width;
+        m_viewport_h = height;
+    }
+
+    float viewport_x() const { return m_viewport_x; }
+    float viewport_y() const { return m_viewport_y; }
+    float viewport_width() const { return m_viewport_w; }
+    float viewport_height() const { return m_viewport_h; }
 
     entt::entity instantiate_prefab_internal(const char* prefab_name);
 
@@ -133,6 +148,12 @@ private:
     std::unique_ptr<engine::prefab::ComponentRegistry> m_component_registry;
     std::unique_ptr<engine::prefab::PrefabManager> m_prefab_manager;
     std::string m_project_assets_path;
+
+    // Viewport info for correct screen-to-world conversion in editor panels
+    float m_viewport_x = 0.0f;
+    float m_viewport_y = 0.0f;
+    float m_viewport_w = 0.0f;
+    float m_viewport_h = 0.0f;
 
     // Maps body -> entity for looking up entities from Box2D bodies
     std::unordered_map<uint64_t, entt::entity> m_body_to_entity;

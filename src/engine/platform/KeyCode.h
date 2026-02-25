@@ -42,6 +42,16 @@ enum class KeyCode {
     Minus,
     Equal,
 
+    // Numpad
+    Numpad0, Numpad1, Numpad2, Numpad3, Numpad4,
+    Numpad5, Numpad6, Numpad7, Numpad8, Numpad9,
+    NumpadAdd,
+    NumpadSubtract,
+    NumpadMultiply,
+    NumpadDivide,
+    NumpadDecimal,
+    NumpadEnter,
+
     COUNT
 };
 

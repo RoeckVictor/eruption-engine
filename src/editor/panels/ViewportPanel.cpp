@@ -1,6 +1,7 @@
 #include "ViewportPanel.h"
 #include "editor/core/EditorContext.h"
 #include "editor/core/EditorComponents.h"
+#include "editor/core/RuntimeContext.h"
 #include "editor/core/SimulationPlayback.h"
 #include "editor/render/SceneRenderUtils.h"
 #include "editor/render/EntityHitDetector.h"
@@ -184,6 +185,23 @@ void ViewportPanel::render_scene() {
 
     // Render scene entities
     render_entities();
+
+    // Render particles from rigidbody-simulation collisions
+    auto* runtime = m_context.runtime();
+    if (runtime && runtime->state() == PlayState::Playing && runtime->sim_playback()) {
+        auto* registry = m_context.registry();
+        if (registry) {
+            auto camera_view = registry->view<engine::render::Camera2D>();
+            for (auto entity : camera_view) {
+                auto& camera = camera_view.get<engine::render::Camera2D>(entity);
+                runtime->sim_playback()->render_particles(
+                    camera,
+                    static_cast<float>(m_viewport_width),
+                    static_cast<float>(m_viewport_height));
+                break;  // Use first camera
+            }
+        }
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }

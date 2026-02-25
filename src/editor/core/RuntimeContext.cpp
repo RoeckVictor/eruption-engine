@@ -7,12 +7,18 @@
 #include "engine/core/Engine.h"
 #include "engine/core/Hierarchy.h"
 #include "engine/core/HierarchyUtils.h"
+#include "engine/core/Transform.h"
+#include "engine/core/MathConstants.h"
 #include "engine/platform/Input.h"
 #include "engine/physics/PhysicsWorld.h"
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
 #include "engine/animation/AnimationSystem.h"
 #include "engine/render/Camera2D.h"
+#include "engine/simulation/PixelGridComponent.h"
+#include "engine/simulation/SimSurface.h"
+#include "engine/simulation/MaterialDefs.h"
+#include "engine/simulation/MaterialLibrary.h"
 #include "editor/scripting/ScriptManager.h"
 #include "runtime/ScriptComponent.h"
 #include "engine/prefab/PrefabManager.h"
@@ -129,6 +135,15 @@ static entt::entity host_find_entity_by_name(runtime::ScriptHostAPI* /*api*/, en
     auto view = reg->view<EntityInfo>();
     for (auto entity : view) {
         if (view.get<EntityInfo>(entity).name == name) return entity;
+    }
+    return entt::null;
+}
+
+static entt::entity host_find_entity_by_guid(runtime::ScriptHostAPI* /*api*/, entt::registry* reg, const char* guid) {
+    if (!reg || !guid || guid[0] == '\0') return entt::null;
+    auto view = reg->view<EntityInfo>();
+    for (auto entity : view) {
+        if (view.get<EntityInfo>(entity).guid == guid) return entity;
     }
     return entt::null;
 }
@@ -324,9 +339,15 @@ static void host_screen_to_world(runtime::ScriptHostAPI* api, float screen_x, fl
     auto* camera = get_first_camera(rt);
     if (!camera || !rt->engine()) return;
 
-    float screen_w = static_cast<float>(rt->engine()->window().width());
-    float screen_h = static_cast<float>(rt->engine()->window().height());
-    engine::render::screen_to_world(*camera, screen_x, screen_y, screen_w, screen_h, *world_x, *world_y);
+    // Use viewport dimensions if set, otherwise fall back to window dimensions
+    float screen_w = rt->viewport_width() > 0 ? rt->viewport_width() : static_cast<float>(rt->engine()->window().width());
+    float screen_h = rt->viewport_height() > 0 ? rt->viewport_height() : static_cast<float>(rt->engine()->window().height());
+
+    // Adjust screen coordinates relative to viewport origin
+    float vp_x = screen_x - rt->viewport_x();
+    float vp_y = screen_y - rt->viewport_y();
+
+    engine::render::screen_to_world(*camera, vp_x, vp_y, screen_w, screen_h, *world_x, *world_y);
 }
 
 static void host_world_to_screen(runtime::ScriptHostAPI* api, float world_x, float world_y, float* screen_x, float* screen_y) {
@@ -335,12 +356,17 @@ static void host_world_to_screen(runtime::ScriptHostAPI* api, float world_x, flo
     auto* camera = get_first_camera(rt);
     if (!camera || !rt->engine()) return;
 
-    float screen_w = static_cast<float>(rt->engine()->window().width());
-    float screen_h = static_cast<float>(rt->engine()->window().height());
+    // Use viewport dimensions if set, otherwise fall back to window dimensions
+    float screen_w = rt->viewport_width() > 0 ? rt->viewport_width() : static_cast<float>(rt->engine()->window().width());
+    float screen_h = rt->viewport_height() > 0 ? rt->viewport_height() : static_cast<float>(rt->engine()->window().height());
 
-    // Inverse of screen_to_world
-    *screen_x = (world_x - camera->x) * camera->zoom + screen_w / 2.0f;
-    *screen_y = (world_y - camera->y) * camera->zoom + screen_h / 2.0f;
+    // Inverse of screen_to_world (result is relative to viewport)
+    float vp_x = (world_x - camera->x) * camera->zoom + screen_w / 2.0f;
+    float vp_y = (world_y - camera->y) * camera->zoom + screen_h / 2.0f;
+
+    // Convert back to window coordinates
+    *screen_x = vp_x + rt->viewport_x();
+    *screen_y = vp_y + rt->viewport_y();
 }
 
 static entt::entity host_get_parent(runtime::ScriptHostAPI* /*api*/, entt::registry* reg, entt::entity entity) {
@@ -398,6 +424,119 @@ static void host_set_entity_active(runtime::ScriptHostAPI* /*api*/, entt::regist
     reg->get<EntityInfo>(entity).enabled_in_hierarchy = active;
 }
 
+static bool host_spawn_pixels_at_world(runtime::ScriptHostAPI* api, float world_x, float world_y, int radius, int material_id, bool erase) {
+    auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
+    if (!rt || !rt->editor_registry() || !rt->sim_playback()) return false;
+
+    auto* registry = rt->editor_registry();
+    bool spawned = false;
+
+    for (auto& state : rt->sim_playback()->surfaces()) {
+        if (!registry->valid(state->entity)) continue;
+        if (!registry->all_of<engine::Transform>(state->entity)) continue;
+        if (!registry->all_of<engine::simulation::PixelGridComponent>(state->entity)) continue;
+        if (!registry->all_of<engine::simulation::SimSurface>(state->entity)) continue;
+
+        auto& transform = registry->get<engine::Transform>(state->entity);
+        auto& grid_comp = registry->get<engine::simulation::PixelGridComponent>(state->entity);
+        auto& sim_surface = registry->get<engine::simulation::SimSurface>(state->entity);
+
+        // Convert world position to entity-local coords
+        float local_x = world_x - transform.world_x;
+        float local_y = world_y - transform.world_y;
+
+        // Apply inverse rotation
+        float rot_rad = -transform.world_rotation * engine::DEG_TO_RAD;
+        float cos_r = std::cos(rot_rad);
+        float sin_r = std::sin(rot_rad);
+        float rotated_x = local_x * cos_r - local_y * sin_r;
+        float rotated_y = local_x * sin_r + local_y * cos_r;
+
+        // Apply inverse scale
+        float unscaled_x = rotated_x / transform.world_scale_x;
+        float unscaled_y = rotated_y / transform.world_scale_y;
+
+        // Convert to grid pixel coordinates
+        float grid_x = unscaled_x + static_cast<float>(grid_comp.origin_x);
+        float grid_y = static_cast<float>(grid_comp.height - grid_comp.origin_y) - unscaled_y;
+
+        int px = static_cast<int>(std::floor(grid_x));
+        int py = static_cast<int>(std::floor(grid_y));
+
+        if (px < 0 || px >= grid_comp.width || py < 0 || py >= grid_comp.height) {
+            continue;
+        }
+
+        if (erase) {
+            if (grid_comp.destructible) {
+                state->pixel_grid.spawn_material(px, py, radius, 0, engine::simulation::CAT_EMPTY, 0);
+                spawned = true;
+
+                // Mark affected chunks dirty for collider regeneration
+                if (state->terrain_colliders) {
+                    state->terrain_colliders->mark_dirty_region(
+                        px - radius, py - radius, radius * 2 + 1, radius * 2 + 1);
+                }
+            }
+        } else {
+            auto* lib = engine::simulation::MaterialLibraryRegistry::instance()
+                .get_library(sim_surface.material_set);
+
+            uint8_t category = engine::simulation::CAT_POWDER;
+            uint8_t temperature = 128;
+
+            if (lib) {
+                auto* mat = lib->get_material(static_cast<uint8_t>(material_id));
+                if (mat) {
+                    category = static_cast<uint8_t>(mat->category);
+                    temperature = mat->default_temp;
+                }
+            }
+
+            state->pixel_grid.spawn_material(px, py, radius, static_cast<uint8_t>(material_id), category, temperature);
+            spawned = true;
+
+            // Mark affected chunks dirty for collider regeneration (for solid materials)
+            // CAT_STATIC and CAT_POWDER are both considered solid for collision purposes
+            if (state->terrain_colliders &&
+                (category == engine::simulation::CAT_STATIC || category == engine::simulation::CAT_POWDER)) {
+                state->terrain_colliders->mark_dirty_region(
+                    px - radius, py - radius, radius * 2 + 1, radius * 2 + 1);
+            }
+        }
+
+        // Only process one grid per spawn
+        break;
+    }
+
+    return spawned;
+}
+
+static void host_get_screen_size(runtime::ScriptHostAPI* api, float* width, float* height) {
+    *width = 800.0f;
+    *height = 600.0f;
+    auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
+    if (!rt || !rt->engine()) return;
+
+    // Use viewport dimensions if set, otherwise fall back to window dimensions
+    if (rt->viewport_width() > 0 && rt->viewport_height() > 0) {
+        *width = rt->viewport_width();
+        *height = rt->viewport_height();
+    } else {
+        *width = static_cast<float>(rt->engine()->window().width());
+        *height = static_cast<float>(rt->engine()->window().height());
+    }
+}
+
+static void host_get_viewport_offset(runtime::ScriptHostAPI* api, float* x, float* y) {
+    *x = 0.0f;
+    *y = 0.0f;
+    auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
+    if (!rt) return;
+    *x = rt->viewport_x();
+    *y = rt->viewport_y();
+}
+
 RuntimeContext::RuntimeContext() = default;
 
 RuntimeContext::~RuntimeContext() {
@@ -429,6 +568,7 @@ void RuntimeContext::init(entt::registry* editor_registry, ScriptManager* script
     m_host_api.add_impulse = &host_add_impulse;
     m_host_api.is_grounded = &host_is_grounded;
     m_host_api.find_entity_by_name = &host_find_entity_by_name;
+    m_host_api.find_entity_by_guid = &host_find_entity_by_guid;
     m_host_api.destroy_entity = &host_destroy_entity;
     m_host_api.add_component = &host_add_component;
     m_host_api.remove_component = &host_remove_component;
@@ -469,6 +609,13 @@ void RuntimeContext::init(entt::registry* editor_registry, ScriptManager* script
     m_host_api.get_entity_name = &host_get_entity_name;
     m_host_api.is_entity_active = &host_is_entity_active;
     m_host_api.set_entity_active = &host_set_entity_active;
+
+    // Pixel simulation
+    m_host_api.spawn_pixels_at_world = &host_spawn_pixels_at_world;
+
+    // Screen info
+    m_host_api.get_screen_size = &host_get_screen_size;
+    m_host_api.get_viewport_offset = &host_get_viewport_offset;
 }
 
 void RuntimeContext::play(const SceneSettings& settings) {
@@ -504,7 +651,7 @@ void RuntimeContext::play(const SceneSettings& settings) {
         m_physics_playback->init_bodies();
 
         m_sim_playback = std::make_unique<SimulationPlayback>(*m_editor_registry);
-        m_sim_playback->init(m_physics_world.get());
+        m_sim_playback->init(m_physics_world.get(), m_engine->config());
 
         m_component_registry = std::make_unique<engine::prefab::ComponentRegistry>();
         engine::register_engine_components(*m_component_registry);

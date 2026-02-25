@@ -370,4 +370,59 @@ PhysicsWorld::RaycastHit PhysicsWorld::raycast(float origin_x, float origin_y,
     return result;
 }
 
+void PhysicsWorld::for_each_body(const BodyCallback& callback) const {
+    if (!b2World_IsValid(m_world_id)) return;
+
+    // Get body count and iterate
+    b2BodyEvents body_events = b2World_GetBodyEvents(m_world_id);
+
+    // Box2D 3.x doesn't have a direct "iterate all bodies" API.
+    // We need to use body move events to track bodies, or query world AABB.
+    // For now, use a world AABB query to find all bodies.
+
+    // Query a very large AABB to capture all bodies
+    b2AABB query_aabb;
+    query_aabb.lowerBound = {-1e6f, -1e6f};
+    query_aabb.upperBound = {1e6f, 1e6f};
+
+    // Use b2World_OverlapAABB to find all shapes, then collect unique bodies
+    struct QueryContext {
+        const BodyCallback* callback;
+        std::vector<uint64_t> seen_bodies;  // Track seen body IDs
+    };
+
+    QueryContext ctx;
+    ctx.callback = &callback;
+
+    auto overlap_callback = [](b2ShapeId shape_id, void* user_data) -> bool {
+        auto* ctx = static_cast<QueryContext*>(user_data);
+
+        b2BodyId body_id = b2Shape_GetBody(shape_id);
+        if (!b2Body_IsValid(body_id)) return true;
+
+        // Create unique key from body ID
+        uint64_t body_key = static_cast<uint64_t>(body_id.index1) |
+                           (static_cast<uint64_t>(body_id.world0) << 32);
+
+        // Check if we've already processed this body
+        bool seen = false;
+        for (uint64_t key : ctx->seen_bodies) {
+            if (key == body_key) {
+                seen = true;
+                break;
+            }
+        }
+
+        if (!seen) {
+            ctx->seen_bodies.push_back(body_key);
+            (*ctx->callback)(body_id);
+        }
+
+        return true;  // Continue iteration
+    };
+
+    b2QueryFilter filter = b2DefaultQueryFilter();
+    b2World_OverlapAABB(m_world_id, query_aabb, filter, overlap_callback, &ctx);
+}
+
 } // namespace engine::physics

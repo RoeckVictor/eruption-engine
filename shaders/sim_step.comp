@@ -432,6 +432,93 @@ void main() {
         markBlockChunksDirty(block_base);
     }
 
+    // ---- PASS 7: Rigidbody collision detection ----
+    // Mark movable pixels that are blocked by rigidbody pixels for particle extraction.
+    // This converts stuck sand/water/gas into particles that can bounce off the rigidbody.
+
+    // Re-read categories for final check
+    cat_tl = getCategoryFast(tl);
+    cat_tr = getCategoryFast(tr);
+    cat_bl = getCategoryFast(bl);
+    cat_br = getCategoryFast(br);
+
+    // Check if any pixel in this block is a rigidbody
+    bool has_rigidbody = hasFlag(tl, FLAG_RIGIDBODY) || hasFlag(tr, FLAG_RIGIDBODY) ||
+                         hasFlag(bl, FLAG_RIGIDBODY) || hasFlag(br, FLAG_RIGIDBODY);
+
+    if (has_rigidbody) {
+        // Check each movable pixel against adjacent rigidbody pixels
+        // Powder/liquid: blocked when rigidbody is below
+        // Gas: blocked when rigidbody is above
+
+        // TL pixel - check if blocked by rigidbody below (BL)
+        if (isMobile(cat_tl) && !hasFlag(tl, FLAG_RIGIDBODY)) {
+            if (hasFlag(bl, FLAG_RIGIDBODY) && (cat_tl == CAT_POWDER || cat_tl == CAT_LIQUID)) {
+                setFlag(tl, FLAG_CONVERT_TO_PARTICLE);
+                moved = true;
+            }
+            // Also check diagonal (BR) for sliding collisions
+            if (hasFlag(br, FLAG_RIGIDBODY) && cat_tl == CAT_POWDER) {
+                setFlag(tl, FLAG_CONVERT_TO_PARTICLE);
+                moved = true;
+            }
+            // Liquid lateral spread blocked
+            if (hasFlag(tr, FLAG_RIGIDBODY) && cat_tl == CAT_LIQUID) {
+                setFlag(tl, FLAG_CONVERT_TO_PARTICLE);
+                moved = true;
+            }
+        }
+
+        // TR pixel - check if blocked by rigidbody below (BR)
+        if (isMobile(cat_tr) && !hasFlag(tr, FLAG_RIGIDBODY)) {
+            if (hasFlag(br, FLAG_RIGIDBODY) && (cat_tr == CAT_POWDER || cat_tr == CAT_LIQUID)) {
+                setFlag(tr, FLAG_CONVERT_TO_PARTICLE);
+                moved = true;
+            }
+            // Check diagonal (BL)
+            if (hasFlag(bl, FLAG_RIGIDBODY) && cat_tr == CAT_POWDER) {
+                setFlag(tr, FLAG_CONVERT_TO_PARTICLE);
+                moved = true;
+            }
+            // Liquid lateral spread blocked
+            if (hasFlag(tl, FLAG_RIGIDBODY) && cat_tr == CAT_LIQUID) {
+                setFlag(tr, FLAG_CONVERT_TO_PARTICLE);
+                moved = true;
+            }
+        }
+
+        // BL pixel - check if gas blocked by rigidbody above (TL)
+        if (isMobile(cat_bl) && !hasFlag(bl, FLAG_RIGIDBODY)) {
+            if (hasFlag(tl, FLAG_RIGIDBODY) && cat_bl == CAT_GAS) {
+                setFlag(bl, FLAG_CONVERT_TO_PARTICLE);
+                moved = true;
+            }
+            // Liquid lateral spread blocked
+            if (hasFlag(br, FLAG_RIGIDBODY) && cat_bl == CAT_LIQUID) {
+                setFlag(bl, FLAG_CONVERT_TO_PARTICLE);
+                moved = true;
+            }
+        }
+
+        // BR pixel - check if gas blocked by rigidbody above (TR)
+        if (isMobile(cat_br) && !hasFlag(br, FLAG_RIGIDBODY)) {
+            if (hasFlag(tr, FLAG_RIGIDBODY) && cat_br == CAT_GAS) {
+                setFlag(br, FLAG_CONVERT_TO_PARTICLE);
+                moved = true;
+            }
+            // Liquid lateral spread blocked
+            if (hasFlag(bl, FLAG_RIGIDBODY) && cat_br == CAT_LIQUID) {
+                setFlag(br, FLAG_CONVERT_TO_PARTICLE);
+                moved = true;
+            }
+        }
+
+        // Mark chunks dirty if we marked any for extraction
+        if (moved) {
+            markBlockChunksDirty(block_base);
+        }
+    }
+
     // ---- Write results ----
     storePixel(block_base + ivec2(0, 0), tl);
     storePixel(block_base + ivec2(1, 0), tr);

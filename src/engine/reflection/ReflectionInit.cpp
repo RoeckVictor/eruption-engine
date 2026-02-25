@@ -104,6 +104,7 @@ REFLECT_TYPE_BEGIN(engine::simulation::PixelGridComponent)
     REFLECT_PROPERTY(origin_x, "Origin X")
     REFLECT_PROPERTY(origin_y, "Origin Y")
     REFLECT_PROPERTY(loaded, "Loaded")
+    REFLECT_PROPERTY(destructible, "Destructible")
 REFLECT_TYPE_END()
 
 // PixelGridRenderer reflection

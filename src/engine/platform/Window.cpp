@@ -99,6 +99,23 @@ static int to_glfw_key(KeyCode key) {
         case KeyCode::Minus:        return GLFW_KEY_MINUS;
         case KeyCode::Equal:        return GLFW_KEY_EQUAL;
 
+        case KeyCode::Numpad0:        return GLFW_KEY_KP_0;
+        case KeyCode::Numpad1:        return GLFW_KEY_KP_1;
+        case KeyCode::Numpad2:        return GLFW_KEY_KP_2;
+        case KeyCode::Numpad3:        return GLFW_KEY_KP_3;
+        case KeyCode::Numpad4:        return GLFW_KEY_KP_4;
+        case KeyCode::Numpad5:        return GLFW_KEY_KP_5;
+        case KeyCode::Numpad6:        return GLFW_KEY_KP_6;
+        case KeyCode::Numpad7:        return GLFW_KEY_KP_7;
+        case KeyCode::Numpad8:        return GLFW_KEY_KP_8;
+        case KeyCode::Numpad9:        return GLFW_KEY_KP_9;
+        case KeyCode::NumpadAdd:      return GLFW_KEY_KP_ADD;
+        case KeyCode::NumpadSubtract: return GLFW_KEY_KP_SUBTRACT;
+        case KeyCode::NumpadMultiply: return GLFW_KEY_KP_MULTIPLY;
+        case KeyCode::NumpadDivide:   return GLFW_KEY_KP_DIVIDE;
+        case KeyCode::NumpadDecimal:  return GLFW_KEY_KP_DECIMAL;
+        case KeyCode::NumpadEnter:    return GLFW_KEY_KP_ENTER;
+
         default: return GLFW_KEY_UNKNOWN;
     }
 }
@@ -242,6 +259,10 @@ void Window::get_cursor_position(double& x, double& y) const {
 
 GLFWwindow* Window::glfw_handle() const {
     return native(m_handle);
+}
+
+void Window::get_position(int& x, int& y) const {
+    glfwGetWindowPos(native(m_handle), &x, &y);
 }
 
 } // namespace engine::platform
