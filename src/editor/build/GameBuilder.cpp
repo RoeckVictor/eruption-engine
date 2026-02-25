@@ -180,16 +180,22 @@ bool GameBuilder::prepare_output_directory(const BuildConfig& config) {
 }
 
 bool GameBuilder::compile_scripts(const BuildConfig& config) {
-    // For now, we just copy the pre-compiled DLL if it exists
+    // For now, we just copy the pre-compiled library if it exists
     // Full script compilation would require calling ScriptCompiler
 
-    fs::path project_dll = fs::path(m_project_path) / "Library" / "ScriptAssemblies" / "GameScripts.dll";
-    fs::path output_dll = fs::path(config.output_path) / "GameScripts.dll";
+#ifdef _WIN32
+    const char* lib_name = "GameScripts.dll";
+#else
+    const char* lib_name = "libGameScripts.so";
+#endif
 
-    if (fs::exists(project_dll)) {
+    fs::path project_lib = fs::path(m_project_path) / "Library" / "ScriptAssemblies" / lib_name;
+    fs::path output_lib = fs::path(config.output_path) / lib_name;
+
+    if (fs::exists(project_lib)) {
         try {
-            fs::copy_file(project_dll, output_dll, fs::copy_options::overwrite_existing);
-            engine::Logger::instance().info("GameBuilder", "Copied script DLL");
+            fs::copy_file(project_lib, output_lib, fs::copy_options::overwrite_existing);
+            engine::Logger::instance().info("GameBuilder", "Copied script library");
         } catch (const std::exception& e) {
             engine::Logger::instance().warning("GameBuilder", "Failed to copy scripts: %s", e.what());
             // Not a fatal error - game can run without scripts

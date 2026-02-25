@@ -11,6 +11,12 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <sys/wait.h>
+#include <unistd.h>
+#include <signal.h>
+#include <chrono>
+#include <thread>
 #endif
 
 namespace fs = std::filesystem;
@@ -18,11 +24,10 @@ namespace fs = std::filesystem;
 namespace editor {
 
 #ifdef _WIN32
-/// Maximum time (ms) to wait for a cmake subprocess before killing it.
-static constexpr DWORD SUBPROCESS_TIMEOUT_MS = 120000;  // 2 minutes
+static constexpr DWORD SUBPROCESS_TIMEOUT_MS = 120000;
 
-/// Run a command silently (no visible CMD window) and wait for completion.
-/// Returns the process exit code, -1 on launch failure, or -2 on timeout.
+// Run a command silently (no visible CMD window) and wait for completion.
+// Returns the process exit code, -1 on launch failure, or -2 on timeout.
 static int run_command_hidden(const std::string& command, std::string& output) {
     SECURITY_ATTRIBUTES sa{};
     sa.nLength = sizeof(sa);
@@ -87,6 +92,94 @@ static int run_command_hidden(const std::string& command, std::string& output) {
     CloseHandle(pi.hThread);
 
     return static_cast<int>(exit_code);
+}
+#else
+static constexpr int SUBPROCESS_TIMEOUT_SEC = 120;
+
+// Run a command and capture stdout/stderr with timeout support.
+// Returns the process exit code, -1 on launch failure, or -2 on timeout.
+static int run_command_hidden(const std::string& command, std::string& output) {
+    output.clear();
+
+    // Create pipe for capturing stdout/stderr
+    int pipe_fd[2];
+    if (pipe(pipe_fd) == -1) {
+        return -1;
+    }
+
+    pid_t pid = fork();
+    if (pid == -1) {
+        close(pipe_fd[0]);
+        close(pipe_fd[1]);
+        return -1;
+    }
+
+    if (pid == 0) {
+        // Child process
+        close(pipe_fd[0]);
+
+        // Redirect stdout and stderr to pipe
+        dup2(pipe_fd[1], STDOUT_FILENO);
+        dup2(pipe_fd[1], STDERR_FILENO);
+        close(pipe_fd[1]);
+
+        // Execute command via shell
+        execl("/bin/sh", "sh", "-c", command.c_str(), nullptr);
+        _exit(127);  // exec failed
+    }
+
+    // Parent process
+    close(pipe_fd[1]);  // Close write end
+
+    char buffer[4096];
+    auto start_time = std::chrono::steady_clock::now();
+
+    while (true) {
+        // Check for timeout
+        auto elapsed = std::chrono::steady_clock::now() - start_time;
+        if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() >= SUBPROCESS_TIMEOUT_SEC) {
+            engine::Logger::instance().error("ScriptCompiler",
+                "Process timed out after %d seconds, terminating", SUBPROCESS_TIMEOUT_SEC);
+            kill(pid, SIGKILL);
+            waitpid(pid, nullptr, 0);
+            close(pipe_fd[0]);
+            return -2;
+        }
+
+        // Try to read from pipe (non-blocking check via waitpid)
+        int status;
+        pid_t result = waitpid(pid, &status, WNOHANG);
+
+        if (result == 0) {
+            // Process still running, read available data
+            ssize_t bytes = read(pipe_fd[0], buffer, sizeof(buffer) - 1);
+            if (bytes > 0) {
+                buffer[bytes] = '\0';
+                output += buffer;
+            } else {
+                // No data available, sleep briefly to avoid busy-wait
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        } else if (result == pid) {
+            // Process finished, read any remaining output
+            ssize_t bytes;
+            while ((bytes = read(pipe_fd[0], buffer, sizeof(buffer) - 1)) > 0) {
+                buffer[bytes] = '\0';
+                output += buffer;
+            }
+            close(pipe_fd[0]);
+
+            if (WIFEXITED(status)) {
+                return WEXITSTATUS(status);
+            }
+            // Process was killed by signal
+            return -1;
+        } else {
+            // waitpid error
+            close(pipe_fd[0]);
+            return -1;
+        }
+    }
 }
 #endif
 
@@ -205,13 +298,20 @@ set_target_properties(GameScripts PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../Library/ScriptAssemblies"
 )
 
-# Windows-specific: output to same directory for all configs
+# Platform-specific settings
 if(WIN32)
+    # Windows: output to same directory for all configs
     set_target_properties(GameScripts PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/../Library/ScriptAssemblies"
         RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/../Library/ScriptAssemblies"
         RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_CURRENT_SOURCE_DIR}/../Library/ScriptAssemblies"
         RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_CURRENT_SOURCE_DIR}/../Library/ScriptAssemblies"
+    )
+else()
+    # Linux/macOS: Set visibility to hidden by default, explicit exports only
+    set_target_properties(GameScripts PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
     )
 endif()
 )";
@@ -230,36 +330,31 @@ endif()
 #include "runtime/SystemScript.h"
 #include <imgui.h>
 
-// DLL exports called by the editor's DLLManager
+// Cross-platform export macro
+#ifdef _WIN32
+    #define SCRIPT_EXPORT __declspec(dllexport)
+#else
+    #define SCRIPT_EXPORT __attribute__((visibility("default")))
+#endif
+
+// Shared library exports called by the editor's DLLManager
 extern "C" {
 
-#ifdef _WIN32
-    __declspec(dllexport)
-#endif
-int GetScriptCount() {
+SCRIPT_EXPORT int GetScriptCount() {
     return static_cast<int>(runtime::get_script_registry().size());
 }
 
-#ifdef _WIN32
-    __declspec(dllexport)
-#endif
-const char* GetScriptName(int index) {
+SCRIPT_EXPORT const char* GetScriptName(int index) {
     return runtime::get_script_registry()[index].name;
 }
 
-#ifdef _WIN32
-    __declspec(dllexport)
-#endif
-runtime::ScriptFactory GetScriptFactory(int index) {
+SCRIPT_EXPORT runtime::ScriptFactory GetScriptFactory(int index) {
     return runtime::get_script_registry()[index].factory;
 }
 
 // Set ImGui context from host application (editor).
-// This ensures the DLL uses the same ImGui context as the editor.
-#ifdef _WIN32
-    __declspec(dllexport)
-#endif
-void SetImGuiContext(ImGuiContext* ctx) {
+// This ensures the shared library uses the same ImGui context as the editor.
+SCRIPT_EXPORT void SetImGuiContext(ImGuiContext* ctx) {
     ImGui::SetCurrentContext(ctx);
 }
 
@@ -464,15 +559,12 @@ bool ScriptCompiler::run_cmake_configure() {
 
     engine::Logger::instance().info("ScriptCompiler", "Running: %s", command.c_str());
 
-#ifdef _WIN32
     std::string cmd_output;
     int result = run_command_hidden(command, cmd_output);
     if (!cmd_output.empty()) {
         m_build_output += cmd_output;
     }
-#else
-    int result = std::system(command.c_str());
-#endif
+
     if (result != 0) {
         m_last_error = "CMake configure failed with code: " + std::to_string(result);
         engine::Logger::instance().error("ScriptCompiler", "%s", m_last_error.c_str());
@@ -502,15 +594,11 @@ bool ScriptCompiler::run_cmake_build() {
 
     engine::Logger::instance().info("ScriptCompiler", "Running: %s", command.c_str());
 
-#ifdef _WIN32
     std::string cmd_output;
     int result = run_command_hidden(command, cmd_output);
     if (!cmd_output.empty()) {
         m_build_output += cmd_output;
     }
-#else
-    int result = std::system(command.c_str());
-#endif
     if (result != 0) {
         m_last_error = "CMake build failed with code: " + std::to_string(result);
         engine::Logger::instance().error("ScriptCompiler", "%s", m_last_error.c_str());
@@ -520,4 +608,4 @@ bool ScriptCompiler::run_cmake_build() {
     return true;
 }
 
-} // namespace editor
+}

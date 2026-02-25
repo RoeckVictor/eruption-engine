@@ -96,21 +96,28 @@ bool GameApplication::on_init(engine::Engine& engine) {
     engine.set_clear_color(settings.bg_color[0], settings.bg_color[1], settings.bg_color[2]);
 
     // -----------------------------------------------------------------------
-    // 3. Load script DLL (optional — game can run without scripts)
+    // 3. Load script library (optional — game can run without scripts)
     // -----------------------------------------------------------------------
     m_script_manager = std::make_unique<editor::ScriptManager>();
 
-    fs::path dll_path = "GameScripts.dll";
-    if (fs::exists(dll_path)) {
-        if (m_script_manager->dll_manager().load(dll_path.string())) {
-            log.info("Game", "Loaded scripts DLL (%zu types)",
+#ifdef _WIN32
+    fs::path lib_path = "GameScripts.dll";
+    const char* lib_name = "GameScripts.dll";
+#else
+    fs::path lib_path = "libGameScripts.so";
+    const char* lib_name = "libGameScripts.so";
+#endif
+
+    if (fs::exists(lib_path)) {
+        if (m_script_manager->dll_manager().load(lib_path.string())) {
+            log.info("Game", "Loaded scripts library (%zu types)",
                      m_script_manager->dll_manager().script_types().size());
         } else {
-            log.warning("Game", "Failed to load scripts DLL: %s",
+            log.warning("Game", "Failed to load scripts library: %s",
                         m_script_manager->dll_manager().last_error().c_str());
         }
     } else {
-        log.info("Game", "No GameScripts.dll found — running without scripts");
+        log.info("Game", "No %s found — running without scripts", lib_name);
     }
 
     // -----------------------------------------------------------------------

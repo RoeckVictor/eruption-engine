@@ -15,17 +15,33 @@ endif()
 include(cmake/Dependencies.cmake)
 
 # =============================================================================
-# Helper: Configure Windows subsystem (console + Shell API)
+# Helper: Configure platform-specific settings
 # =============================================================================
-function(configure_win32_target TARGET)
+function(configure_platform_target TARGET)
     if(WIN32)
+        # Windows: Link Shell API libraries
         target_link_libraries(${TARGET} PRIVATE ole32 uuid shell32)
         if(MSVC)
             target_link_options(${TARGET} PRIVATE /ENTRY:mainCRTStartup)
             target_compile_definitions(${TARGET} PRIVATE _CRT_SECURE_NO_WARNINGS)
         endif()
+    elseif(UNIX AND NOT APPLE)
+        # Linux: Link dl for dynamic library loading, pthread for threading
+        target_link_libraries(${TARGET} PRIVATE dl pthread)
+    elseif(APPLE)
+        # macOS: Link Cocoa frameworks (for future support)
+        # target_link_libraries(${TARGET} PRIVATE "-framework Cocoa")
     endif()
 endfunction()
+
+# Helper macro to add executable with platform-appropriate subsystem
+macro(add_platform_executable TARGET)
+    if(WIN32)
+        add_executable(${TARGET} WIN32 ${ARGN})
+    else()
+        add_executable(${TARGET} ${ARGN})
+    endif()
+endmacro()
 
 # =============================================================================
 # Engine Library
@@ -108,14 +124,14 @@ file(GLOB PIXART_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/pixart/*.cpp"
 )
 
-add_executable(pixart WIN32 ${PIXART_SOURCES})
+add_platform_executable(pixart ${PIXART_SOURCES})
 
 target_link_libraries(pixart PRIVATE
     eruption_engine
     imgui
 )
 
-configure_win32_target(pixart)
+configure_platform_target(pixart)
 
 # =============================================================================
 # Editor Executable
@@ -127,7 +143,7 @@ file(GLOB_RECURSE EDITOR_SOURCES CONFIGURE_DEPENDS
 # Remove sources already compiled in eruption_runtime to avoid duplicate symbols
 list(REMOVE_ITEM EDITOR_SOURCES ${RUNTIME_SOURCES})
 
-add_executable(eruption_editor WIN32 ${EDITOR_SOURCES})
+add_platform_executable(eruption_editor ${EDITOR_SOURCES})
 
 target_link_libraries(eruption_editor PRIVATE
     eruption_runtime
@@ -135,7 +151,7 @@ target_link_libraries(eruption_editor PRIVATE
     stb            # AssetPreviewPanel.cpp includes stb_image.h directly
 )
 
-configure_win32_target(eruption_editor)
+configure_platform_target(eruption_editor)
 
 # =============================================================================
 # Asset Copy Helper
@@ -163,7 +179,7 @@ copy_runtime_assets(copy_editor_assets eruption_editor)
 # =============================================================================
 # Game Runtime Executable
 # =============================================================================
-add_executable(eruption_game WIN32
+add_platform_executable(eruption_game
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/GameApplication.cpp"
 )
@@ -173,7 +189,7 @@ target_link_libraries(eruption_game PRIVATE
     imgui
 )
 
-configure_win32_target(eruption_game)
+configure_platform_target(eruption_game)
 
 # Copy assets for game runtime
 copy_runtime_assets(copy_game_assets eruption_game)
