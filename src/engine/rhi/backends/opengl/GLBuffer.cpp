@@ -18,7 +18,6 @@ GLenum buffer_type_to_gl(BufferType type) {
 }
 
 GLenum buffer_usage_to_gl(BufferUsage usage, BufferType type) {
-    // PixelPack buffers use READ hint since they're for GPU->CPU transfers
     if (type == BufferType::PixelPack) {
         return GL_STREAM_READ;
     }
@@ -30,7 +29,7 @@ GLenum buffer_usage_to_gl(BufferUsage usage, BufferType type) {
     }
 }
 
-} // anonymous namespace
+}
 
 GLBuffer::~GLBuffer() {
     destroy();
@@ -146,13 +145,11 @@ bool GLBuffer::readback(size_t offset, size_t size, void* dst) const {
 void GLBuffer::bind(uint32_t slot) {
     if (!m_valid) return;
 
-    // For storage and uniform buffers, bind to indexed binding point
     if (m_type == BufferType::Storage) {
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, slot, m_handle);
     } else if (m_type == BufferType::Uniform) {
         glBindBufferBase(GL_UNIFORM_BUFFER, slot, m_handle);
     } else {
-        // For vertex/index buffers, just bind to the target
         GLenum target = buffer_type_to_gl(m_type);
         glBindBuffer(target, m_handle);
     }
@@ -181,4 +178,4 @@ void GLBuffer::unmap() {
     glBindBuffer(target, 0);
 }
 
-} // namespace engine::rhi
+}

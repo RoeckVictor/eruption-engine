@@ -19,6 +19,7 @@
 #include "engine/simulation/SimSurface.h"
 #include "engine/simulation/MaterialDefs.h"
 #include "engine/simulation/MaterialLibrary.h"
+#include "engine/profiler/Profiler.h"
 #include "editor/scripting/ScriptManager.h"
 #include "runtime/ScriptComponent.h"
 #include "engine/prefab/PrefabManager.h"
@@ -756,6 +757,8 @@ void RuntimeContext::update(float dt) {
         return;
     }
 
+    PROFILE_SCOPE("RuntimeContext::update");
+
     m_step_requested = false;
 
     m_play_time += dt;
@@ -779,37 +782,56 @@ void RuntimeContext::update(float dt) {
     while (m_fixed_time_accumulator >= m_fixed_timestep) {
         m_fixed_time_accumulator -= m_fixed_timestep;
 
-        fixed_update_scripts();
+        {
+            PROFILE_SCOPE("Runtime::FixedUpdateScripts");
+            fixed_update_scripts();
+        }
 
         if (m_physics_world) {
+            PROFILE_SCOPE("Runtime::PhysicsStep");
             m_physics_world->step(m_fixed_timestep, 4);
             process_collision_events();
         }
     }
 
     if (m_physics_playback) {
+        PROFILE_SCOPE("Runtime::PhysicsSync");
         m_physics_playback->sync_to_transforms();
     }
 
-    update_world_transforms(*m_editor_registry);
+    {
+        PROFILE_SCOPE("Runtime::WorldTransforms");
+        update_world_transforms(*m_editor_registry);
+    }
 
-    update_coroutines(dt);
-    check_enable_disable_scripts();
-    update_scripts();
-    late_update_scripts();
+    {
+        PROFILE_SCOPE("Runtime::Coroutines");
+        update_coroutines(dt);
+    }
+
+    {
+        PROFILE_SCOPE("Runtime::Scripts");
+        check_enable_disable_scripts();
+        update_scripts();
+        late_update_scripts();
+    }
 
     if (m_sim_playback) {
+        PROFILE_SCOPE("Runtime::PixelSimulation");
         m_sim_playback->update(m_frame_count);
     }
 
-    for (auto entity : m_deferred_destroys) {
-        if (m_editor_registry->valid(entity)) {
-            cleanup_entity_coroutines(entity);
-            m_event_dispatcher.cleanup_entity(entity);
-            destroy_entity_recursive(*m_editor_registry, entity);
+    {
+        PROFILE_SCOPE("Runtime::DeferredDestroys");
+        for (auto entity : m_deferred_destroys) {
+            if (m_editor_registry->valid(entity)) {
+                cleanup_entity_coroutines(entity);
+                m_event_dispatcher.cleanup_entity(entity);
+                destroy_entity_recursive(*m_editor_registry, entity);
+            }
         }
+        m_deferred_destroys.clear();
     }
-    m_deferred_destroys.clear();
 }
 
 void RuntimeContext::snapshot_scene() {

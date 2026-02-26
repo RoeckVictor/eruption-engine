@@ -1,10 +1,12 @@
 #include "engine/platform/Input.h"
 #include "engine/platform/Window.h"
+#include "engine/profiler/Profiler.h"
 #include <cstring>
 
 namespace engine::platform {
 
 void Input::update(Window& window) {
+    PROFILE_SCOPE("Input::update");
     memcpy(m_keys_prev, m_keys, sizeof(m_keys));
     memcpy(m_mouse_prev, m_mouse, sizeof(m_mouse));
 

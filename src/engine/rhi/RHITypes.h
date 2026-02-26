@@ -5,33 +5,25 @@
 
 namespace engine::rhi {
 
-// =============================================================================
-// Backend Selection
-// =============================================================================
-
 enum class Backend {
     OpenGL,
-    Vulkan,     // Future
-    D3D12,      // Future
-    Metal,      // Future
+    Vulkan,
+    D3D12,
+    Metal,
 };
-
-// =============================================================================
-// Buffer Types
-// =============================================================================
 
 enum class BufferType {
     Vertex,
     Index,
     Uniform,
     Storage,
-    PixelPack,      // For async GPU->CPU texture readback
+    PixelPack,
 };
 
 enum class BufferUsage {
-    Static,     // Data set once, used many times
-    Dynamic,    // Data updated occasionally
-    Stream,     // Data updated every frame
+    Static,
+    Dynamic,
+    Stream,
 };
 
 struct BufferDesc {
@@ -41,24 +33,17 @@ struct BufferDesc {
     const void* initial_data = nullptr;
 };
 
-// =============================================================================
-// Texture Types
-// =============================================================================
-
 enum class TextureFormat {
-    // Normalized formats (0.0 - 1.0)
     R8,
     RG8,
     RGB8,
     RGBA8,
 
-    // Unsigned integer formats
     R8UI,
     RG8UI,
     RGB8UI,
     RGBA8UI,
 
-    // Float formats
     R16F,
     RG16F,
     RGB16F,
@@ -68,7 +53,6 @@ enum class TextureFormat {
     RGB32F,
     RGBA32F,
 
-    // Depth/stencil formats
     Depth16,
     Depth24,
     Depth32F,
@@ -116,34 +100,26 @@ struct TextureDesc {
     const void* initial_data = nullptr;
 };
 
-// =============================================================================
-// Shader Types
-// =============================================================================
-
 enum class ShaderStage {
     Vertex,
     Fragment,
     Compute,
-    Geometry,       // Optional
-    TessControl,    // Optional
-    TessEvaluation, // Optional
+    Geometry,
+    TessControl,
+    TessEvaluation,
 };
 
 struct ShaderStageDesc {
     ShaderStage stage;
-    const char* source_path = nullptr;  // Path to shader source file
-    const char* source_code = nullptr;  // Or inline source code
-    const char* entry_point = "main";   // Entry point name
+    const char* source_path = nullptr;
+    const char* source_code = nullptr;
+    const char* entry_point = "main";
 };
 
 struct ShaderDesc {
     const ShaderStageDesc* stages = nullptr;
     uint32_t stage_count = 0;
 };
-
-// =============================================================================
-// Pipeline Types
-// =============================================================================
 
 enum class PrimitiveTopology {
     Points,
@@ -249,34 +225,27 @@ struct RasterizerState {
     FrontFace front_face = FrontFace::CounterClockwise;
     bool wireframe = false;
     bool scissor_test = false;
-    bool program_point_size = false;  // Enable gl_PointSize in vertex shader
+    bool program_point_size = false;
 };
 
 struct PipelineDesc {
-    // Shader (required)
     class RHIShader* shader = nullptr;
 
-    // Vertex input
     const VertexAttribute* attributes = nullptr;
     uint32_t attribute_count = 0;
     const VertexBinding* bindings = nullptr;
     uint32_t binding_count = 0;
 
-    // Fixed function state
     PrimitiveTopology topology = PrimitiveTopology::Triangles;
     BlendState blend;
     DepthStencilState depth_stencil;
     RasterizerState rasterizer;
 };
 
-// =============================================================================
-// Framebuffer Types
-// =============================================================================
-
 struct FramebufferAttachment {
     class RHITexture* texture = nullptr;
     int mip_level = 0;
-    int layer = 0;  // For cubemaps/arrays
+    int layer = 0;
 };
 
 struct FramebufferDesc {
@@ -286,10 +255,6 @@ struct FramebufferDesc {
     int width = 0;
     int height = 0;
 };
-
-// =============================================================================
-// Synchronization
-// =============================================================================
 
 enum class BarrierFlags : uint32_t {
     None = 0,
@@ -316,11 +281,6 @@ inline bool has_flag(BarrierFlags flags, BarrierFlags flag) {
     return (static_cast<uint32_t>(flags) & static_cast<uint32_t>(flag)) != 0;
 }
 
-// =============================================================================
-// Utility Functions
-// =============================================================================
-
-/// Get the size in bytes of a vertex format
 inline uint32_t vertex_format_size(VertexFormat format) {
     switch (format) {
         case VertexFormat::Float:      return 4;
@@ -341,7 +301,6 @@ inline uint32_t vertex_format_size(VertexFormat format) {
     }
 }
 
-/// Get bytes per pixel for a texture format
 inline uint32_t texture_format_bpp(TextureFormat format) {
     switch (format) {
         case TextureFormat::R8:
@@ -379,7 +338,6 @@ inline uint32_t texture_format_bpp(TextureFormat format) {
     }
 }
 
-/// Check if format is a depth format
 inline bool is_depth_format(TextureFormat format) {
     switch (format) {
         case TextureFormat::Depth16:
@@ -393,10 +351,9 @@ inline bool is_depth_format(TextureFormat format) {
     }
 }
 
-/// Check if format has stencil
 inline bool has_stencil(TextureFormat format) {
     return format == TextureFormat::Depth24Stencil8 ||
            format == TextureFormat::Depth32FStencil8;
 }
 
-} // namespace engine::rhi
+}

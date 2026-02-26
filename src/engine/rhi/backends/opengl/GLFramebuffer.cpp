@@ -262,4 +262,4 @@ RHITexture* GLFramebuffer::depth_stencil_attachment() {
     return m_depth_attachment;
 }
 
-} // namespace engine::rhi
+}

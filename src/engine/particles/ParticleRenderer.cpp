@@ -4,6 +4,7 @@
 #include "engine/render/Camera2D.h"
 #include "engine/rhi/RHIDevice.h"
 #include "engine/rhi/RHIContext.h"
+#include "engine/profiler/Profiler.h"
 #include "engine/core/Log.h"
 
 namespace engine::particles {
@@ -66,6 +67,7 @@ void ParticleRenderer::draw(ParticleBuffer& buffer,
                              float grid_origin_x, float grid_origin_y, int grid_height) {
     int alive = buffer.alive_count();
     if (alive == 0) return;
+    PROFILE_SCOPE("ParticleRenderer::draw");
 
     auto* ctx = rhi::get_current_context();
     if (!ctx) return;

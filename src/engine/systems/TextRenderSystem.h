@@ -26,6 +26,7 @@ namespace asset { class AssetDatabase; }
 /// Uses stb_truetype for dynamic TTF font rendering.
 class TextRenderSystem : public System {
 public:
+    const char* name() const override { return "TextRenderSystem"; }
     bool init(Engine& engine) override;
     void shutdown() override;
     void render(Engine& engine) override;

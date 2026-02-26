@@ -24,6 +24,7 @@ namespace asset { class AssetDatabase; }
 /// If sprite_path is set, renders the texture multiplied by color for tinting.
 class ImageRenderSystem : public System {
 public:
+    const char* name() const override { return "ImageRenderSystem"; }
     bool init(Engine& engine) override;
     void shutdown() override;
     void render(Engine& engine) override;

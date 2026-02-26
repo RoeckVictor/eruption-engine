@@ -2,6 +2,7 @@
 #include "engine/rhi/RHIDevice.h"
 #include "engine/rhi/RHIContext.h"
 #include "engine/core/Log.h"
+#include "engine/profiler/Profiler.h"
 
 namespace engine::render {
 
@@ -100,6 +101,7 @@ void DebugRenderer::draw_line(float x0, float y0, float x1, float y1,
 
 void DebugRenderer::end() {
     if (m_vertices.empty()) return;
+    PROFILE_SCOPE("DebugRenderer::end");
 
     auto* ctx = rhi::get_current_context();
     if (!ctx) return;

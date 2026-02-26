@@ -252,7 +252,7 @@ void GLPipeline::bind() {
     }
 
     if (m_is_compute) {
-        return;  // Compute pipelines don't need VAO or state
+        return;
     }
 
     if (m_vao) {
@@ -330,4 +330,4 @@ void GLPipeline::apply_rasterizer_state(const RasterizerState& state) {
     }
 }
 
-} // namespace engine::rhi
+}

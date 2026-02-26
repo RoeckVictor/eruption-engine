@@ -18,6 +18,7 @@ namespace engine {
 /// alongside the existing RigidBodySyncSystem (which handles PixelBody).
 class RigidbodySyncSystem : public System {
 public:
+    const char* name() const override { return "RigidbodySyncSystem"; }
     bool init(Engine& engine) override;
     void fixed_update(Engine& engine, float dt) override;
 

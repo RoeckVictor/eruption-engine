@@ -11,6 +11,9 @@ class System {
 public:
     virtual ~System() = default;
 
+    /// Returns the system name for profiling/debugging. Override in subclasses.
+    virtual const char* name() const { return "System"; }
+
     virtual bool init(Engine&) { return true; }
     virtual void shutdown() {}
 

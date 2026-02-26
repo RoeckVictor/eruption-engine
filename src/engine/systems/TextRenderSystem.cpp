@@ -7,6 +7,7 @@
 #include "engine/render/Camera2D.h"
 #include "engine/asset/AssetDatabase.h"
 #include "engine/asset/loaders/DynamicFontLoader.h"
+#include "engine/profiler/Profiler.h"
 #include "engine/rhi/RHIDevice.h"
 #include "engine/rhi/RHIContext.h"
 #include <algorithm>
@@ -318,6 +319,7 @@ void TextRenderSystem::layout_text(
 }
 
 void TextRenderSystem::render(Engine& engine) {
+    PROFILE_SCOPE("TextRenderSystem::render");
     auto& window = engine.window();
 
     // Collect text items for rendering

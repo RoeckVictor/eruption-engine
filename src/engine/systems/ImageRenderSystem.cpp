@@ -8,6 +8,7 @@
 #include "engine/render/Image.h"
 #include "engine/asset/AssetDatabase.h"
 #include "engine/asset/loaders/TextureLoader.h"
+#include "engine/profiler/Profiler.h"
 #include "engine/rhi/RHIDevice.h"
 #include "engine/rhi/RHIContext.h"
 #include <algorithm>
@@ -167,6 +168,7 @@ graphics::Texture* ImageRenderSystem::get_texture(const std::string& sprite_path
 }
 
 void ImageRenderSystem::render(Engine& engine) {
+    PROFILE_SCOPE("ImageRenderSystem::render");
     auto& window = engine.window();
 
     // Render item struct for sorting

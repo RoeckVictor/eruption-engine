@@ -3,6 +3,7 @@
 #include "engine/simulation/PixelGrid.h"
 #include "engine/graphics/RenderContext.h"
 #include "engine/rhi/RHITypes.h"
+#include "engine/profiler/Profiler.h"
 #include "engine/core/Log.h"
 
 namespace engine::particles {
@@ -50,6 +51,7 @@ void ParticleSimulation::update(ParticleBuffer& buffer,
                                  float dt) {
     int max_p = buffer.max_particles();
     if (max_p == 0) return;
+    PROFILE_SCOPE("ParticleSimulation::update");
 
     m_update_shader.use();
 
@@ -77,6 +79,7 @@ void ParticleSimulation::reintegrate(ParticleBuffer& buffer,
                                       graphics::RenderContext& ctx) {
     int max_p = buffer.max_particles();
     if (max_p == 0) return;
+    PROFILE_SCOPE("ParticleSimulation::reintegrate");
 
     m_reintegrate_shader.use();
 

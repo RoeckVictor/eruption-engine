@@ -9,6 +9,7 @@ namespace engine::animation {
 /// Game registers this in the update phase.
 class AnimationSystem : public engine::System {
 public:
+    const char* name() const override { return "AnimationSystem"; }
     void set_registry(entt::registry* reg) { m_registry = reg; }
 
     void update(engine::Engine& engine, float dt) override;

@@ -2,6 +2,7 @@
 #include "engine/rhi/RHIDevice.h"
 #include "engine/rhi/RHIContext.h"
 #include "engine/core/Log.h"
+#include "engine/profiler/Profiler.h"
 
 namespace engine::render {
 
@@ -169,6 +170,7 @@ void SpriteRenderer::draw_rect(float min_x, float min_y, float max_x, float max_
 
 void SpriteRenderer::end() {
     if (m_indices.empty()) return;
+    PROFILE_SCOPE("SpriteRenderer::end");
 
     auto* ctx = rhi::get_current_context();
     if (!ctx) return;

@@ -1,11 +1,13 @@
 #include "engine/animation/AnimationSystem.h"
 #include "engine/animation/Animator.h"
+#include "engine/profiler/Profiler.h"
 #include <entt/entt.hpp>
 
 namespace engine::animation {
 
 void AnimationSystem::update(Engine& /*engine*/, float dt) {
     if (!m_registry) return;
+    PROFILE_SCOPE("AnimationSystem::update");
 
     auto view = m_registry->view<Animator>();
     for (auto [entity, animator] : view.each()) {

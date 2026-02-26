@@ -177,13 +177,13 @@ void ViewportPanel::render_scene() {
         auto* registry = m_context.registry();
         if (registry) {
             auto camera_view = registry->view<engine::render::Camera2D>();
-            for (auto entity : camera_view) {
+            if (!camera_view.empty()) {
+                auto entity = camera_view.front();
                 auto& camera = camera_view.get<engine::render::Camera2D>(entity);
                 runtime->sim_playback()->render_particles(
                     camera,
                     static_cast<float>(m_viewport_width),
                     static_cast<float>(m_viewport_height));
-                break;  // Use first camera
             }
         }
     }

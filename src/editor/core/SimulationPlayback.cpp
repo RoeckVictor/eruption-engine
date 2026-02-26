@@ -12,6 +12,7 @@
 #include "engine/render/Camera2D.h"
 #include "engine/rhi/RHIDevice.h"
 #include "engine/rhi/RHITypes.h"
+#include "engine/profiler/Profiler.h"
 
 namespace editor {
 
@@ -257,6 +258,7 @@ void SimulationPlayback::init(engine::physics::PhysicsWorld* physics_world,
 
 void SimulationPlayback::update(uint64_t frame_count) {
     if (m_surfaces.empty()) return;
+    PROFILE_SCOPE("SimulationPlayback::update");
 
     // Log diagnostic info on first simulation tick per play session
     bool first_update = (frame_count <= 1);
@@ -297,14 +299,15 @@ void SimulationPlayback::update(uint64_t frame_count) {
         }
 
         // --- Particle buffer maintenance ---
-        // Reclaim dead particles from previous frame
-        state->particle_buffer.reclaim_dead();
-        // Flush any pending spawns (from previous frame's extractions)
-        state->particle_buffer.flush_spawns();
+        {
+            PROFILE_SCOPE("Sim::ParticleMaintenance");
+            state->particle_buffer.reclaim_dead();
+            state->particle_buffer.flush_spawns();
+        }
 
         // --- Stamp rigidbody colliders into the grid ---
-        // This marks collider pixels with FLAG_RIGIDBODY so sim_step can detect collisions
         if (m_physics_world) {
+            PROFILE_SCOPE("Sim::StampColliders");
             state->collider_stamper.stamp_colliders(
                 *m_physics_world, state->pixel_grid,
                 state->origin_x, state->origin_y,
@@ -312,48 +315,60 @@ void SimulationPlayback::update(uint64_t frame_count) {
         }
 
         // --- Run CA simulation ---
-        // sim_step.comp will mark movables blocked by rigidbodies with FLAG_CONVERT_TO_PARTICLE
-        state->simulation.simulate(state->pixel_grid, m_render_context);
+        {
+            PROFILE_SCOPE("Sim::MargolusStep");
+            state->simulation.simulate(state->pixel_grid, m_render_context);
+        }
 
         // --- Extract marked pixels and spawn as particles ---
         if (m_physics_world) {
+            PROFILE_SCOPE("Sim::ExtractParticles");
             state->collision_extractor.extract(state->pixel_grid, m_render_context);
             state->collision_extractor.spawn_particles(
                 state->collider_stamper, state->particle_buffer);
         }
 
         // --- Update particles (physics, collision, settling) ---
-        // Note: We use a fixed dt of 1/60 since we're called per simulation tick
-        state->particle_simulation.update(
-            state->particle_buffer, state->pixel_grid,
-            m_render_context, 1.0f / 60.0f);
+        {
+            PROFILE_SCOPE("Sim::ParticleUpdate");
+            state->particle_simulation.update(
+                state->particle_buffer, state->pixel_grid,
+                m_render_context, 1.0f / 60.0f);
+        }
 
         // --- Clear stamped colliders from grid ---
         if (m_physics_world) {
+            PROFILE_SCOPE("Sim::ClearColliders");
             state->collider_stamper.clear_colliders(state->pixel_grid);
         }
 
         // --- Reintegrate settled particles back into the grid ---
-        state->particle_simulation.reintegrate(
-            state->particle_buffer, state->pixel_grid, m_render_context);
+        {
+            PROFILE_SCOPE("Sim::ParticleReintegrate");
+            state->particle_simulation.reintegrate(
+                state->particle_buffer, state->pixel_grid, m_render_context);
+        }
 
         // Convert SSBO -> RGBA8 color texture via palette lookup compute shader
-        m_color_shader.use();
-        state->pixel_grid.bind_read_ssbo(0);
-        state->palette_ssbo.bind_base(1);
-        state->color_texture.bind_as_image(0, engine::graphics::ImageAccess::WriteOnly);
-        m_color_shader.set_int("u_grid_width", state->width);
-        m_color_shader.set_int("u_grid_height", state->height);
-        m_color_shader.set_uint("u_pixel_size", static_cast<uint32_t>(state->pixel_grid.pixel_size()));
-        m_color_shader.set_uint("u_palette_size", 256u);
+        {
+            PROFILE_SCOPE("Sim::ColorConversion");
+            m_color_shader.use();
+            state->pixel_grid.bind_read_ssbo(0);
+            state->palette_ssbo.bind_base(1);
+            state->color_texture.bind_as_image(0, engine::graphics::ImageAccess::WriteOnly);
+            m_color_shader.set_int("u_grid_width", state->width);
+            m_color_shader.set_int("u_grid_height", state->height);
+            m_color_shader.set_uint("u_pixel_size", static_cast<uint32_t>(state->pixel_grid.pixel_size()));
+            m_color_shader.set_uint("u_palette_size", 256u);
 
-        int groups_x = (state->width + 15) / 16;
-        int groups_y = (state->height + 15) / 16;
-        // TEXTURE_FETCH barrier: ImGui reads this via texture sampler, not imageLoad
-        m_render_context.dispatch_compute(groups_x, groups_y, 1, engine::rhi::BarrierFlags::TextureRead);
+            int groups_x = (state->width + 15) / 16;
+            int groups_y = (state->height + 15) / 16;
+            m_render_context.dispatch_compute(groups_x, groups_y, 1, engine::rhi::BarrierFlags::TextureRead);
+        }
 
         // Update terrain colliders from settled pixels
         if (state->terrain_colliders && m_registry.valid(state->entity)) {
+            PROFILE_SCOPE("Sim::TerrainColliders");
             engine::physics::TerrainColliderManager::EntityTransform et;
             if (m_registry.all_of<engine::Transform>(state->entity)) {
                 auto& t = m_registry.get<engine::Transform>(state->entity);
@@ -369,9 +384,6 @@ void SimulationPlayback::update(uint64_t frame_count) {
                 et.origin_y = gc.origin_y;
             }
 
-            // Use GPU dirty flags instead of marking entire grid dirty.
-            // This only updates chunks where pixels actually moved, dramatically
-            // reducing CPU readback and Box2D collider regeneration overhead.
             auto dirty_flags = state->simulation.read_and_clear_dirty_chunks();
             state->terrain_colliders->apply_gpu_dirty_flags(
                 dirty_flags,

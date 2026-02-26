@@ -2,6 +2,7 @@
 #include "engine/simulation/PixelGrid.h"
 #include "engine/graphics/RenderContext.h"
 #include "engine/rhi/RHITypes.h"
+#include "engine/profiler/Profiler.h"
 #include "engine/core/Log.h"
 #include <cstring>
 
@@ -94,6 +95,7 @@ void MargolusSimulation::shutdown() {
 }
 
 void MargolusSimulation::simulate(PixelGrid& grid, graphics::RenderContext& ctx) {
+    PROFILE_SCOPE("MargolusSimulation::simulate");
     m_sim_shader.use();
     m_material_ssbo.bind_base(2);
     m_dirty_chunks_ssbo.bind_base(3);  // Dirty chunk flags for terrain collider optimization

@@ -1,4 +1,5 @@
 #include "engine/physics/PhysicsWorld.h"
+#include "engine/profiler/Profiler.h"
 #include "engine/core/Log.h"
 #include <vector>
 #include <cmath>
@@ -32,6 +33,7 @@ void PhysicsWorld::shutdown() {
 
 void PhysicsWorld::step(float dt, int sub_step_count) {
     if (!b2World_IsValid(m_world_id)) return;
+    PROFILE_SCOPE("PhysicsWorld::step");
     b2World_Step(m_world_id, dt, sub_step_count);
 }
 

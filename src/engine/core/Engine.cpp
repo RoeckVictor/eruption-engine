@@ -2,6 +2,7 @@
 #include "engine/core/Application.h"
 #include "engine/core/Log.h"
 #include "engine/rhi/RHI.h"
+#include "engine/profiler/Profiler.h"
 
 namespace engine {
 
@@ -45,6 +46,14 @@ bool Engine::init(const char* title, int width, int height, const char* config_f
         return false;
     }
     ENGINE_LOG("RHI initialized: %s (%s)", m_rhi_device->backend_name(), m_rhi_device->renderer_name());
+
+    // Initialize GPU profiler via RHI device
+    m_gpu_profiler = m_rhi_device->create_gpu_profiler();
+    if (m_gpu_profiler) {
+        ENGINE_LOG("GPU profiler initialized");
+    } else {
+        ENGINE_LOG_WARN("GPU profiler not supported on this system");
+    }
 
     // Set global RHI device for graphics classes to access
     rhi::set_current_device(m_rhi_device.get());
@@ -101,42 +110,78 @@ void Engine::run(Application& app) {
     m_timer.init(m_config.max_delta_time, m_config.fixed_timestep);
 
     while (!m_window.should_close()) {
-        m_timer.update();
-        m_window.poll_events();
-        m_input.update(m_window);
+        profiler::Profiler::instance().begin_frame();
+
+        {
+            PROFILE_SCOPE("FrameStart");
+            m_timer.update();
+            m_window.poll_events();
+            m_input.update(m_window);
+        }
 
         float dt = static_cast<float>(m_timer.delta_time());
 
-        // Poll asset hot-reload before update phase
-        m_assets.poll_hot_reload();
+        {
+            PROFILE_SCOPE("Assets");
+            m_assets.poll_hot_reload();
+        }
 
         // Process deferred scene operations (push/pop/replace)
         m_scenes.process_pending(*this);
 
-        // Per-frame update
-        m_scenes.update(*this, dt);
-        app.on_update(*this, dt);
+        {
+            PROFILE_SCOPE("Update");
+            m_scenes.update(*this, dt);
+            app.on_update(*this, dt);
+        }
 
         // Fixed timestep updates (physics, simulation).
         // Cap iterations to avoid spiral-of-death after long stalls.
-        float fixed_dt = static_cast<float>(m_timer.fixed_dt());
-        int steps = 0;
-        while (m_timer.consume_fixed_step() && steps < m_config.max_fixed_steps) {
-            m_scenes.fixed_update(*this, fixed_dt);
-            app.on_fixed_update(*this, fixed_dt);
-            ++steps;
+        {
+            PROFILE_SCOPE("FixedUpdate");
+            float fixed_dt = static_cast<float>(m_timer.fixed_dt());
+            int steps = 0;
+            while (m_timer.consume_fixed_step() && steps < m_config.max_fixed_steps) {
+                m_scenes.fixed_update(*this, fixed_dt);
+                app.on_fixed_update(*this, fixed_dt);
+                ++steps;
+            }
         }
 
         // Render: clear, render scene, then application hook
-        auto* ctx = m_rhi_device->context();
-        ctx->begin_frame();
-        ctx->set_viewport(0, 0, m_window.width(), m_window.height());
-        ctx->clear(m_clear_r, m_clear_g, m_clear_b);
-        m_scenes.render(*this);
-        app.on_render(*this);
-        ctx->end_frame();
+        {
+            PROFILE_SCOPE("Render");
+            if (m_gpu_profiler) m_gpu_profiler->begin_frame();
 
-        m_window.swap_buffers();
+            auto* ctx = m_rhi_device->context();
+            {
+                PROFILE_SCOPE("RHI::begin_frame");
+                ctx->begin_frame();
+                ctx->set_viewport(0, 0, m_window.width(), m_window.height());
+                ctx->clear(m_clear_r, m_clear_g, m_clear_b);
+            }
+            {
+                PROFILE_SCOPE("Scene::render");
+                m_scenes.render(*this);
+            }
+            {
+                PROFILE_SCOPE("App::on_render");
+                app.on_render(*this);
+            }
+            {
+                PROFILE_SCOPE("RHI::end_frame");
+                ctx->end_frame();
+            }
+
+            if (m_gpu_profiler) m_gpu_profiler->end_frame();
+        }
+
+        {
+            PROFILE_SCOPE("SwapBuffers");
+            m_window.swap_buffers();
+        }
+
+        profiler::Profiler::instance().end_frame();
     }
 
     m_scenes.shutdown_all(*this);
@@ -146,6 +191,10 @@ void Engine::run(Application& app) {
 void Engine::shutdown() {
     m_subsystems.clear();
     m_assets.shutdown();
+    if (m_gpu_profiler) {
+        m_gpu_profiler->shutdown();
+        m_gpu_profiler.reset();
+    }
     rhi::set_current_device(nullptr);  // Clear global before destroying
     m_rhi_device.reset();  // Destroy RHI device before window
     m_window.shutdown();

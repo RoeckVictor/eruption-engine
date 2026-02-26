@@ -30,6 +30,7 @@ namespace rhi { class RHITexture; }
 /// Execution Order: Runs in render phase, after GridRenderSystem.
 class PixelGridRenderSystem : public System {
 public:
+    const char* name() const override { return "PixelGridRenderSystem"; }
     bool init(Engine& engine) override;
     void shutdown() override;
     void render(Engine& engine) override;

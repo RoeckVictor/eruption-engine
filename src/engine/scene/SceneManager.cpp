@@ -1,6 +1,7 @@
 #include "engine/scene/SceneManager.h"
 #include "engine/scene/Scene.h"
 #include "engine/core/Engine.h"
+#include "engine/profiler/Profiler.h"
 #include "engine/core/Log.h"
 
 namespace engine::scene {
@@ -111,18 +112,21 @@ void SceneManager::process_pending(Engine& engine) {
 }
 
 void SceneManager::update(Engine& engine, float dt) {
+    PROFILE_SCOPE("SceneManager::update");
     if (!m_stack.empty()) {
         m_stack.back()->systems().update_all(engine, dt);
     }
 }
 
 void SceneManager::fixed_update(Engine& engine, float dt) {
+    PROFILE_SCOPE("SceneManager::fixed_update");
     if (!m_stack.empty()) {
         m_stack.back()->systems().fixed_update_all(engine, dt);
     }
 }
 
 void SceneManager::render(Engine& engine) {
+    PROFILE_SCOPE("SceneManager::render");
     if (!m_stack.empty()) {
         m_stack.back()->systems().render_all(engine);
     }

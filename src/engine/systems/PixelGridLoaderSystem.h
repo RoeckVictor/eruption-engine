@@ -35,6 +35,7 @@ struct LoadedPixelGrid {
 /// doesn't need fixed timestep.
 class PixelGridLoaderSystem : public System {
 public:
+    const char* name() const override { return "PixelGridLoaderSystem"; }
     bool init(Engine& engine) override;
     void update(Engine& engine, float dt) override;
 

@@ -30,6 +30,7 @@ namespace engine {
 /// - Manages collider shapes and handles triangulation for DynamicCollider
 class Box2DPhysicsSystem : public System {
 public:
+    const char* name() const override { return "Box2DPhysicsSystem"; }
     bool init(Engine& engine) override;
     void fixed_update(Engine& engine, float dt) override;
     void shutdown() override;

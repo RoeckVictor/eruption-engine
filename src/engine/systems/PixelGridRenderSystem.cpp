@@ -11,6 +11,7 @@
 #include "engine/simulation/MaterialLibrary.h"
 #include "engine/rhi/RHIDevice.h"
 #include "engine/rhi/RHIContext.h"
+#include "engine/profiler/Profiler.h"
 #include "editor/core/EditorComponents.h"
 #include <algorithm>
 #include <cmath>
@@ -206,6 +207,7 @@ void PixelGridRenderSystem::purge_stale_textures() {
 }
 
 void PixelGridRenderSystem::render(Engine& engine) {
+    PROFILE_SCOPE("PixelGridRenderSystem::render");
     auto& window = engine.window();
 
     // Clean up textures for destroyed entities

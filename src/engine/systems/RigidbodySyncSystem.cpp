@@ -5,6 +5,7 @@
 #include "engine/core/MathConstants.h"
 #include "engine/physics/PhysicsWorld.h"
 #include "engine/physics/Rigidbody.h"
+#include "engine/profiler/Profiler.h"
 #include "engine/core/EngineContext.h"
 #include "editor/core/EditorComponents.h"
 #include <box2d/box2d.h>
@@ -26,6 +27,7 @@ bool RigidbodySyncSystem::init(Engine& engine) {
 
 void RigidbodySyncSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
     if (!m_physics_world) return;
+    PROFILE_SCOPE("RigidbodySyncSystem::fixed_update");
 
     // Sync Transform FROM Box2D bodies for Dynamic bodies (Physics → Transform)
     // Note: Kinematic bodies are already synced Transform → Physics in Box2DPhysicsSystem

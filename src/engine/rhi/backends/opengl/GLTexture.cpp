@@ -265,4 +265,4 @@ void GLTexture::generate_mipmaps() {
     glBindTexture(m_gl_target, 0);
 }
 
-} // namespace engine::rhi
+}

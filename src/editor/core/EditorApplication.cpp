@@ -15,6 +15,7 @@
 #include "editor/panels/ProjectSettingsPanel.h"
 #include "editor/panels/PrefabEditorPanel.h"
 #include "editor/panels/ScreenPanel.h"
+#include "editor/panels/ProfilerPanel.h"
 #include "editor/commands/EntityCommands.h"
 #include "editor/serialization/SceneSerializer.h"
 #include "engine/render/Camera2D.h"
@@ -85,6 +86,11 @@ bool EditorApplication::on_init(engine::Engine& engine) {
     m_panel_manager.add_panel<BuildSettingsPanel>();
     m_panel_manager.add_panel<ProjectSettingsPanel>(*m_project_manager);
     m_panel_manager.add_panel<PrefabEditorPanel>(m_context);
+
+    // Add profiler panel and wire up GPU profiler
+    auto* profiler_panel = m_panel_manager.add_panel<ProfilerPanel>(engine, m_context);
+    profiler_panel->set_gpu_profiler(engine.gpu_profiler());
+    profiler_panel->set_visible(false);  // Hidden by default
 
     // Wire up menu bar callbacks
     m_panel_manager.menu_callbacks.new_scene = [this]() {

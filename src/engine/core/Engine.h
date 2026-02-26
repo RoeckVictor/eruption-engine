@@ -11,6 +11,7 @@
 #include "engine/scene/SceneManager.h"
 #include "engine/core/Logger.h"
 #include "engine/rhi/RHIDevice.h"
+#include "engine/profiler/GPUProfiler.h"
 #include <any>
 #include <optional>
 #include <stdexcept>
@@ -52,6 +53,10 @@ public:
 
     /// Access the RHI context (for rendering commands)
     rhi::RHIContext* rhi_context();
+
+    /// Access the GPU profiler (may be null if not supported)
+    profiler::GPUProfiler* gpu_profiler() { return m_gpu_profiler.get(); }
+    const profiler::GPUProfiler* gpu_profiler() const { return m_gpu_profiler.get(); }
 
     EventBus& events() { return m_events; }
     asset::AssetDatabase& assets() { return m_assets; }
@@ -100,6 +105,7 @@ private:
     platform::Input m_input;
     platform::Timer m_timer;
     std::unique_ptr<rhi::RHIDevice> m_rhi_device;
+    std::unique_ptr<profiler::GPUProfiler> m_gpu_profiler;
     graphics::RenderContext m_render_context;
     EventBus m_events;
     asset::AssetDatabase m_assets;

@@ -7,29 +7,21 @@
 
 namespace engine::rhi {
 
-/// OpenGL implementation of RHIShader
+// OpenGL implementation of RHIShader
 class GLShader : public RHIShader {
 public:
     GLShader() = default;
     ~GLShader() override;
 
-    // Move semantics
     GLShader(GLShader&& other) noexcept;
     GLShader& operator=(GLShader&& other) noexcept;
 
-    /// Initialize from a shader description (general method)
     bool init(const ShaderDesc& desc);
-
-    /// Initialize as a graphics shader (vertex + fragment)
     bool init_graphics(const char* vert_path, const char* frag_path);
-
-    /// Initialize as a compute shader
     bool init_compute(const char* comp_path);
 
-    /// Destroy the shader
     void destroy();
 
-    // RHIShader interface
     void bind() override;
     void set_int(const char* name, int value) override;
     void set_uint(const char* name, uint32_t value) override;
@@ -42,7 +34,6 @@ public:
     bool try_reload() override;
     void* native_handle() const override { return reinterpret_cast<void*>(static_cast<uintptr_t>(m_program)); }
 
-    /// Get the OpenGL program handle
     uint32_t handle() const { return m_program; }
 
 private:
@@ -59,7 +50,6 @@ private:
     uint32_t m_program = 0;
     mutable std::unordered_map<std::string, int> m_uniform_cache;
 
-    // Source paths for hot-reload
     std::string m_vert_path;
     std::string m_frag_path;
     std::string m_comp_path;
@@ -69,4 +59,4 @@ private:
     FileTime m_comp_time{};
 };
 
-} // namespace engine::rhi
+}

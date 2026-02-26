@@ -1,5 +1,6 @@
 #include "engine/core/SystemManager.h"
 #include "engine/core/Engine.h"
+#include "engine/profiler/Profiler.h"
 #include "engine/core/Log.h"
 #include <typeinfo>
 #include <unordered_set>
@@ -45,15 +46,27 @@ void SystemManager::shutdown_all() {
 }
 
 void SystemManager::update_all(Engine& engine, float dt) {
-    for (auto* sys : m_update) sys->update(engine, dt);
+    PROFILE_SCOPE("SystemManager::update_all");
+    for (auto* sys : m_update) {
+        PROFILE_SCOPE(sys->name());
+        sys->update(engine, dt);
+    }
 }
 
 void SystemManager::fixed_update_all(Engine& engine, float dt) {
-    for (auto* sys : m_fixed_update) sys->fixed_update(engine, dt);
+    PROFILE_SCOPE("SystemManager::fixed_update_all");
+    for (auto* sys : m_fixed_update) {
+        PROFILE_SCOPE(sys->name());
+        sys->fixed_update(engine, dt);
+    }
 }
 
 void SystemManager::render_all(Engine& engine) {
-    for (auto* sys : m_render) sys->render(engine);
+    PROFILE_SCOPE("SystemManager::render_all");
+    for (auto* sys : m_render) {
+        PROFILE_SCOPE(sys->name());
+        sys->render(engine);
+    }
 }
 
 } // namespace engine

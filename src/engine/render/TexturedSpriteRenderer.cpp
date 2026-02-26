@@ -3,6 +3,7 @@
 #include "engine/rhi/RHIDevice.h"
 #include "engine/rhi/RHIContext.h"
 #include "engine/core/Log.h"
+#include "engine/profiler/Profiler.h"
 
 namespace engine::render {
 
@@ -179,6 +180,7 @@ void TexturedSpriteRenderer::draw_sprite(float min_x, float min_y,
 
 void TexturedSpriteRenderer::end() {
     if (m_indices.empty() || !m_bound_texture) return;
+    PROFILE_SCOPE("TexturedSpriteRenderer::end");
 
     auto* ctx = rhi::get_current_context();
     if (!ctx) return;

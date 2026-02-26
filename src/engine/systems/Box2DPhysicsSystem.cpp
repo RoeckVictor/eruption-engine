@@ -8,6 +8,7 @@
 #include "engine/simulation/PixelGridComponent.h"
 #include "PixelGridLoaderSystem.h"
 #include "engine/core/EngineContext.h"
+#include "engine/profiler/Profiler.h"
 #include "editor/core/EditorComponents.h"
 #include <box2d/box2d.h>
 #include <cmath>
@@ -39,9 +40,11 @@ void Box2DPhysicsSystem::shutdown() {
 
 void Box2DPhysicsSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
     if (!m_physics_world) return;
+    PROFILE_SCOPE("Box2DPhysicsSystem::fixed_update");
 
     // Step 1: Create bodies for new Rigidbody entities (entities without b2BodyId)
     {
+        PROFILE_SCOPE("Physics::CreateBodies");
         auto view = m_registry->view<physics::Rigidbody, Transform>();
         for (auto entity : view) {
             // Skip disabled entities
@@ -65,10 +68,14 @@ void Box2DPhysicsSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
     }
 
     // Step 2: Sync kinematic bodies (Transform → Physics) before physics step
-    sync_kinematic_bodies();
+    {
+        PROFILE_SCOPE("Physics::SyncKinematic");
+        sync_kinematic_bodies();
+    }
 
     // Step 3: Create collider shapes for bodies that need them
     {
+        PROFILE_SCOPE("Physics::CreateColliders");
         // BoxCollider
         auto box_view = m_registry->view<physics::Rigidbody, physics::BoxCollider, Transform>();
         for (auto entity : box_view) {
@@ -150,6 +157,7 @@ void Box2DPhysicsSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
 
     // Step 4: Apply mass overrides for dynamic bodies that have shapes
     {
+        PROFILE_SCOPE("Physics::ApplyMassOverrides");
         auto view = m_registry->view<physics::Rigidbody>();
         for (auto entity : view) {
             auto& rb = view.get<physics::Rigidbody>(entity);

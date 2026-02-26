@@ -230,4 +230,4 @@ bool GLContext::check_error(const char* context) {
     return false;
 }
 
-} // namespace engine::rhi
+}

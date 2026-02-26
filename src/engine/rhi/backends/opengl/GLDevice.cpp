@@ -4,6 +4,7 @@
 #include "GLShader.h"
 #include "GLPipeline.h"
 #include "GLFramebuffer.h"
+#include "GLGPUProfiler.h"
 #include "engine/core/Log.h"
 #include <glad/gl.h>
 
@@ -119,6 +120,14 @@ void GLDevice::max_compute_workgroup_size(int& x, int& y, int& z) const {
     z = m_max_compute_workgroup_size[2];
 }
 
+std::unique_ptr<profiler::GPUProfiler> GLDevice::create_gpu_profiler() {
+    auto profiler = std::make_unique<GLGPUProfiler>();
+    if (!profiler->init()) {
+        return nullptr;
+    }
+    return profiler;
+}
+
 std::unique_ptr<RHIDevice> create_opengl_device(GLLoadFunc load_func) {
     auto device = std::make_unique<GLDevice>();
     if (!device->init(load_func)) {
@@ -127,4 +136,4 @@ std::unique_ptr<RHIDevice> create_opengl_device(GLLoadFunc load_func) {
     return device;
 }
 
-} // namespace engine::rhi
+}

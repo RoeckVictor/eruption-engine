@@ -11,7 +11,7 @@ static constexpr int GL_LOG_BUFFER_SIZE = 1024;
 
 namespace {
 
-/// Recursively resolve #include "filename" directives in GLSL source.
+// Recursively resolve #include "filename" directives in GLSL source.
 std::string resolve_includes(const std::string& source,
                              const std::filesystem::path& base_dir,
                              std::unordered_set<std::string>& included) {
@@ -30,7 +30,7 @@ std::string resolve_includes(const std::string& source,
                 std::string key = include_path.string();
 
                 if (included.count(key)) {
-                    continue;  // Already included
+                    continue;
                 }
                 included.insert(key);
 
@@ -50,7 +50,7 @@ std::string resolve_includes(const std::string& source,
     return result.str();
 }
 
-} // anonymous namespace
+}
 
 GLShader::~GLShader() {
     destroy();
@@ -129,7 +129,6 @@ uint32_t GLShader::compile_shader(uint32_t type, const char* source, const char*
 }
 
 bool GLShader::init(const ShaderDesc& desc) {
-    // Find vertex, fragment, and compute stages
     const char* vert_path = nullptr;
     const char* frag_path = nullptr;
     const char* comp_path = nullptr;
@@ -385,4 +384,4 @@ bool GLShader::try_reload() {
     return true;
 }
 
-} // namespace engine::rhi
+}

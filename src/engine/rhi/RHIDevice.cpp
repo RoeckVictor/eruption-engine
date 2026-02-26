@@ -4,7 +4,6 @@
 
 namespace engine::rhi {
 
-// Global device pointer (non-owning)
 static RHIDevice* g_current_device = nullptr;
 
 void set_current_device(RHIDevice* device) {
@@ -23,7 +22,7 @@ std::unique_ptr<RHIDevice> create_rhi_device(Backend backend, ProcAddressFunc pr
     switch (backend) {
         case Backend::OpenGL:
             if (!proc_address) {
-                return nullptr; // OpenGL requires a proc address loader
+                return nullptr;
             }
             return create_opengl_device(proc_address);
 
@@ -38,4 +37,4 @@ std::unique_ptr<RHIDevice> create_rhi_device(Backend backend, ProcAddressFunc pr
     }
 }
 
-} // namespace engine::rhi
+}
