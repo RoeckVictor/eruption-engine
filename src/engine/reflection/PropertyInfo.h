@@ -2,6 +2,7 @@
 
 #include <string>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 namespace engine::reflection {

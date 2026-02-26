@@ -400,14 +400,25 @@ void EditorApplication::on_project_loaded() {
     // Initialize script manager for this project
     // Engine paths need to be absolute for CMake to find includes
     std::filesystem::path exe_dir = std::filesystem::current_path();
-    // The _deps folder (with EnTT etc.) is in the build root, not build/Debug
-    std::filesystem::path build_root = exe_dir.parent_path();
+
+    // The _deps folder (with EnTT etc.) is in the build root
+    // On Windows multi-config (VS/Ninja Multi-Config): exe is in build/Debug/ or build/Release/
+    // On Linux single-config (Makefiles): exe is directly in build/
+    // Check which layout we have by looking for _deps
+    std::filesystem::path build_root;
+    if (std::filesystem::exists(exe_dir / "_deps")) {
+        // Single-config: exe is directly in build folder
+        build_root = exe_dir;
+    } else {
+        // Multi-config: exe is in build/Debug or build/Release, go up one level
+        build_root = exe_dir.parent_path();
+    }
     std::string engine_build_path = build_root.string();
 
     if (m_engine_src_path.empty()) {
         // Get the path relative to the executable and resolve to absolute
-        // The executable is in build/Debug/, so ../../src gets us to the source folder
-        std::filesystem::path src_path = exe_dir / "../../src";
+        // Try both single-config (../src) and multi-config (../../src) layouts
+        std::filesystem::path src_path = build_root / "../src";
 
         // Resolve to absolute canonical path
         std::error_code ec;
@@ -415,8 +426,8 @@ void EditorApplication::on_project_loaded() {
         if (!ec) {
             m_engine_src_path = canonical.string();
         } else {
-            // Fallback: try relative to the TestGame directory structure
-            m_engine_src_path = (exe_dir / "../../src").string();
+            // Fallback: use unresolved path
+            m_engine_src_path = (build_root / "../src").string();
         }
         engine::Logger::instance().info("Editor", "Engine source path: %s", m_engine_src_path.c_str());
         engine::Logger::instance().info("Editor", "Engine build path: %s", engine_build_path.c_str());
