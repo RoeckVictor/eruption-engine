@@ -330,4 +330,29 @@ void PanelManager::render_about_dialog() {
     }
 }
 
-} // namespace editor
+void PanelManager::show_editor_panels() {
+    for (auto& panel : m_panels) {
+        switch (panel->visibility_mode()) {
+            case PanelVisibilityMode::EditorDefault:
+                panel->set_visible(true);
+                break;
+            case PanelVisibilityMode::OnDemand:
+                panel->set_visible(false);
+                break;
+            case PanelVisibilityMode::Manual:
+                // Don't change visibility - managed externally
+                break;
+        }
+    }
+}
+
+void PanelManager::hide_editor_panels() {
+    for (auto& panel : m_panels) {
+        // Hide all panels except those with Manual visibility mode
+        if (panel->visibility_mode() != PanelVisibilityMode::Manual) {
+            panel->set_visible(false);
+        }
+    }
+}
+
+}

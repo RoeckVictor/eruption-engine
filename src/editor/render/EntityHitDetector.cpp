@@ -17,7 +17,7 @@ namespace editor {
 
 namespace {
 
-/// Check if point is inside a PixelGrid entity bounds
+// Check if point is inside a PixelGrid entity bounds
 bool point_in_pixel_grid_bounds(
     float world_x, float world_y,
     const engine::Transform& transform,
@@ -160,7 +160,6 @@ bool point_in_capsule_collider(
     return (dist_x * dist_x + dist_y * dist_y) <= (radius * radius);
 }
 
-/// Check if point is within threshold of an entity's transform origin
 bool point_near_origin(
     float world_x, float world_y,
     const engine::Transform& transform,
@@ -171,7 +170,6 @@ bool point_near_origin(
     return (dx * dx + dy * dy) <= (threshold * threshold);
 }
 
-/// Check if point is inside an Image entity bounds (centered on transform)
 bool point_in_image_bounds(
     float world_x, float world_y,
     const engine::Transform& transform,
@@ -203,8 +201,6 @@ bool point_in_image_bounds(
            local_y >= -hh && local_y <= hh;
 }
 
-/// Check if point is inside a Text entity bounds (centered on transform)
-/// Uses a simple approximation based on content length and font size
 bool point_in_text_bounds(
     float world_x, float world_y,
     const engine::Transform& transform,
@@ -212,9 +208,7 @@ bool point_in_text_bounds(
 ) {
     if (text.content.empty()) return false;
 
-    // Approximate text bounds: estimate width based on character count and font size
-    // This is a rough approximation since we don't have access to font metrics here
-    float char_width = text.font_size * 0.6f;  // Approximate average character width
+    float char_width = text.font_size * 0.6f;
     float line_height = text.font_size * text.line_height;
 
     // Count lines
@@ -437,7 +431,7 @@ void EntityHitDetector::process_click_selection(
     if (hit.entities.empty()) {
         // Click on empty space - clear selection unless modifier held
         if (!ctrl_held && !shift_held) {
-            context.clear_selection();
+            context.selection().clear_selection();
         }
         cycle_state.reset();
         return;
@@ -467,23 +461,19 @@ void EntityHitDetector::process_click_selection(
 
     entt::entity entity_to_select = hit.entities[cycle_state.last_hit_index];
 
-    // Handle modifier keys
     if (ctrl_held) {
-        // Toggle selection
-        if (context.is_selected(entity_to_select)) {
-            context.remove_from_selection(entity_to_select);
+        if (context.selection().is_selected(entity_to_select)) {
+            context.selection().remove_from_selection(entity_to_select);
         } else {
-            context.add_to_selection(entity_to_select);
+            context.selection().add_to_selection(entity_to_select);
         }
     } else if (shift_held) {
-        // Add to selection
-        context.add_to_selection(entity_to_select);
+        context.selection().add_to_selection(entity_to_select);
     } else {
-        // Single select
-        context.select(entity_to_select);
+        context.selection().select(entity_to_select);
     }
 
     cycle_state.last_click_pos = mouse_pos;
 }
 
-} // namespace editor
+}

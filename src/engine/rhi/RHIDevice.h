@@ -17,14 +17,22 @@ class RHIShader;
 class RHIPipeline;
 class RHIFramebuffer;
 class RHIContext;
+class RHICommandBuffer;
+class RHIDescriptorSetLayout;
+class RHIDescriptorSet;
+class RHIPipelineCache;
+class RHIFence;
+class RHIEvent;
+class RHISemaphore;
+class RHITimelineSemaphore;
+struct DescriptorSetLayoutDesc;
+struct PipelineCacheDesc;
 
-/ Descriptor for shader loading (convenience for graphics shaders)
 struct GraphicsShaderDesc {
     const char* vertex_path = nullptr;
     const char* fragment_path = nullptr;
 };
 
-// Descriptor for compute shader loading
 struct ComputeShaderDesc {
     const char* compute_path = nullptr;
 };
@@ -49,6 +57,18 @@ public:
         TextureFormat color_format = TextureFormat::RGBA8,
         bool create_depth = true) = 0;
 
+    virtual std::unique_ptr<RHICommandBuffer> create_command_buffer() = 0;
+
+    virtual std::unique_ptr<RHIDescriptorSetLayout> create_descriptor_set_layout(const DescriptorSetLayoutDesc& desc) = 0;
+    virtual std::unique_ptr<RHIDescriptorSet> create_descriptor_set(const RHIDescriptorSetLayout* layout) = 0;
+
+    virtual std::unique_ptr<RHIPipelineCache> create_pipeline_cache(const PipelineCacheDesc& desc) = 0;
+
+    virtual std::unique_ptr<RHIFence> create_fence() = 0;
+    virtual std::unique_ptr<RHIEvent> create_event() = 0;
+    virtual std::unique_ptr<RHISemaphore> create_semaphore() = 0;
+    virtual std::unique_ptr<RHITimelineSemaphore> create_timeline_semaphore() = 0;
+
     virtual RHIContext* context() = 0;
 
     virtual std::unique_ptr<profiler::GPUProfiler> create_gpu_profiler() = 0;
@@ -63,6 +83,8 @@ public:
     virtual int max_texture_units() const = 0;
     virtual int max_storage_buffer_bindings() const = 0;
     virtual void max_compute_workgroup_size(int& x, int& y, int& z) const = 0;
+
+    virtual bool uv_origin_top_left() const = 0;
 
 protected:
     RHIDevice() = default;

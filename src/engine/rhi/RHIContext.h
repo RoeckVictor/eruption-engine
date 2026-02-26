@@ -10,6 +10,9 @@ class RHITexture;
 class RHIShader;
 class RHIPipeline;
 class RHIFramebuffer;
+class RHICommandBuffer;
+class RHIDescriptorSet;
+class RHIFence;
 
 // Abstract rendering context for command submission
 // Manages state and issues draw/dispatch commands
@@ -49,6 +52,16 @@ public:
         size_t dst_offset = 0) = 0;
 
     virtual void memory_barrier(BarrierFlags flags) = 0;
+
+    /// Submit a recorded command buffer for execution.
+    /// @param cmd_buffer The command buffer to execute.
+    /// @param signal_fence Optional fence to signal when execution completes.
+    virtual void submit(RHICommandBuffer* cmd_buffer, RHIFence* signal_fence = nullptr) = 0;
+
+    /// Bind a descriptor set.
+    /// @param set The descriptor set to bind.
+    /// @param index The descriptor set index/slot.
+    virtual void bind_descriptor_set(RHIDescriptorSet* set, uint32_t index = 0) = 0;
 
     virtual bool check_error(const char* context = nullptr) = 0;
 

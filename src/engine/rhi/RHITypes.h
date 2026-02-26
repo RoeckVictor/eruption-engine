@@ -85,6 +85,17 @@ enum class ImageAccess {
     ReadWrite,
 };
 
+enum class BufferAccess {
+    ReadOnly,
+    WriteOnly,
+    ReadWrite,
+};
+
+enum class IndexType {
+    UInt16,
+    UInt32,
+};
+
 struct TextureDesc {
     int width = 1;
     int height = 1;

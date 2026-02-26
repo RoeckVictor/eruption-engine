@@ -60,24 +60,13 @@ void ScreenPanel::on_gui() {
     }
 
     // Debounced framebuffer resize
-    if (width != m_pending_width || height != m_pending_height) {
-        m_pending_width = width;
-        m_pending_height = height;
-        m_resize_timer = 0.0f;
-        m_framebuffer_failed = false;
-    }
-
-    if (!m_framebuffer_failed &&
-        (m_pending_width != m_canvas_width || m_pending_height != m_canvas_height)) {
-        m_resize_timer += ImGui::GetIO().DeltaTime;
-        if (m_resize_timer >= RESIZE_DEBOUNCE_SEC || m_canvas_width == 0) {
-            bool was_first_create = (m_canvas_width == 0);
-            destroy_framebuffer();
-            create_framebuffer(m_pending_width, m_pending_height);
-            // Fit to canvas on first creation
-            if (was_first_create || m_zoom <= 0.0f) {
-                fit_to_canvas();
-            }
+    if (m_resize_debouncer.should_resize(m_canvas_width, m_canvas_height, width, height, ImGui::GetIO().DeltaTime)) {
+        bool was_first_create = (m_canvas_width == 0);
+        destroy_framebuffer();
+        create_framebuffer(m_resize_debouncer.target_width(), m_resize_debouncer.target_height());
+        // Fit to canvas on first creation
+        if (was_first_create || m_zoom <= 0.0f) {
+            fit_to_canvas();
         }
     }
 
@@ -122,7 +111,7 @@ void ScreenPanel::on_gui() {
     int screen_selected = 0;
     auto* registry = m_context.registry();
     if (registry) {
-        for (auto entity : m_context.selection()) {
+        for (auto entity : m_context.selection().selection()) {
             if (is_screen_space_entity(*registry, entity)) {
                 screen_selected++;
             }
@@ -204,19 +193,19 @@ void ScreenPanel::create_framebuffer(int width, int height) {
 
     auto* runtime = m_context.runtime();
     if (!runtime) {
-        m_framebuffer_failed = true;
+        m_resize_debouncer.set_failed();
         return;
     }
 
     auto* eng = runtime->engine();
     if (!eng) {
-        m_framebuffer_failed = true;
+        m_resize_debouncer.set_failed();
         return;
     }
 
     auto* device = eng->rhi_device();
     if (!device) {
-        m_framebuffer_failed = true;
+        m_resize_debouncer.set_failed();
         return;
     }
 
@@ -228,7 +217,7 @@ void ScreenPanel::create_framebuffer(int width, int height) {
 
     if (!m_framebuffer) {
         engine::Logger::instance().error("ScreenPanel", "Failed to create framebuffer");
-        m_framebuffer_failed = true;
+        m_resize_debouncer.set_failed();
     }
 }
 
@@ -358,7 +347,7 @@ void ScreenPanel::render_entities(ImDrawList* draw_list, ImVec2 canvas_pos, ImVe
     // Render entities in layer order
     for (const auto& entry : entries) {
         auto& rect = registry->get<engine::ScreenRect>(entry.entity);
-        bool is_selected = m_context.is_selected(entry.entity);
+        bool is_selected = m_context.selection().is_selected(entry.entity);
 
         // Render Image component if present
         if (entry.has_image) {
@@ -422,7 +411,7 @@ void ScreenPanel::render_gizmos(ImDrawList* draw_list, ImVec2 canvas_pos, ImVec2
     if (!registry) return;
 
     // Draw resize handles for selected screen entities
-    for (auto entity : m_context.selection()) {
+    for (auto entity : m_context.selection().selection()) {
         if (!is_screen_space_entity(*registry, entity)) continue;
         if (!registry->all_of<engine::ScreenRect>(entity)) continue;
 
@@ -540,7 +529,7 @@ void ScreenPanel::handle_input(ImVec2 canvas_pos, ImVec2 canvas_size) {
                 rect.offset_x = m_entity_start_offset_x + dx;
                 rect.offset_y = m_entity_start_offset_y + dy;
 
-                m_context.mark_dirty();
+                m_context.scene_state().mark_dirty();
             }
         } else {
             m_is_dragging = false;
@@ -575,19 +564,19 @@ void ScreenPanel::handle_input(ImVec2 canvas_pos, ImVec2 canvas_size) {
 
         if (hit_entity != entt::null) {
             if (io.KeyCtrl) {
-                if (m_context.is_selected(hit_entity)) {
-                    m_context.remove_from_selection(hit_entity);
+                if (m_context.selection().is_selected(hit_entity)) {
+                    m_context.selection().remove_from_selection(hit_entity);
                 } else {
-                    m_context.add_to_selection(hit_entity);
+                    m_context.selection().add_to_selection(hit_entity);
                 }
             } else if (io.KeyShift) {
-                m_context.add_to_selection(hit_entity);
+                m_context.selection().add_to_selection(hit_entity);
             } else {
-                m_context.select(hit_entity);
+                m_context.selection().select(hit_entity);
             }
 
             // Start dragging if this is selected
-            if (m_context.is_selected(hit_entity)) {
+            if (m_context.selection().is_selected(hit_entity)) {
                 m_is_dragging = true;
                 m_drag_entity = hit_entity;
                 m_drag_start_x = screen_x;
@@ -599,7 +588,7 @@ void ScreenPanel::handle_input(ImVec2 canvas_pos, ImVec2 canvas_size) {
         } else {
             // Clicked on empty space - deselect
             if (!io.KeyCtrl && !io.KeyShift) {
-                m_context.clear_selection();
+                m_context.selection().clear_selection();
             }
         }
     }
@@ -670,4 +659,4 @@ void ScreenPanel::render_text_entity(ImDrawList* draw_list, entt::entity entity,
     m_text_renderer->render(draw_list, text, pos, m_zoom);
 }
 
-} // namespace editor
+}

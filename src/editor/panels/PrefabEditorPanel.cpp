@@ -26,7 +26,7 @@
 namespace editor {
 
 PrefabEditorPanel::PrefabEditorPanel(EditorContext& main_context)
-    : Panel("Prefab Editor")
+    : Panel("Prefab Editor", PanelVisibilityMode::OnDemand)
     , m_main_context(main_context)
 {
 }
@@ -245,7 +245,7 @@ void PrefabEditorPanel::render_viewport() {
             void* grid_tex = m_grid_textures.get(entity, grid_comp.pixel_grid_path);
             draw_pixel_grid_quad(draw_list, quad, grid_tex);
 
-            if (m_main_context.is_selected(entity)) {
+            if (m_main_context.selection().is_selected(entity)) {
                 draw_selection_outline(draw_list, quad);
             }
         } else {
@@ -253,7 +253,7 @@ void PrefabEditorPanel::render_viewport() {
             ImVec2 screen_pos = wts(transform.world_x, transform.world_y);
             float marker_size = 6.0f;
 
-            ImU32 marker_color = m_main_context.is_selected(entity) ? IM_COL32(255, 200, 50, 220) : IM_COL32(200, 200, 200, 180);
+            ImU32 marker_color = m_main_context.selection().is_selected(entity) ? IM_COL32(255, 200, 50, 220) : IM_COL32(200, 200, 200, 180);
             draw_list->AddQuadFilled(
                 ImVec2(screen_pos.x, screen_pos.y - marker_size),
                 ImVec2(screen_pos.x + marker_size, screen_pos.y),
@@ -483,4 +483,4 @@ bool PrefabEditorPanel::save_prefab_file() {
     return false;
 }
 
-} // namespace editor
+}

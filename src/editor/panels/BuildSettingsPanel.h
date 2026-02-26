@@ -6,7 +6,7 @@
 
 namespace editor {
 
-/// Panel for configuring and running game builds.
+// Panel for configuring and running game builds
 class BuildSettingsPanel : public Panel {
 public:
     BuildSettingsPanel();
@@ -16,13 +16,9 @@ public:
     void on_close() override;
     void on_gui() override;
 
-    /// Set the project path (called when a project is loaded).
     void set_project_path(const std::string& path);
-
-    /// Set engine paths (for script compilation).
     void set_engine_paths(const std::string& src_path, const std::string& build_path);
 
-    /// Update the builder (call each frame).
     void update();
 
 private:
@@ -42,4 +38,4 @@ private:
     char m_product_name_buffer[128] = "";
 };
 
-} // namespace editor
+}

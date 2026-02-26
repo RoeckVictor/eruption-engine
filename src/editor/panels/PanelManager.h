@@ -8,7 +8,7 @@
 
 namespace editor {
 
-/// Manages all editor panels and the ImGui docking layout.
+// Manages all editor panels and the ImGui docking layout
 class PanelManager {
 public:
     PanelManager() = default;
@@ -17,13 +17,10 @@ public:
     PanelManager(const PanelManager&) = delete;
     PanelManager& operator=(const PanelManager&) = delete;
 
-    /// Initialize the panel manager.
     void init();
 
-    /// Shutdown and clean up all panels.
     void shutdown();
 
-    /// Register a panel. Takes ownership.
     template<typename T, typename... Args>
     T* add_panel(Args&&... args) {
         auto panel = std::make_unique<T>(std::forward<Args>(args)...);
@@ -32,7 +29,6 @@ public:
         return ptr;
     }
 
-    /// Get a panel by type.
     template<typename T>
     T* get_panel() {
         for (auto& panel : m_panels) {
@@ -43,35 +39,23 @@ public:
         return nullptr;
     }
 
-    /// Render all visible panels.
     void render();
 
-    /// Render the main menu bar.
     void render_menu_bar();
 
-    /// Set up the default docking layout (called on first run or reset).
     void setup_default_layout();
-
-    /// Reset layout to default.
     void reset_layout();
-
-    /// Save the current layout to a file.
     void save_layout(const std::string& path);
-
-    /// Load layout from a file.
     void load_layout(const std::string& path);
-
-    /// Check if we need to set up the default layout on next frame.
     bool needs_layout_reset() const { return m_needs_layout_reset; }
 
-    /// Set the toolbar height (dockspace will be offset by this amount).
     void set_toolbar_height(float height) { m_toolbar_height = height; }
     float toolbar_height() const { return m_toolbar_height; }
 
-    /// Show the About dialog.
     void show_about_dialog() { m_show_about_dialog = true; }
 
-    /// Callbacks for menu bar actions (set by EditorApplication).
+    void show_editor_panels();
+    void hide_editor_panels();
     struct MenuCallbacks {
         std::function<void()> new_scene;
         std::function<void()> save_scene;
@@ -85,7 +69,7 @@ public:
         std::function<void()> paste;
         std::function<void()> duplicate;
         std::function<void()> delete_selected;
-        std::function<void()> reset_layout;  // Reset cameras and panel visibility
+        std::function<void()> reset_layout;
     };
     MenuCallbacks menu_callbacks;
 
@@ -102,4 +86,4 @@ private:
     float m_toolbar_height = 0.0f;
 };
 
-} // namespace editor
+}

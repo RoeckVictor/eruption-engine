@@ -310,4 +310,4 @@ void ConsolePanel::copy_selected_to_clipboard(const std::vector<LogEntry>& entri
     }
 }
 
-} // namespace editor
+}

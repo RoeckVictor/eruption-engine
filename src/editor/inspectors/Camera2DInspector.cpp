@@ -1,4 +1,5 @@
 #include "Camera2DInspector.h"
+#include "InspectorUtils.h"
 #include "engine/render/Camera2D.h"
 #include <imgui.h>
 
@@ -8,13 +9,11 @@ bool Camera2DInspector::draw(engine::render::Camera2D& camera) {
     bool changed = false;
 
     // Enabled checkbox
-    if (ImGui::Checkbox("Enabled", &camera.enabled)) {
+    if (EnabledCheckbox(&camera.enabled)) {
         changed = true;
     }
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
+    SectionSeparator();
 
     // Position
     ImGui::Text("Position");
@@ -78,4 +77,4 @@ bool Camera2DInspector::draw(engine::render::Camera2D& camera) {
     return changed;
 }
 
-} // namespace editor
+}

@@ -161,4 +161,4 @@ void AssetPreviewPanel::unload_texture() {
     m_preview_texture.destroy();
 }
 
-} // namespace editor
+}

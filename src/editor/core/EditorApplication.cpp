@@ -120,25 +120,13 @@ bool EditorApplication::on_init(engine::Engine& engine) {
     };
     m_panel_manager.menu_callbacks.reset_layout = [this]() {
         // Reset cameras
-        m_context.reset_camera();
+        m_context.viewport().camera.reset();
         if (auto* prefab_panel = m_panel_manager.get_panel<PrefabEditorPanel>()) {
             prefab_panel->reset_camera();
         }
         // Reset panel visibility to defaults (only if project is loaded)
         if (has_project()) {
-            if (auto* p = m_panel_manager.get_panel<ConsolePanel>()) p->set_visible(true);
-            if (auto* p = m_panel_manager.get_panel<HierarchyPanel>()) p->set_visible(true);
-            if (auto* p = m_panel_manager.get_panel<InspectorPanel>()) p->set_visible(true);
-            if (auto* p = m_panel_manager.get_panel<ViewportPanel>()) p->set_visible(true);
-            if (auto* p = m_panel_manager.get_panel<ScreenPanel>()) p->set_visible(true);
-            if (auto* p = m_panel_manager.get_panel<GamePanel>()) p->set_visible(true);
-            if (auto* p = m_panel_manager.get_panel<FileBrowserPanel>()) p->set_visible(true);
-            if (auto* p = m_panel_manager.get_panel<SceneManagerPanel>()) p->set_visible(true);
-            if (auto* p = m_panel_manager.get_panel<AssetPreviewPanel>()) p->set_visible(true);
-            if (auto* p = m_panel_manager.get_panel<BuildSettingsPanel>()) p->set_visible(false);
-            if (auto* p = m_panel_manager.get_panel<ProjectSettingsPanel>()) p->set_visible(false);
-            if (auto* p = m_panel_manager.get_panel<PrefabEditorPanel>()) p->set_visible(false);
-            if (auto* p = m_panel_manager.get_panel<ProjectHubPanel>()) p->set_visible(false);
+            m_panel_manager.show_editor_panels();
         }
     };
 
@@ -151,18 +139,7 @@ bool EditorApplication::on_init(engine::Engine& engine) {
         }
 
         // Hide other panels until project is loaded
-        if (auto* p = m_panel_manager.get_panel<ConsolePanel>()) p->set_visible(false);
-        if (auto* p = m_panel_manager.get_panel<HierarchyPanel>()) p->set_visible(false);
-        if (auto* p = m_panel_manager.get_panel<InspectorPanel>()) p->set_visible(false);
-        if (auto* p = m_panel_manager.get_panel<ViewportPanel>()) p->set_visible(false);
-        if (auto* p = m_panel_manager.get_panel<ScreenPanel>()) p->set_visible(false);
-        if (auto* p = m_panel_manager.get_panel<GamePanel>()) p->set_visible(false);
-        if (auto* p = m_panel_manager.get_panel<FileBrowserPanel>()) p->set_visible(false);
-        if (auto* p = m_panel_manager.get_panel<SceneManagerPanel>()) p->set_visible(false);
-        if (auto* p = m_panel_manager.get_panel<AssetPreviewPanel>()) p->set_visible(false);
-        if (auto* p = m_panel_manager.get_panel<BuildSettingsPanel>()) p->set_visible(false);
-        if (auto* p = m_panel_manager.get_panel<ProjectSettingsPanel>()) p->set_visible(false);
-        if (auto* p = m_panel_manager.get_panel<PrefabEditorPanel>()) p->set_visible(false);
+        m_panel_manager.hide_editor_panels();
     }
 
     return true;
@@ -392,7 +369,7 @@ void EditorApplication::handle_shortcuts(engine::Engine& engine) {
         }
 
         if (input.is_pressed(KeyCode::G)) {
-            m_context.set_grid_visible(!m_context.is_grid_visible());
+            m_context.viewport().grid_visible = !m_context.viewport().grid_visible;
         }
     }
 }
@@ -401,7 +378,7 @@ void EditorApplication::on_project_loaded() {
     engine::Logger::instance().info("Editor", "Project loaded: %s", m_project_manager->project_info().name.c_str());
 
     // Set project path on context for panels to access
-    m_context.set_project_path(m_project_manager->project_path());
+    m_context.scene_state().set_project_path(m_project_manager->project_path());
 
     // Initialize script manager for this project
     // Engine paths need to be absolute for CMake to find includes
@@ -502,9 +479,9 @@ void EditorApplication::rebuild_scripts() {
 
 void EditorApplication::new_scene() {
     m_scene_registry.clear();
-    m_context.clear_selection();
-    m_context.clear_dirty();
-    m_context.set_current_scene_path("");
+    m_context.selection().clear_selection();
+    m_context.scene_state().clear_dirty();
+    m_context.scene_state().set_scene_path("");
 
     // Create a default camera entity with Camera2D component
     auto camera = create_entity(m_scene_registry, "Main Camera");
@@ -522,7 +499,7 @@ void EditorApplication::new_scene() {
 }
 
 void EditorApplication::save_scene() {
-    std::string path = m_context.current_scene_path();
+    std::string path = m_context.scene_state().scene_path();
 
     if (path.empty()) {
         if (has_project()) {
@@ -535,8 +512,8 @@ void EditorApplication::save_scene() {
 
     SceneSerializer serializer(m_scene_registry);
     if (serializer.save(path)) {
-        m_context.set_current_scene_path(path);
-        m_context.clear_dirty();
+        m_context.scene_state().set_scene_path(path);
+        m_context.scene_state().clear_dirty();
         m_context.history().mark_saved();
         engine::Logger::instance().info("Editor", "Scene saved: %s", path.c_str());
     } else {
@@ -564,8 +541,8 @@ void EditorApplication::save_scene_as() {
     if (!path.empty()) {
         SceneSerializer serializer(m_scene_registry);
         if (serializer.save(path)) {
-            m_context.set_current_scene_path(path);
-            m_context.clear_dirty();
+            m_context.scene_state().set_scene_path(path);
+            m_context.scene_state().clear_dirty();
             m_context.history().mark_saved();
             engine::Logger::instance().info("Editor", "Scene saved as: %s", path.c_str());
         } else {
@@ -578,12 +555,12 @@ bool EditorApplication::load_scene(const std::string& path) {
     SceneSerializer serializer(m_scene_registry);
 
     m_scene_registry.clear();
-    m_context.clear_selection();
+    m_context.selection().clear_selection();
     m_context.history().clear();
 
     if (serializer.load(path)) {
-        m_context.set_current_scene_path(path);
-        m_context.clear_dirty();
+        m_context.scene_state().set_scene_path(path);
+        m_context.scene_state().clear_dirty();
         m_context.history().mark_saved();
         engine::Logger::instance().info("Editor", "Scene loaded: %s", path.c_str());
         return true;
@@ -632,7 +609,7 @@ void EditorApplication::launch_pixart(const std::string& file_path) {
 }
 
 void EditorApplication::delete_selection() {
-    auto selection = m_context.selection();
+    auto selection = m_context.selection().selection();
     for (auto entity : selection) {
         if (m_scene_registry.valid(entity)) {
             auto cmd = std::make_unique<DeleteEntityCommand>(&m_scene_registry, &m_context, entity);
@@ -642,7 +619,7 @@ void EditorApplication::delete_selection() {
 }
 
 void EditorApplication::confirm_discard_or_save(std::function<void()> action) {
-    if (!m_context.is_dirty()) {
+    if (!m_context.scene_state().is_dirty()) {
         action();
         return;
     }

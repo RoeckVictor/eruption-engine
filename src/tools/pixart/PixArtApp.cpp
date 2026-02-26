@@ -91,10 +91,7 @@ void PixArtApp::update() {
 }
 
 void PixArtApp::shutdown() {
-    if (m_canvas_tex) {
-        glDeleteTextures(1, &m_canvas_tex);
-        m_canvas_tex = 0;
-    }
+    m_canvas_tex.destroy();
 }
 
 void PixArtApp::setup_default_layout(unsigned int dockspace_id) {

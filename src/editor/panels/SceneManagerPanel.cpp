@@ -99,4 +99,4 @@ void SceneManagerPanel::render_context_menu(const std::string& scene_path) {
     }
 }
 
-} // namespace editor
+}

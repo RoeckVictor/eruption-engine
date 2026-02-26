@@ -669,7 +669,7 @@ void FileBrowserPanel::render_file_list() {
                         info.is_prefab_instance = true;
                         info.prefab_path = prefab_path.string();
 
-                        m_editor_context->mark_dirty();
+                        m_editor_context->scene_state().mark_dirty();
                         refresh();
                     }
                 }
@@ -980,7 +980,7 @@ void FileBrowserPanel::unlink_prefab_instances(const std::string& prefab_path) {
             info.prefab_path.clear();
         }
     }
-    m_editor_context->mark_dirty();
+    m_editor_context->scene_state().mark_dirty();
 }
 
-} // namespace editor
+}

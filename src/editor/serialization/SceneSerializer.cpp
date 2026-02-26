@@ -94,7 +94,8 @@ nlohmann::json SceneSerializer::serialize() const {
         {"pixelsPerMeter", m_settings.pixels_per_meter},
         {"physicsSubsteps", m_settings.physics_substeps},
         {"backgroundColor", {m_settings.bg_color[0], m_settings.bg_color[1],
-                             m_settings.bg_color[2], m_settings.bg_color[3]}}
+                             m_settings.bg_color[2], m_settings.bg_color[3]}},
+        {"referenceResolution", {m_settings.reference_width, m_settings.reference_height}}
     };
 
     // Get root entities
@@ -142,7 +143,7 @@ bool SceneSerializer::deserialize(const nlohmann::json& json) {
             }
         }
 
-        // --- Validation pass ---
+        // Validation pass
         // Parse settings and walk entity JSON to catch structural errors
         // BEFORE clearing the registry. This prevents data loss on corrupt files.
         SceneSettings new_settings = m_settings;
@@ -168,6 +169,13 @@ bool SceneSerializer::deserialize(const nlohmann::json& json) {
                     new_settings.bg_color[i] = bg[i].get<float>();
                 }
             }
+            if (settings.contains("referenceResolution") && settings["referenceResolution"].is_array()) {
+                auto& res = settings["referenceResolution"];
+                if (res.size() >= 2) {
+                    new_settings.reference_width = res[0].get<float>();
+                    new_settings.reference_height = res[1].get<float>();
+                }
+            }
         }
 
         // Validate entity array is structurally sound before committing
@@ -187,8 +195,8 @@ bool SceneSerializer::deserialize(const nlohmann::json& json) {
             }
         }
 
-        // --- Commit pass ---
-        // Validation passed; now safe to clear and rebuild.
+        // Commit pass
+        // Validation passed; now safe to clear and rebuild
         m_registry.clear();
         m_settings = new_settings;
 
@@ -203,7 +211,7 @@ bool SceneSerializer::deserialize(const nlohmann::json& json) {
         update_world_transforms(m_registry);
 
         // Update screen-space entity positions
-        engine::ScreenRectSystem::update(m_registry, 1920.0f, 1080.0f);
+        engine::ScreenRectSystem::update(m_registry, m_settings.reference_width, m_settings.reference_height);
 
         return true;
     } catch (const std::exception& e) {
@@ -338,11 +346,9 @@ std::vector<entt::entity> SceneSerializer::deserialize_entities(const nlohmann::
             }
         }
 
-        // Update world transforms for new entities
         update_world_transforms(m_registry);
 
-        // Update screen-space entity positions
-        engine::ScreenRectSystem::update(m_registry, 1920.0f, 1080.0f);
+        engine::ScreenRectSystem::update(m_registry, m_settings.reference_width, m_settings.reference_height);
 
     } catch (const std::exception& e) {
         m_last_error = std::string("Exception while deserializing entities: ") + e.what();
@@ -352,10 +358,8 @@ std::vector<entt::entity> SceneSerializer::deserialize_entities(const nlohmann::
 }
 
 entt::entity SceneSerializer::deserialize_entity(const nlohmann::json& json, entt::entity parent) {
-    // Create entity
     auto entity = m_registry.create();
 
-    // EntityInfo
     EntityInfo info;
     if (json.contains("name")) {
         info.name = json["name"].get<std::string>();
@@ -389,7 +393,6 @@ entt::entity SceneSerializer::deserialize_entity(const nlohmann::json& json, ent
     }
     m_registry.emplace<EntityInfo>(entity, info);
 
-    // Hierarchy
     m_registry.emplace<Hierarchy>(entity);
     if (parent != entt::null) {
         set_parent(m_registry, entity, parent);
@@ -494,7 +497,7 @@ bool SceneSerializer::deserialize_component(entt::entity entity, const nlohmann:
     void* component_ptr = component_registry.create_component(m_registry, entity, type_info->type_index());
 
     if (!component_ptr) {
-        return false;  // Failed to get/create component
+        return false;
     }
 
     engine::reflection::deserialize_properties(*type_info, component_ptr, data);
@@ -541,7 +544,7 @@ entt::entity SceneSerializer::load_prefab(const std::filesystem::path& path) {
         }
 
         update_world_transforms(m_registry);
-        engine::ScreenRectSystem::update(m_registry, 1920.0f, 1080.0f);
+        engine::ScreenRectSystem::update(m_registry, m_settings.reference_width, m_settings.reference_height);
 
         engine::Logger::instance().info("SceneSerializer", "Loaded prefab: %s", path.string().c_str());
         return entity;
@@ -561,7 +564,6 @@ bool SceneSerializer::save_prefab(const std::filesystem::path& path, entt::entit
 
         nlohmann::json json;
 
-        // Entity name
         if (m_registry.all_of<EntityInfo>(entity)) {
             json["name"] = m_registry.get<EntityInfo>(entity).name;
         } else {
@@ -654,12 +656,11 @@ void SceneSerializer::sync_entity_from_prefab(entt::entity target, entt::registr
         comp_json["data"] = nlohmann::json::object();
         engine::reflection::serialize_properties(*type_info, source_ptr, comp_json["data"]);
 
-        // Apply to target
         deserialize_component(target, comp_json);
     }
 
     update_world_transforms(m_registry);
-    engine::ScreenRectSystem::update(m_registry, 1920.0f, 1080.0f);
+    engine::ScreenRectSystem::update(m_registry, m_settings.reference_width, m_settings.reference_height);
 }
 
-} // namespace editor
+}

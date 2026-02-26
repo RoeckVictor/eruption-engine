@@ -16,21 +16,21 @@ namespace editor {
 
 // Color palette for flame chart (hashed by scope name)
 static const ImU32 s_flame_colors[] = {
-    IM_COL32(66, 133, 244, 255),   // Blue
-    IM_COL32(219, 68, 55, 255),    // Red
-    IM_COL32(244, 180, 0, 255),    // Yellow
-    IM_COL32(15, 157, 88, 255),    // Green
-    IM_COL32(171, 71, 188, 255),   // Purple
-    IM_COL32(255, 112, 67, 255),   // Orange
-    IM_COL32(0, 172, 193, 255),    // Cyan
-    IM_COL32(124, 179, 66, 255),   // Lime
-    IM_COL32(103, 58, 183, 255),   // Deep Purple
-    IM_COL32(233, 30, 99, 255),    // Pink
+    IM_COL32(66, 133, 244, 255),
+    IM_COL32(219, 68, 55, 255),
+    IM_COL32(244, 180, 0, 255),
+    IM_COL32(15, 157, 88, 255),
+    IM_COL32(171, 71, 188, 255),
+    IM_COL32(255, 112, 67, 255),
+    IM_COL32(0, 172, 193, 255),
+    IM_COL32(124, 179, 66, 255),
+    IM_COL32(103, 58, 183, 255),
+    IM_COL32(233, 30, 99, 255),
 };
 static const int s_flame_color_count = sizeof(s_flame_colors) / sizeof(s_flame_colors[0]);
 
 ProfilerPanel::ProfilerPanel(engine::Engine& engine, EditorContext& context)
-    : Panel("Profiler")
+    : Panel("Profiler", PanelVisibilityMode::OnDemand)
     , m_engine(engine)
     , m_context(context)
 {
@@ -739,4 +739,4 @@ void ProfilerPanel::render_gpu_tab() {
     render_flame_chart(snapshot.frames, true);
 }
 
-} // namespace editor
+}

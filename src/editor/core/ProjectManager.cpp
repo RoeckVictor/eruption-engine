@@ -1,5 +1,6 @@
 #include "ProjectManager.h"
 #include "engine/core/Log.h"
+#include "engine/platform/PlatformUtils.h"
 
 #include <fstream>
 #include <filesystem>
@@ -263,19 +264,11 @@ void ProjectManager::create_project_directories(const std::string& path) {
 }
 
 std::string ProjectManager::get_prefs_file_path() const {
-#ifdef _WIN32
-    const char* appdata = std::getenv("APPDATA");
-    if (appdata) {
-        return (fs::path(appdata) / "Eruption" / "editor_prefs.json").string();
+    std::string config_dir = engine::platform::user_config_directory();
+    if (!config_dir.empty()) {
+        return (fs::path(config_dir) / "eruption" / "editor_prefs.json").string();
     }
     return "editor_prefs.json";
-#else
-    const char* home = std::getenv("HOME");
-    if (home) {
-        return (fs::path(home) / ".config" / "eruption" / "editor_prefs.json").string();
-    }
-    return "editor_prefs.json";
-#endif
 }
 
 }

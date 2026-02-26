@@ -9,14 +9,13 @@ class RuntimeContext;
 class ScriptManager;
 class PanelManager;
 
-/// Renders the main editor toolbar (play/pause/stop, gizmo modes, grid, snap, etc.).
-/// Extracted from EditorApplication to reduce its size and keep toolbar logic isolated.
+// Renders the main editor toolbar (play/pause/stop, gizmo modes, grid, snap, etc.)
+// Extracted from EditorApplication to reduce its size and keep toolbar logic isolated
 class EditorToolbar {
 public:
     EditorToolbar(EditorContext& context, RuntimeContext& runtime,
                   ScriptManager& scripts, PanelManager& panels);
 
-    /// Render the toolbar. Sets the toolbar height on PanelManager.
     void render();
 
 private:
@@ -32,4 +31,4 @@ private:
     PanelManager& m_panels;
 };
 
-} // namespace editor
+}

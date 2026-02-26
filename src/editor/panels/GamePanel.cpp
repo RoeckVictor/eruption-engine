@@ -3,14 +3,8 @@
 #include "editor/core/EditorComponents.h"
 #include "editor/core/RuntimeContext.h"
 #include "editor/render/SceneRenderUtils.h"
-#include "editor/render/EditorTextRenderer.h"
-#include "engine/core/MathConstants.h"
 #include "engine/core/Transform.h"
 #include "engine/core/ScreenRect.h"
-#include "engine/core/Logger.h"
-#include "engine/core/Engine.h"
-#include "engine/simulation/PixelGridComponent.h"
-#include "engine/render/PixelGridRenderer.h"
 #include "engine/render/Camera2D.h"
 #include "engine/render/Image.h"
 #include "engine/render/Text.h"
@@ -25,6 +19,7 @@ namespace editor {
 GamePanel::GamePanel(EditorContext& context)
     : Panel("Game")
     , m_context(context)
+    , m_scene_renderer(context)
 {
 }
 
@@ -79,15 +74,10 @@ void GamePanel::on_gui() {
     }
 
     // Update viewport info for correct screen-to-world conversion in scripts
-    // Convert ImGui screen coordinates to GLFW window-relative coordinates
-    // With ImGuiConfigFlags_ViewportsEnable, GetCursorScreenPos returns OS screen coords
-    // but mouse_x/y from GLFW are window-relative
     if (auto* runtime = m_context.runtime()) {
-        // Get the main ImGui viewport (corresponds to the main GLFW window)
         ImGuiViewport* main_viewport = ImGui::GetMainViewport();
         float vp_x = panel_pos.x - main_viewport->Pos.x;
         float vp_y = panel_pos.y - main_viewport->Pos.y;
-
         runtime->set_viewport(vp_x, vp_y, panel_size.x, panel_size.y);
     }
 
@@ -108,57 +98,6 @@ entt::entity GamePanel::find_camera_entity() const {
     return entt::null;
 }
 
-void GamePanel::ensure_text_renderer() {
-    if (m_text_renderer) return;
-
-    auto* runtime = m_context.runtime();
-    if (!runtime) return;
-
-    auto* eng = runtime->engine();
-    if (!eng) return;
-
-    m_text_renderer = std::make_unique<EditorTextRenderer>(eng->assets());
-}
-
-void GamePanel::render_world_image(ImDrawList* draw_list, entt::entity entity,
-                                    float cam_x, float cam_y, float cam_zoom,
-                                    ImVec2 panel_pos, ImVec2 panel_size) {
-    auto* registry = m_context.registry();
-    if (!registry) return;
-
-    auto& transform = registry->get<engine::Transform>(entity);
-    auto& image = registry->get<engine::render::Image>(entity);
-
-    if (!image.enabled) return;
-
-    int tex_width, tex_height;
-    void* texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
-
-    WorldToScreen wts(panel_pos, panel_size, cam_x, cam_y, cam_zoom);
-    auto quad = compute_image_quad(transform, tex_width, tex_height, image, wts);
-    draw_image_quad(draw_list, quad, texture);
-}
-
-void GamePanel::render_world_text(ImDrawList* draw_list, entt::entity entity,
-                                   float cam_x, float cam_y, float cam_zoom,
-                                   ImVec2 panel_pos, ImVec2 panel_size) {
-    auto* registry = m_context.registry();
-    if (!registry) return;
-
-    ensure_text_renderer();
-    if (!m_text_renderer) return;
-
-    auto& transform = registry->get<engine::Transform>(entity);
-    auto& text = registry->get<engine::render::Text>(entity);
-
-    if (!text.enabled) return;
-
-    WorldToScreen wts(panel_pos, panel_size, cam_x, cam_y, cam_zoom);
-    ImVec2 pos = wts(transform.world_x, transform.world_y);
-
-    m_text_renderer->render(draw_list, text, pos, cam_zoom);
-}
-
 void GamePanel::render_screen_image(ImDrawList* draw_list, entt::entity entity,
                                      ImVec2 panel_pos, ImVec2 panel_size) {
     auto* registry = m_context.registry();
@@ -170,12 +109,11 @@ void GamePanel::render_screen_image(ImDrawList* draw_list, entt::entity entity,
     if (!rect.enabled || !image.enabled) return;
 
     int tex_width, tex_height;
-    void* texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
+    void* texture = m_scene_renderer.image_textures().get(image.sprite_path, tex_width, tex_height);
 
-    // Map screen coordinates to panel (assuming reference resolution matches panel size for now)
-    // For proper scaling, we'd need to know the reference resolution
-    float scale_x = panel_size.x / 1920.0f;  // Assume 1920x1080 reference
-    float scale_y = panel_size.y / 1080.0f;
+    const auto& settings = m_context.scene_settings();
+    float scale_x = panel_size.x / settings.reference_width;
+    float scale_y = panel_size.y / settings.reference_height;
 
     ImVec2 tl(panel_pos.x + rect.computed_x * scale_x,
               panel_pos.y + rect.computed_y * scale_y);
@@ -198,23 +136,27 @@ void GamePanel::render_screen_text(ImDrawList* draw_list, entt::entity entity,
     auto* registry = m_context.registry();
     if (!registry) return;
 
-    ensure_text_renderer();
-    if (!m_text_renderer) return;
-
     auto& rect = registry->get<engine::ScreenRect>(entity);
     auto& text = registry->get<engine::render::Text>(entity);
 
     if (!rect.enabled || !text.enabled) return;
 
-    float scale_x = panel_size.x / 1920.0f;
-    float scale_y = panel_size.y / 1080.0f;
-    float scale = std::min(scale_x, scale_y);
+    const auto& settings = m_context.scene_settings();
+    float scale_x = panel_size.x / settings.reference_width;
+    float scale_y = panel_size.y / settings.reference_height;
 
     ImVec2 pos(panel_pos.x + rect.computed_x * scale_x,
                panel_pos.y + rect.computed_y * scale_y);
 
-    // Use EditorTextRenderer with the computed scale
-    m_text_renderer->render(draw_list, text, pos, scale);
+    // For screen-space text, we use ImGui's default font at a scaled size
+    // This is simpler than using EditorTextRenderer which is more for world-space
+    ImU32 color = IM_COL32(
+        static_cast<uint8_t>(text.color_r * 255.0f),
+        static_cast<uint8_t>(text.color_g * 255.0f),
+        static_cast<uint8_t>(text.color_b * 255.0f),
+        static_cast<uint8_t>(text.color_a * 255.0f)
+    );
+    draw_list->AddText(pos, color, text.content.c_str());
 }
 
 void GamePanel::render_game_view(ImVec2 panel_pos, ImVec2 panel_size) {
@@ -238,31 +180,8 @@ void GamePanel::render_game_view(ImVec2 panel_pos, ImVec2 panel_size) {
     draw_list->PushClipRect(panel_pos,
         ImVec2(panel_pos.x + panel_size.x, panel_pos.y + panel_size.y), true);
 
-    // Collect and sort all world-space renderable entities
-    auto render_items = collect_world_renderables(*registry);
-
-    // Render sorted world-space entities
-    for (const auto& item : render_items) {
-        switch (item.type) {
-            case RenderableType::PixelGrid: {
-                auto& transform = registry->get<engine::Transform>(item.entity);
-                auto& grid_comp = registry->get<engine::simulation::PixelGridComponent>(item.entity);
-                auto& renderer = registry->get<engine::render::PixelGridRenderer>(item.entity);
-
-                auto quad = compute_pixel_grid_quad(transform, grid_comp, renderer, wts);
-                void* grid_tex = resolve_grid_texture(
-                    item.entity, grid_comp.pixel_grid_path, m_context.runtime(), m_grid_textures);
-                draw_pixel_grid_quad(draw_list, quad, grid_tex);
-                break;
-            }
-            case RenderableType::Image:
-                render_world_image(draw_list, item.entity, cam_x, cam_y, cam_zoom, panel_pos, panel_size);
-                break;
-            case RenderableType::Text:
-                render_world_text(draw_list, item.entity, cam_x, cam_y, cam_zoom, panel_pos, panel_size);
-                break;
-        }
-    }
+    // Render world-space entities using the scene renderer (no selection outlines in game view)
+    m_scene_renderer.render_world_entities(draw_list, *registry, wts, false, m_context.runtime());
 
     // Now render screen-space entities (on top of world-space)
     struct ScreenRenderItem {
@@ -286,7 +205,7 @@ void GamePanel::render_game_view(ImVec2 panel_pos, ImVec2 panel_size) {
             bool has_image = registry->all_of<engine::render::Image>(entity);
             bool has_text = registry->all_of<engine::render::Text>(entity);
 
-            if (!has_image && !has_text) continue;  // Skip entities without visuals
+            if (!has_image && !has_text) continue;
 
             int layer = 0;
             if (has_image) {
@@ -315,7 +234,7 @@ void GamePanel::render_game_view(ImVec2 panel_pos, ImVec2 panel_size) {
 
     draw_list->PopClipRect();
 
-    m_grid_textures.cleanup(m_context.registry());
+    m_scene_renderer.cleanup(m_context.registry());
 }
 
-} // namespace editor
+}

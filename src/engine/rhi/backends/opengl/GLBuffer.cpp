@@ -123,7 +123,8 @@ bool GLBuffer::resize(size_t new_size, const void* new_data) {
 
 bool GLBuffer::readback(size_t offset, size_t size, void* dst) const {
     if (!m_valid || !dst) return false;
-    if (offset + size > m_size) return false;
+    // Use overflow-safe bounds check: avoid offset + size which can wrap
+    if (size > m_size || offset > m_size - size) return false;
 
     GLenum target = buffer_type_to_gl(m_type);
     glBindBuffer(target, m_handle);
@@ -157,7 +158,8 @@ void GLBuffer::bind(uint32_t slot) {
 
 void* GLBuffer::map_read(size_t offset, size_t size) {
     if (!m_valid) return nullptr;
-    if (offset + size > m_size) return nullptr;
+    // Use overflow-safe bounds check: avoid offset + size which can wrap
+    if (size > m_size || offset > m_size - size) return nullptr;
 
     GLenum target = buffer_type_to_gl(m_type);
     glBindBuffer(target, m_handle);

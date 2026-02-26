@@ -10,6 +10,7 @@
 #include "editor/core/PixelGridTextureCache.h"
 #include "editor/core/RuntimeContext.h"
 #include "editor/core/EditorComponents.h"
+#include "editor/core/CoordinateUtils.h"
 
 #include <imgui.h>
 #include <entt/entt.hpp>
@@ -19,26 +20,6 @@
 #include <algorithm>
 
 namespace editor {
-
-struct WorldToScreen {
-    float screen_cx;
-    float screen_cy;
-    float cam_x;
-    float cam_y;
-    float zoom;
-
-    WorldToScreen(ImVec2 viewport_pos, ImVec2 viewport_size, float cx, float cy, float z)
-        : screen_cx(viewport_pos.x + viewport_size.x * 0.5f)
-        , screen_cy(viewport_pos.y + viewport_size.y * 0.5f)
-        , cam_x(cx), cam_y(cy), zoom(z)
-    {}
-
-    ImVec2 operator()(float wx, float wy) const {
-        float sx = screen_cx + (wx - cam_x) * zoom;
-        float sy = screen_cy - (wy - cam_y) * zoom;
-        return ImVec2(sx, sy);
-    }
-};
 
 struct PixelGridQuad {
     ImVec2 corners[4];

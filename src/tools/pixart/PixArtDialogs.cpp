@@ -5,6 +5,7 @@
 #include <cstring>
 #include <string>
 
+#include "editor/core/Constants.h"
 #include "engine/platform/PlatformUtils.h"
 
 namespace pixart {
@@ -26,15 +27,14 @@ void PixArtApp::render_new_dialog() {
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::InputInt("Width", &m_new_width);
         ImGui::InputInt("Height", &m_new_height);
-        m_new_width = std::clamp(m_new_width, 1, 4096);
-        m_new_height = std::clamp(m_new_height, 1, 4096);
+        m_new_width = std::clamp(m_new_width,
+            editor::constants::GRID_SIZE_MIN, editor::constants::GRID_SIZE_MAX);
+        m_new_height = std::clamp(m_new_height,
+            editor::constants::GRID_SIZE_MIN, editor::constants::GRID_SIZE_MAX);
 
         if (ImGui::Button("Create", ImVec2(120, 0))) {
-            // Delete old texture
-            if (m_canvas_tex) {
-                glDeleteTextures(1, &m_canvas_tex);
-                m_canvas_tex = 0;
-            }
+            // Delete old texture (will be recreated on next update)
+            m_canvas_tex.destroy();
             m_doc.create(m_new_width, m_new_height);
             m_canvas_dirty = true;
             m_active_layer = 0;
@@ -63,14 +63,14 @@ void PixArtApp::render_resize_dialog() {
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::InputInt("Width", &m_resize_width);
         ImGui::InputInt("Height", &m_resize_height);
-        m_resize_width = std::clamp(m_resize_width, 1, 4096);
-        m_resize_height = std::clamp(m_resize_height, 1, 4096);
+        m_resize_width = std::clamp(m_resize_width,
+            editor::constants::GRID_SIZE_MIN, editor::constants::GRID_SIZE_MAX);
+        m_resize_height = std::clamp(m_resize_height,
+            editor::constants::GRID_SIZE_MIN, editor::constants::GRID_SIZE_MAX);
 
         if (ImGui::Button("Resize", ImVec2(120, 0))) {
-            if (m_canvas_tex) {
-                glDeleteTextures(1, &m_canvas_tex);
-                m_canvas_tex = 0;
-            }
+            // Delete old texture (will be recreated on next update)
+            m_canvas_tex.destroy();
             // Capture all pixels before resize for undo
             m_undo.begin_operation(m_doc);
             for (int ly = 0; ly < m_doc.height(); ++ly) {
@@ -220,10 +220,8 @@ void PixArtApp::do_new_document() {
 void PixArtApp::do_open_file() {
     std::string path = engine::platform::open_file_dialog("Open Pixel Grid", PXG_FILTERS);
     if (!path.empty() && m_doc.load(path)) {
-        if (m_canvas_tex) {
-            glDeleteTextures(1, &m_canvas_tex);
-            m_canvas_tex = 0;
-        }
+        // Delete old texture (will be recreated on next update)
+        m_canvas_tex.destroy();
         m_current_path = path;
         m_canvas_dirty = true;
         m_active_layer = 0;

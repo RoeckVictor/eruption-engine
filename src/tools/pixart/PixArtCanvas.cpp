@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "editor/core/Constants.h"
+
 namespace pixart {
 
 // ---------------------------------------------------------------------------
@@ -101,24 +103,21 @@ void PixArtApp::update_canvas_texture() {
     int w = m_doc.width();
     int h = m_doc.height();
 
-    if (!m_canvas_tex) {
-        glGenTextures(1, &m_canvas_tex);
-        glBindTexture(GL_TEXTURE_2D, m_canvas_tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0,
-                     GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    }
-
     // Build composited image from all visible layers
     build_composite();
 
-    // Upload composite to GPU
-    glBindTexture(GL_TEXTURE_2D, m_canvas_tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, m_composite.data());
+    // Create or recreate texture if needed (size might have changed)
+    if (!m_canvas_tex.valid() || m_canvas_tex.width() != w || m_canvas_tex.height() != h) {
+        m_canvas_tex.destroy();
+        m_canvas_tex.create_2d(w, h,
+            engine::graphics::TextureFormat::RGBA8,
+            engine::graphics::TextureFilter::Nearest,
+            engine::graphics::TextureWrap::ClampToEdge,
+            m_composite.data());
+    } else {
+        // Upload composite to GPU
+        m_canvas_tex.upload_sub_2d(0, 0, w, h, m_composite.data());
+    }
 
     m_canvas_dirty = false;
 }
@@ -134,7 +133,7 @@ void PixArtApp::render_canvas() {
 
     ImGui::Begin("Canvas", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
-    if (!m_doc.valid() || !m_canvas_tex) {
+    if (!m_doc.valid() || !m_canvas_tex.valid()) {
         ImGui::Text("No document. Use File > New to create one.");
         ImGui::End();
         return;
@@ -159,7 +158,8 @@ void PixArtApp::render_canvas() {
         float wheel = ImGui::GetIO().MouseWheel;
         if (wheel != 0.0f) {
             ImVec2 mouse = ImGui::GetIO().MousePos;
-            float factor = (wheel > 0) ? 1.25f : 0.8f;
+            float factor = (wheel > 0) ? editor::constants::ZOOM_FACTOR_IN
+                                       : editor::constants::ZOOM_FACTOR_OUT;
             m_view.zoom_towards(factor, mouse.x, mouse.y,
                                canvas_pos.x + canvas_w * 0.5f,
                                canvas_pos.y + canvas_h * 0.5f);
@@ -212,12 +212,12 @@ void PixArtApp::render_canvas() {
     }
 
     // --- Draw the pixel grid texture ---
-    dl->AddImage(static_cast<ImTextureID>(static_cast<uintptr_t>(m_canvas_tex)),
+    dl->AddImage(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(m_canvas_tex.imgui_texture_id())),
                  ImVec2(grid_x0, grid_y0),
                  ImVec2(grid_x0 + grid_w, grid_y0 + grid_h));
 
     // --- Grid overlay (when zoomed in enough) ---
-    if (m_view.zoom >= 4.0f) {
+    if (m_view.zoom >= editor::constants::MIN_GRID_ZOOM) {
         ImU32 grid_col = IM_COL32(100, 100, 100, 60);
         for (int x = 0; x <= m_doc.width(); ++x) {
             float lx = grid_x0 + x * m_view.zoom;

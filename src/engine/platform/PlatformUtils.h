@@ -5,45 +5,46 @@
 
 namespace engine::platform {
 
-/// A single filter entry for file dialogs.
 struct FileFilter {
-    std::string description;  // "Pixel Grid Files (*.pxg)"
-    std::string pattern;      // "*.pxg"
+    std::string description;
+    std::string pattern;
 };
 
-/// Show a native "Open File" dialog.
-/// @return Selected file path, or empty string if cancelled.
 std::string open_file_dialog(
     const std::string& title,
     const std::vector<FileFilter>& filters = {});
 
-/// Show a native "Save File" dialog.
-/// @return Selected file path, or empty string if cancelled.
 std::string save_file_dialog(
     const std::string& title,
     const std::vector<FileFilter>& filters = {},
     const std::string& default_ext = "",
     const std::string& initial_dir = "");
 
-/// Show a native "Select Folder" dialog.
-/// @return Selected folder path, or empty string if cancelled.
 std::string folder_dialog(const std::string& title = "Select Folder");
 
-/// Launch a detached process (fire-and-forget).
-/// Each element in args is passed as a separate argument (no shell interpretation).
-/// @return true if the process was spawned successfully.
 bool launch_detached(
     const std::string& exe_path,
     const std::vector<std::string>& args = {});
 
-/// Open the OS file manager showing the given folder.
 void open_folder_in_file_manager(const std::string& folder_path);
-
-/// Open the OS file manager and highlight/select a specific file.
 void reveal_in_file_manager(const std::string& file_path);
 
-/// Get the directory containing the currently running executable.
-/// More reliable than fs::current_path() which depends on the working directory.
 std::string executable_directory();
 
-} // namespace engine::platform
+const char* shared_library_extension();
+const char* shared_library_prefix();
+std::string shared_library_name(const std::string& base_name);
+
+const char* executable_extension();
+
+char path_separator();
+
+std::string find_cmake();
+
+std::string user_config_directory();
+std::string user_documents_directory();
+
+bool filesystem_case_insensitive();
+std::string normalize_path_for_comparison(const std::string& path);
+
+}

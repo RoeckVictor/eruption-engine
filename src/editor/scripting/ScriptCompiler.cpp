@@ -1,192 +1,25 @@
 #include "ScriptCompiler.h"
 #include "engine/core/Logger.h"
+#include "engine/platform/PlatformUtils.h"
 
 #include <fstream>
 #include <sstream>
 #include <filesystem>
 #include <cstdlib>
-#include <cstdio>
-#include <array>
 #include <vector>
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <sys/wait.h>
-#include <unistd.h>
-#include <signal.h>
-#include <chrono>
-#include <thread>
-#endif
 
 namespace fs = std::filesystem;
 
 namespace editor {
 
-#ifdef _WIN32
-static constexpr DWORD SUBPROCESS_TIMEOUT_MS = 120000;
+static constexpr uint32_t SUBPROCESS_TIMEOUT_MS = 120000;
 
-// Run a command silently (no visible CMD window) and wait for completion.
-// Returns the process exit code, -1 on launch failure, or -2 on timeout.
-static int run_command_hidden(const std::string& command, std::string& output) {
-    SECURITY_ATTRIBUTES sa{};
-    sa.nLength = sizeof(sa);
-    sa.bInheritHandle = TRUE;
-
-    // Create pipe for capturing stdout/stderr
-    HANDLE read_pipe = nullptr;
-    HANDLE write_pipe = nullptr;
-    CreatePipe(&read_pipe, &write_pipe, &sa, 0);
-    SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
-
-    STARTUPINFOA si{};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
-    si.wShowWindow = SW_HIDE;
-    si.hStdOutput = write_pipe;
-    si.hStdError = write_pipe;
-
-    PROCESS_INFORMATION pi{};
-
-    // CreateProcess needs a mutable command string
-    std::vector<char> cmd_buf(command.begin(), command.end());
-    cmd_buf.push_back('\0');
-
-    BOOL ok = CreateProcessA(
-        nullptr, cmd_buf.data(), nullptr, nullptr, TRUE,
-        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
-
-    CloseHandle(write_pipe);
-
-    if (!ok) {
-        CloseHandle(read_pipe);
-        return -1;
-    }
-
-    // Read output from pipe
-    output.clear();
-    char buf[4096];
-    DWORD bytes_read = 0;
-    while (ReadFile(read_pipe, buf, sizeof(buf) - 1, &bytes_read, nullptr) && bytes_read > 0) {
-        buf[bytes_read] = '\0';
-        output += buf;
-    }
-    CloseHandle(read_pipe);
-
-    DWORD wait_result = WaitForSingleObject(pi.hProcess, SUBPROCESS_TIMEOUT_MS);
-
-    if (wait_result == WAIT_TIMEOUT) {
-        engine::Logger::instance().error("ScriptCompiler",
-            "Process timed out after %d seconds, terminating",
-            SUBPROCESS_TIMEOUT_MS / 1000);
-        TerminateProcess(pi.hProcess, 1);
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-        return -2;
-    }
-
-    DWORD exit_code = 0;
-    GetExitCodeProcess(pi.hProcess, &exit_code);
-
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-
-    return static_cast<int>(exit_code);
+ScriptCompiler::ScriptCompiler()
+    : m_process_runner(engine::platform::create_process_runner())
+{
 }
-#else
-static constexpr int SUBPROCESS_TIMEOUT_SEC = 120;
-
-// Run a command and capture stdout/stderr with timeout support.
-// Returns the process exit code, -1 on launch failure, or -2 on timeout.
-static int run_command_hidden(const std::string& command, std::string& output) {
-    output.clear();
-
-    // Create pipe for capturing stdout/stderr
-    int pipe_fd[2];
-    if (pipe(pipe_fd) == -1) {
-        return -1;
-    }
-
-    pid_t pid = fork();
-    if (pid == -1) {
-        close(pipe_fd[0]);
-        close(pipe_fd[1]);
-        return -1;
-    }
-
-    if (pid == 0) {
-        // Child process
-        close(pipe_fd[0]);
-
-        // Redirect stdout and stderr to pipe
-        dup2(pipe_fd[1], STDOUT_FILENO);
-        dup2(pipe_fd[1], STDERR_FILENO);
-        close(pipe_fd[1]);
-
-        // Execute command via shell
-        execl("/bin/sh", "sh", "-c", command.c_str(), nullptr);
-        _exit(127);  // exec failed
-    }
-
-    // Parent process
-    close(pipe_fd[1]);  // Close write end
-
-    char buffer[4096];
-    auto start_time = std::chrono::steady_clock::now();
-
-    while (true) {
-        // Check for timeout
-        auto elapsed = std::chrono::steady_clock::now() - start_time;
-        if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() >= SUBPROCESS_TIMEOUT_SEC) {
-            engine::Logger::instance().error("ScriptCompiler",
-                "Process timed out after %d seconds, terminating", SUBPROCESS_TIMEOUT_SEC);
-            kill(pid, SIGKILL);
-            waitpid(pid, nullptr, 0);
-            close(pipe_fd[0]);
-            return -2;
-        }
-
-        // Try to read from pipe (non-blocking check via waitpid)
-        int status;
-        pid_t result = waitpid(pid, &status, WNOHANG);
-
-        if (result == 0) {
-            // Process still running, read available data
-            ssize_t bytes = read(pipe_fd[0], buffer, sizeof(buffer) - 1);
-            if (bytes > 0) {
-                buffer[bytes] = '\0';
-                output += buffer;
-            } else {
-                // No data available, sleep briefly to avoid busy-wait
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            }
-        } else if (result == pid) {
-            // Process finished, read any remaining output
-            ssize_t bytes;
-            while ((bytes = read(pipe_fd[0], buffer, sizeof(buffer) - 1)) > 0) {
-                buffer[bytes] = '\0';
-                output += buffer;
-            }
-            close(pipe_fd[0]);
-
-            if (WIFEXITED(status)) {
-                return WEXITSTATUS(status);
-            }
-            // Process was killed by signal
-            return -1;
-        } else {
-            // waitpid error
-            close(pipe_fd[0]);
-            return -1;
-        }
-    }
-}
-#endif
-
-ScriptCompiler::ScriptCompiler() = default;
 
 ScriptCompiler::~ScriptCompiler() {
-    // Wait for any pending build
     if (m_build_future.valid()) {
         m_build_future.wait();
     }
@@ -207,11 +40,8 @@ void ScriptCompiler::set_engine_build_path(const std::string& path) {
 }
 
 std::string ScriptCompiler::dll_path() const {
-#ifdef _WIN32
-    return (fs::path(m_project_path) / "Library" / "ScriptAssemblies" / "GameScripts.dll").string();
-#else
-    return (fs::path(m_project_path) / "Library" / "ScriptAssemblies" / "libGameScripts.so").string();
-#endif
+    return (fs::path(m_project_path) / "Library" / "ScriptAssemblies" /
+            engine::platform::shared_library_name("GameScripts")).string();
 }
 
 bool ScriptCompiler::generate_cmake() {
@@ -441,96 +271,14 @@ std::string ScriptCompiler::find_cmake() const {
         return m_cmake_path;
     }
 
-#ifdef _WIN32
-    // First, check for bundled CMake relative to the editor executable
-    // Structure: tools/cmake/bin/cmake.exe
-    fs::path exe_dir = fs::current_path();
-    fs::path bundled_cmake = exe_dir / "tools" / "cmake" / "bin" / "cmake.exe";
-    if (fs::exists(bundled_cmake)) {
-        m_cmake_path = bundled_cmake.string();
-        engine::Logger::instance().info("ScriptCompiler", "Found bundled CMake at: %s", m_cmake_path.c_str());
-        return m_cmake_path;
+    // Use platform utility for cross-platform CMake discovery
+    m_cmake_path = engine::platform::find_cmake();
+
+    if (!m_cmake_path.empty()) {
+        engine::Logger::instance().info("ScriptCompiler", "Found CMake at: %s", m_cmake_path.c_str());
     }
 
-    // Also check one level up (in case we're in Debug/Release subfolder)
-    bundled_cmake = exe_dir.parent_path() / "tools" / "cmake" / "bin" / "cmake.exe";
-    if (fs::exists(bundled_cmake)) {
-        m_cmake_path = bundled_cmake.string();
-        engine::Logger::instance().info("ScriptCompiler", "Found bundled CMake at: %s", m_cmake_path.c_str());
-        return m_cmake_path;
-    }
-
-    // Fallback: Common CMake installation paths on Windows
-    std::vector<std::string> search_paths = {
-        "C:\\Program Files\\CMake\\bin\\cmake.exe",
-        "C:\\Program Files (x86)\\CMake\\bin\\cmake.exe",
-        "C:\\cmake\\bin\\cmake.exe",
-    };
-
-    // Also check Visual Studio installations
-    char* program_files = nullptr;
-    size_t pf_len = 0;
-    _dupenv_s(&program_files, &pf_len, "ProgramFiles");
-    if (program_files) {
-        // VS 2022 bundled CMake
-        search_paths.push_back(std::string(program_files) +
-            "\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe");
-        search_paths.push_back(std::string(program_files) +
-            "\\Microsoft Visual Studio\\2022\\Professional\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe");
-        search_paths.push_back(std::string(program_files) +
-            "\\Microsoft Visual Studio\\2022\\Enterprise\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe");
-        free(program_files);
-    }
-
-    for (const auto& path : search_paths) {
-        if (fs::exists(path)) {
-            m_cmake_path = path;
-            engine::Logger::instance().info("ScriptCompiler", "Found system CMake at: %s", path.c_str());
-            return m_cmake_path;
-        }
-    }
-
-    // Try system PATH as fallback (using where command)
-    std::array<char, 512> buffer;
-    FILE* pipe = _popen("where cmake 2>nul", "r");
-    if (pipe) {
-        if (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
-            std::string result = buffer.data();
-            // Remove trailing newline
-            while (!result.empty() && (result.back() == '\n' || result.back() == '\r')) {
-                result.pop_back();
-            }
-            if (!result.empty() && fs::exists(result)) {
-                m_cmake_path = result;
-                _pclose(pipe);
-                engine::Logger::instance().info("ScriptCompiler", "Found CMake in PATH: %s", result.c_str());
-                return m_cmake_path;
-            }
-        }
-        _pclose(pipe);
-    }
-#else
-    // On Unix, try common paths or rely on PATH
-    std::vector<std::string> search_paths = {
-        "/usr/bin/cmake",
-        "/usr/local/bin/cmake",
-        "/opt/homebrew/bin/cmake",  // macOS Homebrew ARM
-        "/usr/local/Cellar/cmake/bin/cmake"  // macOS Homebrew Intel
-    };
-
-    for (const auto& path : search_paths) {
-        if (fs::exists(path)) {
-            m_cmake_path = path;
-            return m_cmake_path;
-        }
-    }
-
-    // Fallback to just "cmake" and hope it's in PATH
-    m_cmake_path = "cmake";
-#endif
-
-    // If nothing found, return empty
-    return "";
+    return m_cmake_path;
 }
 
 bool ScriptCompiler::run_cmake_configure() {
@@ -547,26 +295,45 @@ bool ScriptCompiler::run_cmake_configure() {
         return false;
     }
 
-    std::string command;
+    // Build command with arguments
+    std::vector<std::string> args;
+    args.push_back("-S");
+    args.push_back(m_scripts_path);
+    args.push_back("-B");
+    args.push_back(m_build_path);
+
 #ifdef _WIN32
-    // Don't specify -G generator: CMake 3.20+ auto-detects the newest
-    // available Visual Studio (works with VS 2019, 2022, and future versions).
-    command = "\"" + cmake_exe + "\" -S \"" + m_scripts_path + "\" -B \"" + m_build_path + "\"";
-    command += " -A x64";
-#else
-    command = "\"" + cmake_exe + "\" -S \"" + m_scripts_path + "\" -B \"" + m_build_path + "\"";
+    // Use x64 architecture on Windows
+    args.push_back("-A");
+    args.push_back("x64");
 #endif
 
-    engine::Logger::instance().info("ScriptCompiler", "Running: %s", command.c_str());
+    engine::Logger::instance().info("ScriptCompiler", "Running CMake configure...");
 
-    std::string cmd_output;
-    int result = run_command_hidden(command, cmd_output);
-    if (!cmd_output.empty()) {
-        m_build_output += cmd_output;
+    auto result = m_process_runner->run_sync(cmake_exe, args, SUBPROCESS_TIMEOUT_MS);
+
+    // Capture output
+    if (!result.stdout_output.empty()) {
+        m_build_output += result.stdout_output;
+    }
+    if (!result.stderr_output.empty()) {
+        m_build_output += result.stderr_output;
     }
 
-    if (result != 0) {
-        m_last_error = "CMake configure failed with code: " + std::to_string(result);
+    if (result.timed_out) {
+        m_last_error = "CMake configure timed out after " + std::to_string(SUBPROCESS_TIMEOUT_MS / 1000) + " seconds";
+        engine::Logger::instance().error("ScriptCompiler", "%s", m_last_error.c_str());
+        return false;
+    }
+
+    if (result.launch_failed) {
+        m_last_error = "Failed to launch CMake process";
+        engine::Logger::instance().error("ScriptCompiler", "%s", m_last_error.c_str());
+        return false;
+    }
+
+    if (result.exit_code != 0) {
+        m_last_error = "CMake configure failed with code: " + std::to_string(result.exit_code);
         engine::Logger::instance().error("ScriptCompiler", "%s", m_last_error.c_str());
         return false;
     }
@@ -589,18 +356,38 @@ bool ScriptCompiler::run_cmake_build() {
     constexpr const char* build_config = "Debug";
 #endif
 
-    std::string command;
-    command = "\"" + cmake_exe + "\" --build \"" + m_build_path + "\" --config " + build_config;
+    std::vector<std::string> args;
+    args.push_back("--build");
+    args.push_back(m_build_path);
+    args.push_back("--config");
+    args.push_back(build_config);
 
-    engine::Logger::instance().info("ScriptCompiler", "Running: %s", command.c_str());
+    engine::Logger::instance().info("ScriptCompiler", "Running CMake build (%s)...", build_config);
 
-    std::string cmd_output;
-    int result = run_command_hidden(command, cmd_output);
-    if (!cmd_output.empty()) {
-        m_build_output += cmd_output;
+    auto result = m_process_runner->run_sync(cmake_exe, args, SUBPROCESS_TIMEOUT_MS);
+
+    // Capture output
+    if (!result.stdout_output.empty()) {
+        m_build_output += result.stdout_output;
     }
-    if (result != 0) {
-        m_last_error = "CMake build failed with code: " + std::to_string(result);
+    if (!result.stderr_output.empty()) {
+        m_build_output += result.stderr_output;
+    }
+
+    if (result.timed_out) {
+        m_last_error = "CMake build timed out after " + std::to_string(SUBPROCESS_TIMEOUT_MS / 1000) + " seconds";
+        engine::Logger::instance().error("ScriptCompiler", "%s", m_last_error.c_str());
+        return false;
+    }
+
+    if (result.launch_failed) {
+        m_last_error = "Failed to launch CMake build process";
+        engine::Logger::instance().error("ScriptCompiler", "%s", m_last_error.c_str());
+        return false;
+    }
+
+    if (result.exit_code != 0) {
+        m_last_error = "CMake build failed with code: " + std::to_string(result.exit_code);
         engine::Logger::instance().error("ScriptCompiler", "%s", m_last_error.c_str());
         return false;
     }

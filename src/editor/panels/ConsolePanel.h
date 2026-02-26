@@ -7,18 +7,18 @@
 
 namespace editor {
 
-/// Log message entry for the console.
+// Log message entry for the console
 struct LogEntry {
     enum class Level { Info, Warning, Error };
 
     Level level;
     std::string message;
     std::string source;
-    int count = 1;  // For collapsing duplicates
+    int count = 1;
 };
 
-/// Console panel for displaying log messages.
-/// Automatically hooks into the engine's Logger system.
+// Console panel for displaying log messages
+// Automatically hooks into the engine's Logger system
 class ConsolePanel : public Panel {
 public:
     ConsolePanel();
@@ -28,13 +28,10 @@ public:
     void on_close() override;
     void on_gui() override;
 
-    /// Add a log message.
     void log(LogEntry::Level level, const std::string& message, const std::string& source = "");
 
-    /// Clear all messages.
     void clear();
 
-    /// Convenience methods.
     void log_info(const std::string& message, const std::string& source = "");
     void log_warning(const std::string& message, const std::string& source = "");
     void log_error(const std::string& message, const std::string& source = "");
@@ -45,11 +42,10 @@ private:
     void hook_logger();
     void unhook_logger();
 
-    /// Copy selected entries (or all visible if none selected) to clipboard.
     void copy_selected_to_clipboard(const std::vector<LogEntry>& visible_entries);
 
     std::vector<LogEntry> m_entries;
-    std::mutex m_entries_mutex;  // For thread-safe logging
+    std::mutex m_entries_mutex;
     char m_filter[128] = "";
 
     bool m_show_info = true;
@@ -58,12 +54,11 @@ private:
     bool m_collapse_duplicates = true;
     bool m_auto_scroll = true;
 
-    // Selection state (indices into the filtered/visible entries)
     std::vector<bool> m_selected;
-    int m_last_clicked = -1;  // For shift-click range selection
+    int m_last_clicked = -1;
 
     size_t m_logger_sink_id = 0;
     bool m_hooked = false;
 };
 
-} // namespace editor
+}

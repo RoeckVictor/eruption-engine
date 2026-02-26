@@ -1,5 +1,7 @@
 #pragma once
 
+#include "editor/core/Constants.h"
+
 namespace pixart {
 
 /// Encapsulates canvas view state: zoom, pan, and coordinate transformations.
@@ -7,17 +9,17 @@ namespace pixart {
 class CanvasView {
 public:
     // View parameters
-    float zoom = 16.0f;
+    float zoom = editor::constants::DEFAULT_ZOOM;
     float pan_x = 0.0f;
     float pan_y = 0.0f;
 
     // Zoom constraints
-    float min_zoom = 1.0f;
-    float max_zoom = 128.0f;
+    float min_zoom = editor::constants::MIN_ZOOM;
+    float max_zoom = editor::constants::MAX_ZOOM;
 
     /// Reset view to default state.
     void reset() {
-        zoom = 16.0f;
+        zoom = editor::constants::DEFAULT_ZOOM;
         pan_x = 0.0f;
         pan_y = 0.0f;
     }

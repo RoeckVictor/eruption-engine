@@ -1,4 +1,5 @@
 #include "TranslateGizmo.h"
+#include "GizmoColors.h"
 #include "engine/core/MathConstants.h"
 #include <cmath>
 #include <algorithm>
@@ -17,66 +18,39 @@ GizmoResult TranslateGizmo::update(
 ) {
     GizmoResult result;
 
-    // Position gizmo at WORLD coordinates (not local)
-    ImVec2 center = world_to_screen(
-        transform.world_x, transform.world_y,
-        viewport_pos, viewport_size,
-        camera_x, camera_y, zoom
-    );
+    auto coord = make_transform(viewport_pos, viewport_size, camera_x, camera_y, zoom);
+    ImVec2 center = coord.world_to_screen(transform.world_x, transform.world_y);
 
-    // Check if gizmo is visible in viewport
-    if (center.x < viewport_pos.x - AXIS_LENGTH * 2 ||
-        center.x > viewport_pos.x + viewport_size.x + AXIS_LENGTH * 2 ||
-        center.y < viewport_pos.y - AXIS_LENGTH * 2 ||
-        center.y > viewport_pos.y + viewport_size.y + AXIS_LENGTH * 2) {
+    if (!is_visible_in_viewport(center, viewport_pos, viewport_size, AXIS_LENGTH * 2)) {
         return result;
     }
 
     ImGuiIO& io = ImGui::GetIO();
     ImVec2 mouse = io.MousePos;
 
-    // Compute rotation for axis orientation
-    float rot_rad = 0.0f;
-    if (space == GizmoSpace::Local) {
-        rot_rad = transform.world_rotation * engine::DEG_TO_RAD;
-    }
-    float cos_r = std::cos(rot_rad);
-    float sin_r = std::sin(rot_rad);
+    auto rot = get_rotation_cache(transform, space);
+    float x_dir_sx = rot.x_dir_sx(), x_dir_sy = rot.x_dir_sy();
+    float y_dir_sx = rot.y_dir_sx(), y_dir_sy = rot.y_dir_sy();
 
-    // Screen-space axis directions
-    float x_dir_sx = cos_r, x_dir_sy = -sin_r;
-    float y_dir_sx = -sin_r, y_dir_sy = -cos_r;
-
-    // Axis endpoints
     ImVec2 x_end(center.x + AXIS_LENGTH * x_dir_sx, center.y + AXIS_LENGTH * x_dir_sy);
     ImVec2 y_end(center.x + AXIS_LENGTH * y_dir_sx, center.y + AXIS_LENGTH * y_dir_sy);
 
-    // Handle dragging
     if (m_is_dragging) {
         result.is_active = true;
 
         if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-            // Convert current mouse to world space
-            ImVec2 world_pos = screen_to_world(
-                mouse.x, mouse.y,
-                viewport_pos, viewport_size,
-                camera_x, camera_y, zoom
-            );
+            ImVec2 world_pos = coord.screen_to_world(mouse.x, mouse.y);
 
-            // Raw world delta from drag start
             float raw_dx = world_pos.x - m_drag_start_world.x;
             float raw_dy = world_pos.y - m_drag_start_world.y;
 
-            // Compute constrained world delta based on axis and space
             float world_dx = 0, world_dy = 0;
 
-            // Use start transform's world rotation for consistent axis during drag
-            float drag_wr = m_start_transform.world_rotation * engine::DEG_TO_RAD;
-            float drag_cos = std::cos(drag_wr);
-            float drag_sin = std::sin(drag_wr);
+            auto drag_rot = RotationCache::from_degrees(m_start_transform.world_rotation);
+            float drag_cos = drag_rot.cos_r;
+            float drag_sin = drag_rot.sin_r;
 
             if (space == GizmoSpace::Local) {
-                // Local axes in world space
                 float lx_wx = drag_cos, lx_wy = drag_sin;
                 float ly_wx = -drag_sin, ly_wy = drag_cos;
 
@@ -101,7 +75,6 @@ GizmoResult TranslateGizmo::update(
                         break;
                 }
             } else {
-                // World axes
                 switch (m_drag_axis) {
                     case DragAxis::X: world_dx = raw_dx; break;
                     case DragAxis::Y: world_dy = raw_dy; break;
@@ -110,16 +83,15 @@ GizmoResult TranslateGizmo::update(
                 }
             }
 
-            // Convert world delta to parent-space (local) delta
             float parent_rot = m_start_transform.world_rotation - m_start_transform.rotation;
             float parent_sx = (std::abs(m_start_transform.scale_x) > 0.0001f)
                 ? m_start_transform.world_scale_x / m_start_transform.scale_x : 1.0f;
             float parent_sy = (std::abs(m_start_transform.scale_y) > 0.0001f)
                 ? m_start_transform.world_scale_y / m_start_transform.scale_y : 1.0f;
 
-            float inv_rad = -parent_rot * engine::DEG_TO_RAD;
-            float cos_inv = std::cos(inv_rad);
-            float sin_inv = std::sin(inv_rad);
+            auto inv_rot = RotationCache::from_degrees(-parent_rot);
+            float cos_inv = inv_rot.cos_r;
+            float sin_inv = inv_rot.sin_r;
 
             float local_dx = (std::abs(parent_sx) > 0.0001f)
                 ? (world_dx * cos_inv - world_dy * sin_inv) / parent_sx : 0.0f;
@@ -131,16 +103,13 @@ GizmoResult TranslateGizmo::update(
 
             result.value_changed = true;
         } else {
-            // Mouse released - end drag
             m_is_dragging = false;
             m_drag_axis = DragAxis::None;
             result.just_finished = true;
         }
     } else {
-        // Not dragging - check for hover and start drag
         m_hover_axis = DragAxis::None;
 
-        // Check center square first (rotated point-in-quad test)
         {
             float rel_x = mouse.x - center.x;
             float rel_y = mouse.y - center.y;
@@ -151,34 +120,26 @@ GizmoResult TranslateGizmo::update(
             }
         }
 
-        // Check X axis
         if (m_hover_axis == DragAxis::None &&
             is_mouse_near_line(mouse, center, x_end, HIT_THRESHOLD)) {
             m_hover_axis = DragAxis::X;
         }
-        // Check Y axis
         if (m_hover_axis == DragAxis::None &&
             is_mouse_near_line(mouse, center, y_end, HIT_THRESHOLD)) {
             m_hover_axis = DragAxis::Y;
         }
 
-        // Start drag on click
         if (m_hover_axis != DragAxis::None && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             m_is_dragging = true;
             m_drag_axis = m_hover_axis;
             m_start_transform = transform;
             m_drag_start_mouse = mouse;
-            m_drag_start_world = screen_to_world(
-                mouse.x, mouse.y,
-                viewport_pos, viewport_size,
-                camera_x, camera_y, zoom
-            );
+            m_drag_start_world = coord.screen_to_world(mouse.x, mouse.y);
             result.just_started = true;
             result.is_active = true;
         }
     }
 
-    // Set hovering state for click-to-select priority
     m_is_hovering = (m_hover_axis != DragAxis::None);
 
     return result;
@@ -194,55 +155,30 @@ void TranslateGizmo::render(
     float zoom,
     GizmoSpace space
 ) {
-    // Position gizmo at WORLD coordinates
-    ImVec2 center = world_to_screen(
-        transform.world_x, transform.world_y,
-        viewport_pos, viewport_size,
-        camera_x, camera_y, zoom
-    );
+    auto coord = make_transform(viewport_pos, viewport_size, camera_x, camera_y, zoom);
+    ImVec2 center = coord.world_to_screen(transform.world_x, transform.world_y);
 
-    // Check if gizmo is visible in viewport
-    if (center.x < viewport_pos.x - AXIS_LENGTH * 2 ||
-        center.x > viewport_pos.x + viewport_size.x + AXIS_LENGTH * 2 ||
-        center.y < viewport_pos.y - AXIS_LENGTH * 2 ||
-        center.y > viewport_pos.y + viewport_size.y + AXIS_LENGTH * 2) {
+    if (!is_visible_in_viewport(center, viewport_pos, viewport_size, AXIS_LENGTH * 2)) {
         return;
     }
 
-    // Compute rotation for axis orientation
-    float rot_rad = 0.0f;
-    if (space == GizmoSpace::Local) {
-        rot_rad = transform.world_rotation * engine::DEG_TO_RAD;
-    }
-    float cos_r = std::cos(rot_rad);
-    float sin_r = std::sin(rot_rad);
+    auto rot = get_rotation_cache(transform, space);
+    float x_dir_sx = rot.x_dir_sx(), x_dir_sy = rot.x_dir_sy();
+    float y_dir_sx = rot.y_dir_sx(), y_dir_sy = rot.y_dir_sy();
 
-    // Screen-space axis directions
-    float x_dir_sx = cos_r, x_dir_sy = -sin_r;
-    float y_dir_sx = -sin_r, y_dir_sy = -cos_r;
-
-    // Axis endpoints
     ImVec2 x_end(center.x + AXIS_LENGTH * x_dir_sx, center.y + AXIS_LENGTH * x_dir_sy);
     ImVec2 y_end(center.x + AXIS_LENGTH * y_dir_sx, center.y + AXIS_LENGTH * y_dir_sy);
 
-    // Colors
-    ImU32 x_color = IM_COL32(220, 60, 60, 255);
-    ImU32 y_color = IM_COL32(60, 180, 60, 255);
-    ImU32 xy_color = IM_COL32(255, 220, 60, 200);
-    ImU32 x_hover = IM_COL32(255, 120, 120, 255);
-    ImU32 y_hover = IM_COL32(120, 255, 120, 255);
-    ImU32 xy_hover = IM_COL32(255, 255, 120, 255);
+    ImU32 draw_x_color = (m_hover_axis == DragAxis::X || m_drag_axis == DragAxis::X)
+        ? gizmo_colors::X_AXIS_HOVER : gizmo_colors::X_AXIS;
+    ImU32 draw_y_color = (m_hover_axis == DragAxis::Y || m_drag_axis == DragAxis::Y)
+        ? gizmo_colors::Y_AXIS_HOVER : gizmo_colors::Y_AXIS;
+    ImU32 draw_xy_color = (m_hover_axis == DragAxis::XY || m_drag_axis == DragAxis::XY)
+        ? gizmo_colors::XY_PLANE_HOVER : gizmo_colors::XY_PLANE;
 
-    // Determine colors based on hover/drag state
-    ImU32 draw_x_color = (m_hover_axis == DragAxis::X || m_drag_axis == DragAxis::X) ? x_hover : x_color;
-    ImU32 draw_y_color = (m_hover_axis == DragAxis::Y || m_drag_axis == DragAxis::Y) ? y_hover : y_color;
-    ImU32 draw_xy_color = (m_hover_axis == DragAxis::XY || m_drag_axis == DragAxis::XY) ? xy_hover : xy_color;
+    constexpr float LINE_THICKNESS = 3.0f;
 
-    // Draw gizmo
-    float line_thickness = 3.0f;
-
-    // X axis line and arrow
-    draw_list->AddLine(center, x_end, draw_x_color, line_thickness);
+    draw_list->AddLine(center, x_end, draw_x_color, LINE_THICKNESS);
     {
         ImVec2 tip(x_end.x + ARROW_SIZE * x_dir_sx, x_end.y + ARROW_SIZE * x_dir_sy);
         ImVec2 base1(x_end.x - 4 * x_dir_sx + 6 * x_dir_sy,
@@ -252,8 +188,7 @@ void TranslateGizmo::render(
         draw_list->AddTriangleFilled(tip, base1, base2, draw_x_color);
     }
 
-    // Y axis line and arrow
-    draw_list->AddLine(center, y_end, draw_y_color, line_thickness);
+    draw_list->AddLine(center, y_end, draw_y_color, LINE_THICKNESS);
     {
         ImVec2 tip(y_end.x + ARROW_SIZE * y_dir_sx, y_end.y + ARROW_SIZE * y_dir_sy);
         ImVec2 base1(y_end.x - 4 * y_dir_sx + 6 * y_dir_sy,
@@ -263,7 +198,6 @@ void TranslateGizmo::render(
         draw_list->AddTriangleFilled(tip, base1, base2, draw_y_color);
     }
 
-    // Center square for XY movement (rotated quad)
     {
         ImVec2 sq0 = center;
         ImVec2 sq1(center.x + CENTER_SIZE * x_dir_sx, center.y + CENTER_SIZE * x_dir_sy);
@@ -292,9 +226,4 @@ bool TranslateGizmo::is_mouse_near_line(ImVec2 mouse, ImVec2 a, ImVec2 b, float 
     return dist <= threshold;
 }
 
-bool TranslateGizmo::is_mouse_in_rect(ImVec2 mouse, ImVec2 min, ImVec2 max) const {
-    return mouse.x >= min.x && mouse.x <= max.x &&
-           mouse.y >= min.y && mouse.y <= max.y;
 }
-
-} // namespace editor

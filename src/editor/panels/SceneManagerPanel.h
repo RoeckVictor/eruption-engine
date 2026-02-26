@@ -6,7 +6,7 @@
 
 namespace editor {
 
-/// Scene Manager panel for listing and managing scenes.
+// Scene Manager panel for listing and managing scenes
 class SceneManagerPanel : public Panel {
 public:
     SceneManagerPanel();
@@ -21,4 +21,4 @@ private:
     std::string m_current_scene;
 };
 
-} // namespace editor
+}

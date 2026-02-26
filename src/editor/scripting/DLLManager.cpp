@@ -1,16 +1,15 @@
 #include "DLLManager.h"
+#include "ScriptAPIVersion.h"
 #include "engine/core/Logger.h"
 #include <imgui.h>
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
+#include <sstream>
 
 namespace editor {
 
-DLLManager::DLLManager() = default;
+DLLManager::DLLManager()
+    : m_library(engine::platform::create_dynamic_library())
+{
+}
 
 DLLManager::~DLLManager() {
     unload();
@@ -18,47 +17,43 @@ DLLManager::~DLLManager() {
 
 bool DLLManager::load(const std::string& path) {
     // Unload any existing DLL first
-    if (m_handle) {
+    if (m_library->is_loaded()) {
         unload();
     }
 
     m_dll_path = path;
 
-#ifdef _WIN32
-    // On Windows, we need to copy the DLL to allow rebuilding
-    // while the original is loaded. Use a temp copy.
-    std::string temp_path = path + ".loaded";
-
-    // Copy the file
-    if (!CopyFileA(path.c_str(), temp_path.c_str(), FALSE)) {
-        m_last_error = "Failed to copy DLL for loading";
-        engine::Logger::instance().error("DLLManager", "Failed to copy DLL: %s", path.c_str());
+    if (!m_library->load(path)) {
+        m_last_error = m_library->last_error();
+        engine::Logger::instance().error("DLLManager", "Failed to load DLL: %s (%s)",
+            path.c_str(), m_last_error.c_str());
         return false;
     }
 
-    m_handle = LoadLibraryA(temp_path.c_str());
-    if (!m_handle) {
-        DWORD error = GetLastError();
-        m_last_error = "LoadLibrary failed with error code: " + std::to_string(error);
-        engine::Logger::instance().error("DLLManager", "Failed to load DLL: %s (error %lu)", path.c_str(), error);
-        if (!DeleteFileA(temp_path.c_str())) {
-            engine::Logger::instance().warning("DLLManager", "Failed to clean up temp DLL copy: %s", temp_path.c_str());
+    // Check API version compatibility
+    using GetAPIVersionFn = void(*)(int* major, int* minor);
+    auto get_version = m_library->get_function<GetAPIVersionFn>("GetScriptAPIVersion");
+    if (get_version) {
+        int dll_major = 0, dll_minor = 0;
+        get_version(&dll_major, &dll_minor);
+
+        if (!ScriptAPIVersion::is_compatible(dll_major, dll_minor)) {
+            std::ostringstream oss;
+            oss << "Script API version mismatch: DLL has v" << dll_major << "." << dll_minor
+                << ", editor expects v" << ScriptAPIVersion::MAJOR << "." << ScriptAPIVersion::MINOR;
+            m_last_error = oss.str();
+            engine::Logger::instance().error("DLLManager", "%s", m_last_error.c_str());
+            m_library->unload();
+            return false;
         }
-        return false;
+
+        engine::Logger::instance().info("DLLManager", "Script API version: %d.%d (compatible)",
+            dll_major, dll_minor);
     }
-    m_temp_path = temp_path;  // Track temp path for cleanup
-#else
-    m_handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
-    if (!m_handle) {
-        m_last_error = dlerror();
-        engine::Logger::instance().error("DLLManager", "Failed to load DLL: %s (%s)", path.c_str(), m_last_error.c_str());
-        return false;
-    }
-#endif
 
     // Share the editor's ImGui context with the DLL so scripts can use ImGui
     using SetImGuiContextFn = void(*)(ImGuiContext*);
-    auto set_ctx = reinterpret_cast<SetImGuiContextFn>(get_symbol("SetImGuiContext"));
+    auto set_ctx = m_library->get_function<SetImGuiContextFn>("SetImGuiContext");
     if (set_ctx) {
         set_ctx(ImGui::GetCurrentContext());
     }
@@ -66,7 +61,8 @@ bool DLLManager::load(const std::string& path) {
     // Discover registered scripts
     discover_scripts();
 
-    engine::Logger::instance().info("DLLManager", "Loaded DLL: %s (%zu script types)", path.c_str(), m_script_types.size());
+    engine::Logger::instance().info("DLLManager", "Loaded DLL: %s (%zu script types)",
+        path.c_str(), m_script_types.size());
 
     // Notify callback
     if (m_loaded_callback) {
@@ -77,7 +73,7 @@ bool DLLManager::load(const std::string& path) {
 }
 
 void DLLManager::unload() {
-    if (!m_handle) {
+    if (!m_library->is_loaded()) {
         return;
     }
 
@@ -90,36 +86,11 @@ void DLLManager::unload() {
     m_script_types.clear();
     m_type_index.clear();
 
-#ifdef _WIN32
-    FreeLibrary(m_handle);
-
-    // Delete the temp copy
-    if (!m_temp_path.empty()) {
-        if (!DeleteFileA(m_temp_path.c_str())) {
-            engine::Logger::instance().warning("DLLManager", "Failed to clean up temp DLL: %s", m_temp_path.c_str());
-        }
-        m_temp_path.clear();
-    }
-#else
-    dlclose(m_handle);
-#endif
+    m_library->unload();
 
     engine::Logger::instance().info("DLLManager", "Unloaded DLL: %s", m_dll_path.c_str());
 
-    m_handle = nullptr;
     m_dll_path.clear();
-}
-
-void* DLLManager::get_symbol(const char* name) {
-    if (!m_handle) {
-        return nullptr;
-    }
-
-#ifdef _WIN32
-    return reinterpret_cast<void*>(GetProcAddress(m_handle, name));
-#else
-    return dlsym(m_handle, name);
-#endif
 }
 
 void DLLManager::discover_scripts() {
@@ -132,9 +103,9 @@ void DLLManager::discover_scripts() {
     using GetScriptNameFn = const char*(*)(int index);
     using GetScriptFactoryFn = runtime::ScriptFactory(*)(int index);
 
-    auto get_count = reinterpret_cast<GetScriptCountFn>(get_symbol("GetScriptCount"));
-    auto get_name = reinterpret_cast<GetScriptNameFn>(get_symbol("GetScriptName"));
-    auto get_factory = reinterpret_cast<GetScriptFactoryFn>(get_symbol("GetScriptFactory"));
+    auto get_count = m_library->get_function<GetScriptCountFn>("GetScriptCount");
+    auto get_name = m_library->get_function<GetScriptNameFn>("GetScriptName");
+    auto get_factory = m_library->get_function<GetScriptFactoryFn>("GetScriptFactory");
 
     if (get_count && get_name && get_factory) {
         int count = get_count();
@@ -156,9 +127,9 @@ void DLLManager::discover_scripts() {
     using GetSystemNameFn = const char*(*)(int index);
     using GetSystemFactoryFn = runtime::SystemFactory(*)(int index);
 
-    auto get_sys_count = reinterpret_cast<GetSystemCountFn>(get_symbol("GetSystemCount"));
-    auto get_sys_name = reinterpret_cast<GetSystemNameFn>(get_symbol("GetSystemName"));
-    auto get_sys_factory = reinterpret_cast<GetSystemFactoryFn>(get_symbol("GetSystemFactory"));
+    auto get_sys_count = m_library->get_function<GetSystemCountFn>("GetSystemCount");
+    auto get_sys_name = m_library->get_function<GetSystemNameFn>("GetSystemName");
+    auto get_sys_factory = m_library->get_function<GetSystemFactoryFn>("GetSystemFactory");
 
     if (get_sys_count && get_sys_name && get_sys_factory) {
         int count = get_sys_count();
@@ -178,12 +149,23 @@ void DLLManager::discover_scripts() {
 }
 
 runtime::ComponentScript* DLLManager::create_script(const std::string& type_name) {
+    // Safety check: ensure DLL is loaded before accessing factories
+    if (!is_loaded()) {
+        return nullptr;
+    }
+
     auto it = m_type_index.find(type_name);
     if (it == m_type_index.end()) {
         return nullptr;
     }
 
-    const auto& info = m_script_types[it->second];
+    // Validate index is still valid (protects against stale references during hot-reload)
+    size_t index = it->second;
+    if (index >= m_script_types.size()) {
+        return nullptr;
+    }
+
+    const auto& info = m_script_types[index];
     if (info.is_system || !info.factory) {
         return nullptr;
     }
@@ -192,12 +174,23 @@ runtime::ComponentScript* DLLManager::create_script(const std::string& type_name
 }
 
 runtime::SystemScript* DLLManager::create_system(const std::string& type_name) {
+    // Safety check: ensure DLL is loaded before accessing factories
+    if (!is_loaded()) {
+        return nullptr;
+    }
+
     auto it = m_type_index.find(type_name);
     if (it == m_type_index.end()) {
         return nullptr;
     }
 
-    const auto& info = m_script_types[it->second];
+    // Validate index is still valid (protects against stale references during hot-reload)
+    size_t index = it->second;
+    if (index >= m_script_types.size()) {
+        return nullptr;
+    }
+
+    const auto& info = m_script_types[index];
     if (!info.is_system || !info.system_factory) {
         return nullptr;
     }
@@ -209,4 +202,9 @@ bool DLLManager::has_script_type(const std::string& type_name) const {
     return m_type_index.find(type_name) != m_type_index.end();
 }
 
-} // namespace editor
+void DLLManager::api_version(int& major, int& minor) {
+    major = ScriptAPIVersion::MAJOR;
+    minor = ScriptAPIVersion::MINOR;
+}
+
+}

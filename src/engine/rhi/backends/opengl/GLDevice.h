@@ -29,6 +29,16 @@ public:
         TextureFormat color_format = TextureFormat::RGBA8,
         bool create_depth = true) override;
 
+    // Command buffer and descriptor set factory methods
+    std::unique_ptr<RHICommandBuffer> create_command_buffer() override;
+    std::unique_ptr<RHIDescriptorSetLayout> create_descriptor_set_layout(const DescriptorSetLayoutDesc& desc) override;
+    std::unique_ptr<RHIDescriptorSet> create_descriptor_set(const RHIDescriptorSetLayout* layout) override;
+    std::unique_ptr<RHIPipelineCache> create_pipeline_cache(const PipelineCacheDesc& desc) override;
+    std::unique_ptr<RHIFence> create_fence() override;
+    std::unique_ptr<RHIEvent> create_event() override;
+    std::unique_ptr<RHISemaphore> create_semaphore() override;
+    std::unique_ptr<RHITimelineSemaphore> create_timeline_semaphore() override;
+
     RHIContext* context() override { return &m_context; }
 
     std::unique_ptr<profiler::GPUProfiler> create_gpu_profiler() override;
@@ -43,6 +53,7 @@ public:
     int max_texture_units() const override { return m_max_texture_units; }
     int max_storage_buffer_bindings() const override { return m_max_storage_buffer_bindings; }
     void max_compute_workgroup_size(int& x, int& y, int& z) const override;
+    bool uv_origin_top_left() const override { return false; }
 
 private:
     GLContext m_context;

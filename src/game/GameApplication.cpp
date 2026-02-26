@@ -6,6 +6,7 @@
 #include "engine/scene/Scene.h"
 #include "engine/reflection/ReflectionInit.h"
 #include "engine/platform/KeyCode.h"
+#include "engine/platform/PlatformUtils.h"
 
 #include "editor/core/EditorComponents.h"
 #include "editor/core/RuntimeContext.h"
@@ -100,13 +101,8 @@ bool GameApplication::on_init(engine::Engine& engine) {
     // -----------------------------------------------------------------------
     m_script_manager = std::make_unique<editor::ScriptManager>();
 
-#ifdef _WIN32
-    fs::path lib_path = "GameScripts.dll";
-    const char* lib_name = "GameScripts.dll";
-#else
-    fs::path lib_path = "libGameScripts.so";
-    const char* lib_name = "libGameScripts.so";
-#endif
+    std::string lib_name = engine::platform::shared_library_name("GameScripts");
+    fs::path lib_path = lib_name;
 
     if (fs::exists(lib_path)) {
         if (m_script_manager->dll_manager().load(lib_path.string())) {
@@ -117,7 +113,7 @@ bool GameApplication::on_init(engine::Engine& engine) {
                         m_script_manager->dll_manager().last_error().c_str());
         }
     } else {
-        log.info("Game", "No %s found — running without scripts", lib_name);
+        log.info("Game", "No %s found — running without scripts", lib_name.c_str());
     }
 
     // -----------------------------------------------------------------------

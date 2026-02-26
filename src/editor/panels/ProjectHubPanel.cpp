@@ -12,7 +12,7 @@ namespace fs = std::filesystem;
 namespace editor {
 
 ProjectHubPanel::ProjectHubPanel(ProjectManager& project_manager, EditorApplication& app)
-    : Panel("Project Hub")
+    : Panel("Project Hub", PanelVisibilityMode::Manual)
     , m_project_manager(project_manager)
     , m_app(app)
 {
@@ -44,16 +44,17 @@ void ProjectHubPanel::on_gui() {
 
     // Modal dialogs
     render_new_project_dialog();
+    render_error_dialog();
 }
 
 void ProjectHubPanel::render_header() {
     ImGui::Spacing();
     ImGui::Spacing();
 
-    // Title
-    ImGui::PushFont(nullptr); // TODO: Use larger font
+    // Title (using font scale for larger text)
+    ImGui::SetWindowFontScale(1.5f);
     ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.9f, 1.0f), "Eruption Editor");
-    ImGui::PopFont();
+    ImGui::SetWindowFontScale(1.0f);
 
     ImGui::TextDisabled("Falling Sand Physics Engine");
 
@@ -129,20 +130,12 @@ void ProjectHubPanel::render_actions() {
     if (ImGui::Button("New Project", ImVec2(button_width, button_height))) {
         m_show_new_dialog = true;
 
-        // Set default path
-#ifdef _WIN32
-        const char* userprofile = std::getenv("USERPROFILE");
-        if (userprofile) {
-            std::string default_path = (fs::path(userprofile) / "Documents" / "EruptionProjects").string();
+        // Set default path using platform utility
+        std::string docs_dir = engine::platform::user_documents_directory();
+        if (!docs_dir.empty()) {
+            std::string default_path = (fs::path(docs_dir) / "EruptionProjects").string();
             strncpy(m_new_project_path, default_path.c_str(), sizeof(m_new_project_path) - 1);
         }
-#else
-        const char* home = std::getenv("HOME");
-        if (home) {
-            std::string default_path = (fs::path(home) / "EruptionProjects").string();
-            strncpy(m_new_project_path, default_path.c_str(), sizeof(m_new_project_path) - 1);
-        }
-#endif
     }
 
     ImGui::SameLine();
@@ -156,7 +149,8 @@ void ProjectHubPanel::render_actions() {
                     m_app.on_project_loaded();
                 }
             } else {
-                // TODO: Show error message
+                m_error_message = "Invalid project folder. The selected folder does not contain a valid Eruption project.";
+                m_show_error_dialog = true;
             }
         }
     }
@@ -210,7 +204,8 @@ void ProjectHubPanel::render_new_project_dialog() {
                 m_show_new_dialog = false;
                 m_app.on_project_loaded();
             } else {
-                // TODO: Show error
+                m_error_message = "Failed to create project. Check that the path is valid and writable.";
+                m_show_error_dialog = true;
             }
         }
 
@@ -224,4 +219,32 @@ void ProjectHubPanel::render_new_project_dialog() {
     }
 }
 
-} // namespace editor
+void ProjectHubPanel::render_error_dialog() {
+    if (!m_show_error_dialog) {
+        return;
+    }
+
+    ImGui::OpenPopup("Error");
+
+    // Center the modal
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal("Error", &m_show_error_dialog,
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("%s", m_error_message.c_str());
+        ImGui::Spacing();
+        ImGui::Spacing();
+
+        float button_width = 100.0f;
+        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - button_width) * 0.5f);
+        if (ImGui::Button("OK", ImVec2(button_width, 0))) {
+            m_show_error_dialog = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
+}

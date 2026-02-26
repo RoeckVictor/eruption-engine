@@ -3,6 +3,7 @@
 #include "editor/core/EditorComponents.h"
 #include "editor/serialization/SceneSerializer.h"
 #include "editor/icons/IconsFontAwesome6.h"
+#include "engine/platform/PlatformUtils.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -59,7 +60,7 @@ void HierarchyPanel::on_gui() {
 
         // Click on empty space to deselect
         if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(0) && !ImGui::IsAnyItemHovered()) {
-            m_context.clear_selection();
+            m_context.selection().clear_selection();
         }
 
         // Right-click context menu on empty space
@@ -69,8 +70,8 @@ void HierarchyPanel::on_gui() {
                 if (ImGui::BeginMenu(ICON_FA_GLOBE " Create World Entity")) {
                     if (ImGui::MenuItem("Empty Entity")) {
                         auto entity = create_entity(*registry, "New Entity");
-                        m_context.select(entity);
-                        m_context.mark_dirty();
+                        m_context.selection().select(entity);
+                        m_context.scene_state().mark_dirty();
                     }
                     ImGui::EndMenu();
                 }
@@ -79,14 +80,14 @@ void HierarchyPanel::on_gui() {
                 if (ImGui::BeginMenu(ICON_FA_DISPLAY " Create Screen Entity")) {
                     if (ImGui::MenuItem("Empty Screen Entity")) {
                         auto entity = create_screen_entity(*registry, "New Screen Entity");
-                        m_context.select(entity);
-                        m_context.mark_dirty();
+                        m_context.selection().select(entity);
+                        m_context.scene_state().mark_dirty();
                     }
                     ImGui::EndMenu();
                 }
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Paste", "Ctrl+V", false, m_context.has_clipboard())) {
+            if (ImGui::MenuItem("Paste", "Ctrl+V", false, m_context.clipboard().has_entity_clipboard())) {
                 m_context.paste();
             }
             ImGui::EndPopup();
@@ -121,7 +122,7 @@ void HierarchyPanel::on_gui() {
 
             if (ImGui::Button("Save", ImVec2(120, 0)) || enter_pressed) {
                 // Get project prefabs folder path
-                std::filesystem::path prefab_dir = std::filesystem::path(m_context.project_path()) / "Assets" / "Prefabs";
+                std::filesystem::path prefab_dir = std::filesystem::path(m_context.scene_state().project_path()) / "Assets" / "Prefabs";
                 std::filesystem::create_directories(prefab_dir);
 
                 std::filesystem::path prefab_path = prefab_dir / (std::string(m_prefab_name_buffer) + ".prefab");
@@ -140,7 +141,7 @@ void HierarchyPanel::on_gui() {
                         info.is_prefab_instance = true;
                         info.prefab_path = prefab_path.string();
                     }
-                    m_context.mark_dirty();
+                    m_context.scene_state().mark_dirty();
                     m_context.refresh_file_browser();
                 }
 
@@ -181,21 +182,30 @@ void HierarchyPanel::render_world_hierarchy() {
     if (ImGui::BeginPopup("CreateWorldEntityPopup")) {
         if (ImGui::MenuItem("Empty Entity")) {
             auto entity = create_entity(*registry, "New Entity");
-            m_context.select(entity);
-            m_context.mark_dirty();
+            m_context.selection().select(entity);
+            m_context.scene_state().mark_dirty();
         }
         if (ImGui::MenuItem("Child of Selected")) {
-            auto& selection = m_context.selection();
+            auto& selection = m_context.selection().selection();
             if (!selection.empty() && is_world_space_entity(*registry, selection[0])) {
                 auto entity = create_entity(*registry, "Child Entity");
                 set_parent(*registry, entity, selection[0]);
-                m_context.select(entity);
-                m_context.mark_dirty();
+                m_context.selection().select(entity);
+                m_context.scene_state().mark_dirty();
             }
         }
         ImGui::Separator();
         if (ImGui::MenuItem("From Prefab...")) {
-            // TODO: Open prefab picker
+            std::string path = engine::platform::open_file_dialog(
+                "Select Prefab", {{"Prefab Files (*.prefab)", "*.prefab"}});
+            if (!path.empty()) {
+                SceneSerializer serializer(*registry);
+                entt::entity e = serializer.load_prefab(path);
+                if (e != entt::null) {
+                    m_context.selection().select(e);
+                    m_context.scene_state().mark_dirty();
+                }
+            }
         }
         ImGui::EndPopup();
     }
@@ -224,16 +234,16 @@ void HierarchyPanel::render_screen_hierarchy() {
     if (ImGui::BeginPopup("CreateScreenEntityPopup")) {
         if (ImGui::MenuItem("Empty Screen Entity")) {
             auto entity = create_screen_entity(*registry, "New Screen Entity");
-            m_context.select(entity);
-            m_context.mark_dirty();
+            m_context.selection().select(entity);
+            m_context.scene_state().mark_dirty();
         }
         if (ImGui::MenuItem("Child of Selected")) {
-            auto& selection = m_context.selection();
+            auto& selection = m_context.selection().selection();
             if (!selection.empty() && is_screen_space_entity(*registry, selection[0])) {
                 auto entity = create_screen_entity(*registry, "Child Screen Entity");
                 set_parent(*registry, entity, selection[0]);
-                m_context.select(entity);
-                m_context.mark_dirty();
+                m_context.selection().select(entity);
+                m_context.scene_state().mark_dirty();
             }
         }
         ImGui::EndPopup();
@@ -307,7 +317,7 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth, bool is_
         flags |= ImGuiTreeNodeFlags_Leaf;
     }
 
-    if (m_context.is_selected(entity)) {
+    if (m_context.selection().is_selected(entity)) {
         flags |= ImGuiTreeNodeFlags_Selected;
     }
 
@@ -337,17 +347,17 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth, bool is_
     if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
         if (ImGui::GetIO().KeyCtrl) {
             // Toggle selection
-            if (m_context.is_selected(entity)) {
-                m_context.remove_from_selection(entity);
+            if (m_context.selection().is_selected(entity)) {
+                m_context.selection().remove_from_selection(entity);
             } else {
-                m_context.add_to_selection(entity);
+                m_context.selection().add_to_selection(entity);
             }
         } else if (ImGui::GetIO().KeyShift) {
             // Add to selection
-            m_context.add_to_selection(entity);
+            m_context.selection().add_to_selection(entity);
         } else {
             // Single select
-            m_context.select(entity);
+            m_context.selection().select(entity);
         }
     }
 
@@ -378,13 +388,13 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth, bool is_
             m_rename_buffer[sizeof(m_rename_buffer) - 1] = '\0';
         }
         if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
-            m_context.select(entity);  // Ensure this entity is selected
+            m_context.selection().select(entity);  // Ensure this entity is selected
             m_context.duplicate_selection();
         }
         if (ImGui::MenuItem("Delete")) {
             destroy_entity_recursive(*registry, entity);
-            m_context.remove_from_selection(entity);
-            m_context.mark_dirty();
+            m_context.selection().remove_from_selection(entity);
+            m_context.scene_state().mark_dirty();
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Create Child")) {
@@ -395,12 +405,12 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth, bool is_
                 child = create_entity(*registry, "Child Entity");
             }
             set_parent(*registry, child, entity);
-            m_context.select(child);
-            m_context.mark_dirty();
+            m_context.selection().select(child);
+            m_context.scene_state().mark_dirty();
         }
         if (ImGui::MenuItem("Unparent")) {
             remove_from_parent(*registry, entity);
-            m_context.mark_dirty();
+            m_context.scene_state().mark_dirty();
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Make Prefab from Entity", nullptr, false, !is_prefab_instance)) {
@@ -420,7 +430,7 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth, bool is_
                 if (ImGui::MenuItem("Unpack Prefab")) {
                     info.is_prefab_instance = false;
                     info.prefab_path.clear();
-                    m_context.mark_dirty();
+                    m_context.scene_state().mark_dirty();
                 }
                 if (ImGui::IsItemHovered() && !info.prefab_path.empty()) {
                     ImGui::SetTooltip("Disconnect from: %s", info.prefab_path.c_str());
@@ -429,10 +439,10 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth, bool is_
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Copy", "Ctrl+C")) {
-            m_context.select(entity);  // Ensure this entity is selected
+            m_context.selection().select(entity);  // Ensure this entity is selected
             m_context.copy_selection();
         }
-        if (ImGui::MenuItem("Paste", "Ctrl+V", false, m_context.has_clipboard())) {
+        if (ImGui::MenuItem("Paste", "Ctrl+V", false, m_context.clipboard().has_entity_clipboard())) {
             m_context.paste();
         }
         ImGui::EndPopup();
@@ -470,7 +480,7 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth, bool is_
                 bool target_is_screen = is_screen_space_entity(*registry, entity);
                 if (dragged_is_screen == target_is_screen) {
                     set_parent(*registry, dragged, entity);
-                    m_context.mark_dirty();
+                    m_context.scene_state().mark_dirty();
                 }
             }
         }
@@ -490,7 +500,7 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth, bool is_
                              ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
             if (registry->all_of<EntityInfo>(entity)) {
                 registry->get<EntityInfo>(entity).name = m_rename_buffer;
-                m_context.mark_dirty();
+                m_context.scene_state().mark_dirty();
             }
             m_renaming_entity = entt::null;
         }
@@ -519,4 +529,4 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth, bool is_
     ImGui::PopID();
 }
 
-} // namespace editor
+}

@@ -25,7 +25,7 @@ void AddEntityCommand::execute() {
 
     // Select the new entity
     if (m_context) {
-        m_context->select(m_entity);
+        m_context->selection().select(m_entity);
     }
 }
 
@@ -33,8 +33,8 @@ void AddEntityCommand::undo() {
     if (!m_registry || m_entity == entt::null) return;
 
     // Deselect if selected
-    if (m_context && m_context->is_selected(m_entity)) {
-        m_context->remove_from_selection(m_entity);
+    if (m_context && m_context->selection().is_selected(m_entity)) {
+        m_context->selection().remove_from_selection(m_entity);
     }
 
     destroy_entity_recursive(*m_registry, m_entity);
@@ -45,9 +45,9 @@ void DeleteEntityCommand::execute() {
 
     // Check if entity was selected
     if (m_context) {
-        m_was_selected = m_context->is_selected(m_entity);
+        m_was_selected = m_context->selection().is_selected(m_entity);
         if (m_was_selected) {
-            m_context->remove_from_selection(m_entity);
+            m_context->selection().remove_from_selection(m_entity);
         }
     }
 
@@ -112,7 +112,7 @@ void DeleteEntityCommand::undo() {
 
     // Re-select if it was selected
     if (m_context && m_was_selected && m_entity != entt::null) {
-        m_context->select(m_entity);
+        m_context->selection().select(m_entity);
     }
 }
 
@@ -205,8 +205,8 @@ void PasteEntitiesCommand::execute() {
         // Save previous selection for undo, then select pasted entities
         if (m_context) {
             m_previous_selection = std::vector<entt::entity>(
-                m_context->selection().begin(), m_context->selection().end());
-            m_context->select_multiple(m_pasted_entities);
+                m_context->selection().selection().begin(), m_context->selection().selection().end());
+            m_context->selection().select_multiple(m_pasted_entities);
         }
 
         engine::Logger::instance().info("Editor", "Pasted %zu entities", m_pasted_entities.size());
@@ -228,7 +228,7 @@ void PasteEntitiesCommand::undo() {
 
     // Restore previous selection
     if (m_context) {
-        m_context->select_multiple(m_previous_selection);
+        m_context->selection().select_multiple(m_previous_selection);
     }
 }
 

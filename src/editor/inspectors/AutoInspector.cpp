@@ -1,7 +1,7 @@
 #include "AutoInspector.h"
+#include "InspectorUtils.h"
 #include <imgui.h>
 #include <string>
-#include <cstring>
 
 using namespace engine::reflection;
 
@@ -178,24 +178,13 @@ bool AutoInspector::draw_string(const PropertyInfo& prop, void* instance) {
     std::string* value = prop.get_ptr<std::string>(instance);
     ImGui::PushID(prop.name.c_str());
 
-    ImGui::Text("%s", prop.display_name.c_str());
-    ImGui::SameLine(120);
-    ImGui::SetNextItemWidth(-1);
-
-    // Use a static buffer for ImGui
-    static char buffer[1024];
-    strncpy(buffer, value->c_str(), sizeof(buffer) - 1);
-    buffer[sizeof(buffer) - 1] = '\0';
+    PropertyLabel(prop.display_name.c_str());
 
     bool modified = false;
     if (has_flag(prop.flags, PropertyFlags::Multiline)) {
-        modified = ImGui::InputTextMultiline("##value", buffer, sizeof(buffer));
+        modified = InputTextMultiline("##value", value);
     } else {
-        modified = ImGui::InputText("##value", buffer, sizeof(buffer));
-    }
-
-    if (modified) {
-        *value = buffer;
+        modified = InputText("##value", value);
     }
 
     ImGui::PopID();
@@ -283,4 +272,4 @@ bool AutoInspector::draw_enum(const PropertyInfo& prop, void* instance) {
     return modified;
 }
 
-} // namespace editor
+}

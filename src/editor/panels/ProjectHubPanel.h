@@ -8,8 +8,8 @@ namespace editor {
 class ProjectManager;
 class EditorApplication;
 
-/// The Project Hub panel shown when no project is loaded.
-/// Displays recent projects and options to create/open projects.
+// The Project Hub panel shown when no project is loaded
+// Displays recent projects and options to create/open projects
 class ProjectHubPanel : public Panel {
 public:
     ProjectHubPanel(ProjectManager& project_manager, EditorApplication& app);
@@ -21,14 +21,17 @@ private:
     void render_recent_projects();
     void render_actions();
     void render_new_project_dialog();
+    void render_error_dialog();
 
     ProjectManager& m_project_manager;
     EditorApplication& m_app;
 
-    // New project dialog state
     bool m_show_new_dialog = false;
     char m_new_project_name[128] = "NewProject";
     char m_new_project_path[512] = "";
+
+    bool m_show_error_dialog = false;
+    std::string m_error_message;
 };
 
-} // namespace editor
+}

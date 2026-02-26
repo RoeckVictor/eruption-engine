@@ -4,7 +4,7 @@
 #include "CanvasView.h"
 #include "ToolManager.h"
 #include "DeltaUndoManager.h"
-#include <glad/gl.h>
+#include "engine/graphics/Texture.h"
 #include <string>
 #include <vector>
 
@@ -68,7 +68,7 @@ private:
     DeltaUndoManager m_undo;
 
     // --- Rendering state ---
-    GLuint m_canvas_tex = 0;
+    engine::graphics::Texture m_canvas_tex;
     bool m_canvas_dirty = true;
     std::vector<uint8_t> m_composite;
 

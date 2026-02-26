@@ -32,14 +32,14 @@ void GizmoRenderer::update(ImVec2 viewport_pos, ImVec2 viewport_size) {
         return;
     }
 
-    const auto& selection = m_context.selection();
+    const auto& selection = m_context.selection().selection();
     if (selection.empty()) {
         m_is_active = false;
         return;
     }
 
     // Get camera info
-    const auto& camera = m_context.camera();
+    const auto& camera = m_context.viewport().camera;
 
     // Get the active gizmo based on mode
     Gizmo* active_gizmo = nullptr;
@@ -87,9 +87,9 @@ void GizmoRenderer::update(ImVec2 viewport_pos, ImVec2 viewport_size) {
     m_is_hovering = active_gizmo->is_hovering();
 
     // Apply snap-to-grid if enabled and transform changed (for translate mode)
-    if (result.value_changed && m_context.is_snap_enabled() && m_mode == GizmoMode::Translate) {
-        transform.x = m_context.snap_to_grid(transform.x);
-        transform.y = m_context.snap_to_grid(transform.y);
+    if (result.value_changed && m_context.viewport().snap_enabled && m_mode == GizmoMode::Translate) {
+        transform.x = m_context.viewport().snap_to_grid(transform.x);
+        transform.y = m_context.viewport().snap_to_grid(transform.y);
     }
 
     // Track manipulation start
@@ -106,7 +106,7 @@ void GizmoRenderer::update(ImVec2 viewport_pos, ImVec2 viewport_size) {
 
     // Mark dirty if value changed
     if (result.value_changed) {
-        m_context.mark_dirty();
+        m_context.scene_state().mark_dirty();
     }
 }
 
@@ -125,13 +125,13 @@ void GizmoRenderer::render(ImDrawList* draw_list, ImVec2 viewport_pos, ImVec2 vi
         return;
     }
 
-    const auto& selection = m_context.selection();
+    const auto& selection = m_context.selection().selection();
     if (selection.empty()) {
         return;
     }
 
     // Get camera info
-    const auto& camera = m_context.camera();
+    const auto& camera = m_context.viewport().camera;
 
     // Get the active gizmo based on mode
     Gizmo* active_gizmo = nullptr;
@@ -194,4 +194,4 @@ void GizmoRenderer::generate_command(entt::entity entity, const engine::Transfor
     m_context.history().add_executed(std::move(cmd));
 }
 
-} // namespace editor
+}

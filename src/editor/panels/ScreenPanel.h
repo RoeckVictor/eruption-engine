@@ -3,6 +3,7 @@
 #include "Panel.h"
 #include "editor/render/EditorTextureCache.h"
 #include "editor/render/EditorTextRenderer.h"
+#include "editor/render/PanelSceneRenderer.h"
 #include "engine/rhi/RHIFramebuffer.h"
 #include <entt/entt.hpp>
 #include <imgui.h>
@@ -13,15 +14,14 @@ namespace editor {
 
 class EditorContext;
 
-/// Common reference resolutions for screen panel display
 struct RefResolution {
     const char* name;
     float width;
     float height;
 };
 
-/// Screen panel for viewing and manipulating screen-space entities.
-/// Similar to Viewport but for UI entities using ScreenRect instead of Transform.
+// Screen panel for viewing and manipulating screen-space entities
+// Similar to Viewport but for UI entities using ScreenRect instead of Transform
 class ScreenPanel : public Panel {
 public:
     explicit ScreenPanel(EditorContext& context);
@@ -31,10 +31,7 @@ public:
     void on_close() override;
     void on_gui() override;
 
-    /// Reset camera by fitting reference rect to canvas.
     void reset_camera() { fit_to_canvas(); }
-
-    /// Fit the reference rect to the current canvas size.
     void fit_to_canvas();
 
 private:
@@ -46,9 +43,7 @@ private:
     void render_toolbar();
     void handle_input(ImVec2 canvas_pos, ImVec2 canvas_size);
 
-    // Convert reference screen coords to canvas screen coords (with zoom/pan)
     ImVec2 screen_to_canvas(float sx, float sy, ImVec2 canvas_pos, ImVec2 canvas_size) const;
-    // Convert canvas screen coords to reference screen coords (with zoom/pan)
     void canvas_to_screen(ImVec2 canvas_pos_local, ImVec2 canvas_size, float& out_sx, float& out_sy) const;
 
     EditorContext& m_context;
@@ -58,19 +53,12 @@ private:
     int m_canvas_width = 0;
     int m_canvas_height = 0;
 
-    // Resize debouncing
-    int m_pending_width = 0;
-    int m_pending_height = 0;
-    float m_resize_timer = 0.0f;
-    static constexpr float RESIZE_DEBOUNCE_SEC = 0.15f;
-    bool m_framebuffer_failed = false;
+    FramebufferResizeDebouncer m_resize_debouncer;
 
-    // Reference screen resolution (what ScreenRect coordinates are relative to)
     float m_ref_width = 1920.0f;
     float m_ref_height = 1080.0f;
     int m_resolution_index = 0;
 
-    // Common reference resolutions
     static constexpr RefResolution RESOLUTIONS[] = {
         {"1920x1080 (Full HD)", 1920.0f, 1080.0f},
         {"1280x720 (HD)", 1280.0f, 720.0f},
@@ -83,19 +71,16 @@ private:
     };
     static constexpr int RESOLUTION_COUNT = sizeof(RESOLUTIONS) / sizeof(RESOLUTIONS[0]);
 
-    // Zoom and pan state
     float m_zoom = 1.0f;
-    float m_pan_x = 0.0f;  // Pan offset in reference screen coords
+    float m_pan_x = 0.0f;
     float m_pan_y = 0.0f;
 
-    // Panning state
     bool m_is_panning = false;
     float m_pan_start_mouse_x = 0.0f;
     float m_pan_start_mouse_y = 0.0f;
     float m_pan_start_offset_x = 0.0f;
     float m_pan_start_offset_y = 0.0f;
 
-    // Gizmo state (entity dragging)
     bool m_is_dragging = false;
     entt::entity m_drag_entity = entt::null;
     float m_drag_start_x = 0.0f;
@@ -103,16 +88,13 @@ private:
     float m_entity_start_offset_x = 0.0f;
     float m_entity_start_offset_y = 0.0f;
 
-    // Texture cache for Image components
     EditorTextureCache m_image_textures;
 
-    // Helper methods for rendering
     void render_image_entity(ImDrawList* draw_list, entt::entity entity, ImVec2 canvas_pos, ImVec2 canvas_size);
     void render_text_entity(ImDrawList* draw_list, entt::entity entity, ImVec2 canvas_pos, ImVec2 canvas_size);
 
-    // Text renderer using game fonts
     std::unique_ptr<EditorTextRenderer> m_text_renderer;
     void ensure_text_renderer();
 };
 
-} // namespace editor
+}

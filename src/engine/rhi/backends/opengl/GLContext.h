@@ -42,6 +42,9 @@ public:
 
     void memory_barrier(BarrierFlags flags) override;
 
+    void submit(RHICommandBuffer* cmd_buffer, RHIFence* signal_fence = nullptr) override;
+    void bind_descriptor_set(RHIDescriptorSet* set, uint32_t index = 0) override;
+
     bool check_error(const char* context = nullptr) override;
 
 private:

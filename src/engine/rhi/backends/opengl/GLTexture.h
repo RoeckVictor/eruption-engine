@@ -26,6 +26,7 @@ public:
 
     uint32_t handle() const { return m_handle; }
     uint32_t gl_target() const { return m_gl_target; }
+    uint32_t gl_internal_format() const { return m_gl_internal_format; }
     uint32_t gl_format() const { return m_gl_format; }
     uint32_t gl_type() const { return m_gl_type; }
 

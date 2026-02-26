@@ -5,6 +5,12 @@
 #include "GLPipeline.h"
 #include "GLFramebuffer.h"
 #include "GLGPUProfiler.h"
+#include "GLCommandBuffer.h"
+#include "GLDescriptorSet.h"
+#include "GLPipelineCache.h"
+#include "GLSynchronization.h"
+#include "engine/rhi/RHIDescriptorSet.h"
+#include "engine/rhi/RHIPipelineCache.h"
 #include "engine/core/Log.h"
 #include <glad/gl.h>
 
@@ -126,6 +132,70 @@ std::unique_ptr<profiler::GPUProfiler> GLDevice::create_gpu_profiler() {
         return nullptr;
     }
     return profiler;
+}
+
+std::unique_ptr<RHICommandBuffer> GLDevice::create_command_buffer() {
+    auto cmd_buffer = std::make_unique<GLCommandBuffer>();
+    if (!cmd_buffer->init()) {
+        return nullptr;
+    }
+    return cmd_buffer;
+}
+
+std::unique_ptr<RHIDescriptorSetLayout> GLDevice::create_descriptor_set_layout(const DescriptorSetLayoutDesc& desc) {
+    auto layout = std::make_unique<GLDescriptorSetLayout>();
+    if (!layout->init(desc)) {
+        return nullptr;
+    }
+    return layout;
+}
+
+std::unique_ptr<RHIDescriptorSet> GLDevice::create_descriptor_set(const RHIDescriptorSetLayout* layout) {
+    auto set = std::make_unique<GLDescriptorSet>();
+    if (!set->init(static_cast<const GLDescriptorSetLayout*>(layout))) {
+        return nullptr;
+    }
+    return set;
+}
+
+std::unique_ptr<RHIPipelineCache> GLDevice::create_pipeline_cache(const PipelineCacheDesc& desc) {
+    auto cache = std::make_unique<GLPipelineCache>();
+    if (!cache->init(desc)) {
+        return nullptr;
+    }
+    return cache;
+}
+
+std::unique_ptr<RHIFence> GLDevice::create_fence() {
+    auto fence = std::make_unique<GLFence>();
+    if (!fence->init()) {
+        return nullptr;
+    }
+    return fence;
+}
+
+std::unique_ptr<RHIEvent> GLDevice::create_event() {
+    auto event = std::make_unique<GLEvent>();
+    if (!event->init()) {
+        return nullptr;
+    }
+    return event;
+}
+
+std::unique_ptr<RHISemaphore> GLDevice::create_semaphore() {
+    auto semaphore = std::make_unique<GLSemaphore>();
+    if (!semaphore->init()) {
+        return nullptr;
+    }
+    return semaphore;
+}
+
+std::unique_ptr<RHITimelineSemaphore> GLDevice::create_timeline_semaphore() {
+    auto semaphore = std::make_unique<GLTimelineSemaphore>();
+    if (!semaphore->init()) {
+        return nullptr;
+    }
+    return semaphore;
 }
 
 std::unique_ptr<RHIDevice> create_opengl_device(GLLoadFunc load_func) {

@@ -4,8 +4,8 @@
 
 namespace editor {
 
-/// Gizmo for scaling entities.
-/// Shows axis handles with boxes that can be dragged to scale.
+// Gizmo for scaling entities
+// Shows axis handles with boxes that can be dragged to scale
 class ScaleGizmo : public Gizmo {
 public:
     ScaleGizmo() = default;
@@ -37,21 +37,17 @@ private:
         None,
         X,
         Y,
-        Uniform  // Uniform scale (center)
+        Uniform
     };
-
-    /// Check if mouse is in a box.
-    bool is_mouse_in_box(ImVec2 mouse, ImVec2 center, float half_size) const;
 
     DragAxis m_drag_axis = DragAxis::None;
     DragAxis m_hover_axis = DragAxis::None;
     float m_start_scale_x = 1.0f;
     float m_start_scale_y = 1.0f;
 
-    // Visual settings
     static constexpr float AXIS_LENGTH = 70.0f;
     static constexpr float HANDLE_SIZE = 8.0f;
     static constexpr float CENTER_SIZE = 10.0f;
 };
 
-} // namespace editor
+}

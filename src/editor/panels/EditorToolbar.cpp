@@ -190,25 +190,25 @@ void EditorToolbar::render_gizmo_mode_buttons() {
     ImGui::SameLine();
 
     // Coordinate space toggle (Local/World)
-    bool is_local = m_context.is_local_space();
+    bool is_local = m_context.viewport().local_space;
     if (ImGui::Button(is_local ? ICON_FA_CUBE " Local" : ICON_FA_GLOBE " World")) {
-        m_context.set_local_space(!is_local);
+        m_context.viewport().local_space = !is_local;
     }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Toggle coordinate space for gizmos");
 }
 
 void EditorToolbar::render_grid_snap_controls() {
-    bool grid_visible = m_context.is_grid_visible();
+    bool grid_visible = m_context.viewport().grid_visible;
     if (ImGui::Checkbox(ICON_FA_BORDER_ALL " Grid", &grid_visible)) {
-        m_context.set_grid_visible(grid_visible);
+        m_context.viewport().grid_visible = grid_visible;
     }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Toggle grid visibility (G)");
 
     ImGui::SameLine();
 
-    bool snap_enabled = m_context.is_snap_enabled();
+    bool snap_enabled = m_context.viewport().snap_enabled;
     if (ImGui::Checkbox(ICON_FA_MAGNET " Snap", &snap_enabled)) {
-        m_context.set_snap_enabled(snap_enabled);
+        m_context.viewport().snap_enabled = snap_enabled;
     }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Toggle snap to grid");
 
@@ -216,9 +216,9 @@ void EditorToolbar::render_grid_snap_controls() {
     if (snap_enabled) {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(50);
-        float grid_size = m_context.grid_size();
+        float grid_size = m_context.viewport().grid_size;
         if (ImGui::DragFloat("##GridSize", &grid_size, 1.0f, 1.0f, 256.0f, "%.0f")) {
-            m_context.set_grid_size(grid_size);
+            m_context.viewport().grid_size = grid_size;
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Grid size for snapping");
     }
@@ -290,4 +290,4 @@ void EditorToolbar::render_script_status() {
     }
 }
 
-} // namespace editor
+}

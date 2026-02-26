@@ -1,6 +1,5 @@
 #include "PixArtApp.h"
 
-#include <glad/gl.h>
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -8,6 +7,15 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
+
+#include "editor/core/Constants.h"
+#include "engine/rhi/RHIDevice.h"
+#include "engine/rhi/RHIContext.h"
+
+// NOTE: This file uses OpenGL-specific ImGui backend (imgui_impl_opengl3).
+// When adding support for other graphics APIs (Vulkan, D3D12, Metal),
+// this should be refactored to use an RHI ImGui abstraction layer.
+// For now, PixArt is OpenGL-only.
 
 int main(int argc, char* argv[]) {
     // --- GLFW init ---
@@ -20,7 +28,9 @@ int main(int argc, char* argv[]) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(1280, 720,
+    GLFWwindow* window = glfwCreateWindow(
+        editor::constants::DEFAULT_WINDOW_WIDTH,
+        editor::constants::DEFAULT_WINDOW_HEIGHT,
         "PixArt - Pixel Grid Editor", nullptr, nullptr);
     if (!window) {
         fprintf(stderr, "Failed to create GLFW window\n");
@@ -31,13 +41,17 @@ int main(int argc, char* argv[]) {
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // vsync
 
-    // --- GLAD init ---
-    if (!gladLoadGL(glfwGetProcAddress)) {
-        fprintf(stderr, "Failed to load OpenGL via GLAD\n");
+    // --- RHI init (handles GLAD loading internally) ---
+    auto rhi_device = engine::rhi::create_rhi_device(
+        engine::rhi::Backend::OpenGL,
+        reinterpret_cast<engine::rhi::ProcAddressFunc>(glfwGetProcAddress));
+    if (!rhi_device) {
+        fprintf(stderr, "Failed to create RHI device\n");
         glfwDestroyWindow(window);
         glfwTerminate();
         return 1;
     }
+    engine::rhi::set_current_device(rhi_device.get());
 
     // --- ImGui init ---
     IMGUI_CHECKVERSION();
@@ -86,9 +100,9 @@ int main(int argc, char* argv[]) {
         ImGui::Render();
         int display_w, display_h;
         glfwGetFramebufferSize(window, &display_w, &display_h);
-        glViewport(0, 0, display_w, display_h);
-        glClearColor(0.12f, 0.12f, 0.14f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        auto* ctx = engine::rhi::get_current_context();
+        ctx->set_viewport(0, 0, display_w, display_h);
+        ctx->clear(0.12f, 0.12f, 0.14f, 1.0f);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window);
@@ -99,6 +113,8 @@ int main(int argc, char* argv[]) {
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
+    engine::rhi::set_current_device(nullptr);
+    rhi_device.reset();
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;

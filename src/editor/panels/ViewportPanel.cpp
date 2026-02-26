@@ -36,6 +36,7 @@ ViewportPanel::ViewportPanel(EditorContext& context)
     : Panel("Viewport")
     , m_context(context)
     , m_gizmo_renderer(context)
+    , m_scene_renderer(context)
 {
 }
 
@@ -67,23 +68,10 @@ void ViewportPanel::on_gui() {
         return;
     }
 
-    // Debounced framebuffer resize: avoid destroying/recreating GPU objects every
-    // frame while the user is dragging a panel splitter.  Record the desired size
-    // and only commit the resize once the size has been stable for a short period.
-    if (width != m_pending_width || height != m_pending_height) {
-        m_pending_width = width;
-        m_pending_height = height;
-        m_resize_timer = 0.0f;
-        m_framebuffer_failed = false;  // New size requested — allow retry
-    }
-
-    if (!m_framebuffer_failed &&
-        (m_pending_width != m_viewport_width || m_pending_height != m_viewport_height)) {
-        m_resize_timer += ImGui::GetIO().DeltaTime;
-        if (m_resize_timer >= RESIZE_DEBOUNCE_SEC || m_viewport_width == 0) {
-            destroy_framebuffer();
-            create_framebuffer(m_pending_width, m_pending_height);
-        }
+    // Debounced framebuffer resize
+    if (m_resize_debouncer.should_resize(m_viewport_width, m_viewport_height, width, height, ImGui::GetIO().DeltaTime)) {
+        destroy_framebuffer();
+        create_framebuffer(m_resize_debouncer.target_width(), m_resize_debouncer.target_height());
     }
 
     // Render scene to framebuffer
@@ -93,12 +81,13 @@ void ViewportPanel::on_gui() {
     ImTextureID texture_id = m_framebuffer
         ? (ImTextureID)(uintptr_t)(m_framebuffer->color_attachment(0)->native_handle())
         : 0;
-    ImGui::Image(
-        texture_id,
-        size,
-        ImVec2(0, 1),  // UV flipped for OpenGL
-        ImVec2(1, 0)
-    );
+
+    // UV coordinates depend on texture origin convention
+    auto* device = engine::rhi::get_current_device();
+    bool flip_y = device && !device->uv_origin_top_left();
+    ImVec2 uv0 = flip_y ? ImVec2(0, 1) : ImVec2(0, 0);
+    ImVec2 uv1 = flip_y ? ImVec2(1, 0) : ImVec2(1, 1);
+    ImGui::Image(texture_id, size, uv0, uv1);
 
     // Get viewport rect for gizmos and overlay
     ImVec2 viewport_pos = ImGui::GetItemRectMin();
@@ -129,7 +118,7 @@ void ViewportPanel::create_framebuffer(int width, int height) {
     auto* device = engine::rhi::get_current_device();
     if (!device) {
         engine::Logger::instance().error("Viewport", "No RHI device available");
-        m_framebuffer_failed = true;
+        m_resize_debouncer.set_failed();
         return;
     }
 
@@ -140,7 +129,7 @@ void ViewportPanel::create_framebuffer(int width, int height) {
     if (!m_framebuffer || !m_framebuffer->valid()) {
         engine::Logger::instance().error("Viewport", "Failed to create framebuffer");
         m_framebuffer.reset();
-        m_framebuffer_failed = true;
+        m_resize_debouncer.set_failed();
     }
 }
 
@@ -201,61 +190,6 @@ void ViewportPanel::render_entities() {
     // This keeps all viewport rendering in one place
 }
 
-void ViewportPanel::ensure_text_renderer() {
-    if (m_text_renderer) return;
-
-    auto* runtime = m_context.runtime();
-    if (!runtime) return;
-
-    auto* eng = runtime->engine();
-    if (!eng) return;
-
-    m_text_renderer = std::make_unique<EditorTextRenderer>(eng->assets());
-}
-
-void ViewportPanel::render_world_image(ImDrawList* draw_list, entt::entity entity,
-                                        float cam_x, float cam_y, float cam_zoom,
-                                        ImVec2 vp_pos, ImVec2 vp_size) {
-    auto* registry = m_context.registry();
-    if (!registry) return;
-
-    auto& transform = registry->get<engine::Transform>(entity);
-    auto& image = registry->get<engine::render::Image>(entity);
-
-    if (!image.enabled) return;
-
-    int tex_width, tex_height;
-    void* texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
-
-    // Cache dimensions for hit detection
-    image._cached_width = tex_width;
-    image._cached_height = tex_height;
-
-    WorldToScreen wts(vp_pos, vp_size, cam_x, cam_y, cam_zoom);
-    auto quad = compute_image_quad(transform, tex_width, tex_height, image, wts);
-    draw_image_quad(draw_list, quad, texture);
-}
-
-void ViewportPanel::render_world_text(ImDrawList* draw_list, entt::entity entity,
-                                       float cam_x, float cam_y, float cam_zoom,
-                                       ImVec2 vp_pos, ImVec2 vp_size) {
-    auto* registry = m_context.registry();
-    if (!registry) return;
-
-    ensure_text_renderer();
-    if (!m_text_renderer) return;
-
-    auto& transform = registry->get<engine::Transform>(entity);
-    auto& text = registry->get<engine::render::Text>(entity);
-
-    if (!text.enabled) return;
-
-    WorldToScreen wts(vp_pos, vp_size, cam_x, cam_y, cam_zoom);
-    ImVec2 center = wts(transform.world_x, transform.world_y);
-
-    m_text_renderer->render_centered(draw_list, text, center, cam_zoom);
-}
-
 void ViewportPanel::render_overlay() {
     // Get viewport position
     ImVec2 pos = ImGui::GetItemRectMin();
@@ -263,11 +197,14 @@ void ViewportPanel::render_overlay() {
 
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
-    auto& camera = m_context.camera();
+    auto& camera = m_context.viewport().camera;
+
+    // Create coordinate transform once for all rendering
+    CoordinateTransform wts(pos, size, camera.x, camera.y, camera.zoom);
 
     // Draw grid if enabled
-    if (m_context.is_grid_visible()) {
-        float grid_size = m_context.grid_size();
+    if (m_context.viewport().grid_visible) {
+        float grid_size = m_context.viewport().grid_size;
 
         // Calculate visible world-space bounds
         float half_width = (size.x * 0.5f) / camera.zoom;
@@ -286,21 +223,10 @@ void ViewportPanel::render_overlay() {
         ImU32 grid_color = IM_COL32(60, 60, 70, 100);
         ImU32 major_grid_color = IM_COL32(80, 80, 90, 150);
 
-        // Screen center (where camera.x, camera.y is displayed)
-        float screen_center_x = pos.x + size.x * 0.5f;
-        float screen_center_y = pos.y + size.y * 0.5f;
-
-        // Lambda to convert world to screen coordinates
-        auto world_to_screen = [&](float wx, float wy) -> ImVec2 {
-            float sx = screen_center_x + (wx - camera.x) * camera.zoom;
-            float sy = screen_center_y - (wy - camera.y) * camera.zoom;  // Flip Y
-            return ImVec2(sx, sy);
-        };
-
         // Draw vertical lines
         for (float x = start_x; x <= world_right; x += grid_size) {
-            ImVec2 top = world_to_screen(x, world_top);
-            ImVec2 bottom = world_to_screen(x, world_bottom);
+            ImVec2 top = wts(x, world_top);
+            ImVec2 bottom = wts(x, world_bottom);
 
             // Major lines every 5 grid units
             bool is_major = (static_cast<int>(std::round(x / grid_size)) % 5) == 0;
@@ -311,8 +237,8 @@ void ViewportPanel::render_overlay() {
 
         // Draw horizontal lines
         for (float y = start_y; y <= world_top; y += grid_size) {
-            ImVec2 left = world_to_screen(world_left, y);
-            ImVec2 right = world_to_screen(world_right, y);
+            ImVec2 left = wts(world_left, y);
+            ImVec2 right = wts(world_right, y);
 
             // Major lines every 5 grid units
             bool is_major = (static_cast<int>(std::round(y / grid_size)) % 5) == 0;
@@ -322,19 +248,17 @@ void ViewportPanel::render_overlay() {
         }
 
         // Draw origin axes (thicker, colored)
-        ImVec2 origin = world_to_screen(0, 0);
-
         // X axis (red) - only if origin is in view
         if (world_bottom <= 0 && world_top >= 0) {
-            ImVec2 x_start = world_to_screen(world_left, 0);
-            ImVec2 x_end = world_to_screen(world_right, 0);
+            ImVec2 x_start = wts(world_left, 0);
+            ImVec2 x_end = wts(world_right, 0);
             draw_list->AddLine(x_start, x_end, IM_COL32(180, 80, 80, 200), 1.5f);
         }
 
         // Y axis (green)
         if (world_left <= 0 && world_right >= 0) {
-            ImVec2 y_start = world_to_screen(0, world_bottom);
-            ImVec2 y_end = world_to_screen(0, world_top);
+            ImVec2 y_start = wts(0, world_bottom);
+            ImVec2 y_end = wts(0, world_top);
             draw_list->AddLine(y_start, y_end, IM_COL32(80, 180, 80, 200), 1.5f);
         }
     }
@@ -342,44 +266,13 @@ void ViewportPanel::render_overlay() {
     // Draw world-space entities (PixelGrid, Image, Text) sorted by layer
     auto* registry = m_context.registry();
     if (registry) {
-        WorldToScreen wts(pos, size, camera.x, camera.y, camera.zoom);
-
-        // Collect and sort all world-space renderables
-        auto render_items = collect_world_renderables(*registry);
-
-        // Render sorted entities
-        for (const auto& item : render_items) {
-            switch (item.type) {
-                case RenderableType::PixelGrid: {
-                    auto& transform = registry->get<engine::Transform>(item.entity);
-                    auto& grid_comp = registry->get<engine::simulation::PixelGridComponent>(item.entity);
-                    auto& renderer = registry->get<engine::render::PixelGridRenderer>(item.entity);
-
-                    auto quad = compute_pixel_grid_quad(transform, grid_comp, renderer, wts);
-                    void* grid_tex = resolve_grid_texture(
-                        item.entity, grid_comp.pixel_grid_path, m_context.runtime(), m_grid_textures);
-
-                    draw_pixel_grid_quad(draw_list, quad, grid_tex);
-
-                    if (m_context.is_selected(item.entity)) {
-                        draw_selection_outline(draw_list, quad);
-                    }
-                    break;
-                }
-                case RenderableType::Image:
-                    render_world_image(draw_list, item.entity, camera.x, camera.y, camera.zoom, pos, size);
-                    break;
-                case RenderableType::Text:
-                    render_world_text(draw_list, item.entity, camera.x, camera.y, camera.zoom, pos, size);
-                    break;
-            }
-        }
-
-        m_grid_textures.cleanup(m_context.registry());
+        // Render all world-space entities using the scene renderer
+        m_scene_renderer.render_world_entities(draw_list, *registry, wts, true, m_context.runtime());
+        m_scene_renderer.cleanup(m_context.registry());
     }
 
     // Draw debug overlays (colliders, origins, names, etc.)
-    render_debug_overlays(draw_list, pos, size);
+    render_debug_overlays(draw_list, wts);
 
     // Draw camera info in corner
     char info[128];
@@ -391,7 +284,7 @@ void ViewportPanel::render_overlay() {
     );
 
     // Draw center crosshair (only if grid is not visible - grid has origin axes)
-    if (!m_context.is_grid_visible()) {
+    if (!m_context.viewport().grid_visible) {
         float center_x = pos.x + size.x * 0.5f;
         float center_y = pos.y + size.y * 0.5f;
         float cross_size = 10.0f;
@@ -410,7 +303,7 @@ void ViewportPanel::render_overlay() {
     }
 
     // Draw dirty indicator
-    if (m_context.is_dirty()) {
+    if (m_context.scene_state().is_dirty()) {
         draw_list->AddText(
             ImVec2(pos.x + size.x - 80, pos.y + 10),
             IM_COL32(255, 200, 100, 255),
@@ -419,9 +312,9 @@ void ViewportPanel::render_overlay() {
     }
 
     // Draw selection count
-    if (!m_context.selection().empty()) {
+    if (!m_context.selection().selection().empty()) {
         char sel_info[64];
-        snprintf(sel_info, sizeof(sel_info), "Selected: %zu", m_context.selection().size());
+        snprintf(sel_info, sizeof(sel_info), "Selected: %zu", m_context.selection().selection().size());
         draw_list->AddText(
             ImVec2(pos.x + 10, pos.y + 30),
             IM_COL32(150, 200, 255, 200),
@@ -474,26 +367,16 @@ void ViewportPanel::render_overlay() {
     }
 }
 
-void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, ImVec2 vp_size) {
+void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, const CoordinateTransform& wts) {
     auto* registry = m_context.registry();
     if (!registry) return;
 
     const auto& vis = m_context.gizmo_visibility();
-    const auto& camera = m_context.camera();
-
-    float screen_cx = vp_pos.x + vp_size.x * 0.5f;
-    float screen_cy = vp_pos.y + vp_size.y * 0.5f;
-
-    auto world_to_screen = [&](float wx, float wy) -> ImVec2 {
-        float sx = screen_cx + (wx - camera.x) * camera.zoom;
-        float sy = screen_cy - (wy - camera.y) * camera.zoom;
-        return ImVec2(sx, sy);
-    };
 
     auto should_draw = [&](GizmoVisibility v, entt::entity e) -> bool {
         if (v == GizmoVisibility::None) return false;
         if (v == GizmoVisibility::All) return true;
-        return m_context.is_selected(e);
+        return m_context.selection().is_selected(e);
     };
 
     constexpr ImU32 collider_color   = IM_COL32(0, 200, 0, 180);
@@ -549,7 +432,7 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
                 for (int i = 0; i < 4; i++) {
                     float wx = t.world_x + body_local[i][0] * e_cos - body_local[i][1] * e_sin;
                     float wy = t.world_y + body_local[i][0] * e_sin + body_local[i][1] * e_cos;
-                    pts[i] = world_to_screen(wx, wy);
+                    pts[i] = wts(wx, wy);
                 }
                 draw_list->AddQuad(pts[0], pts[1], pts[2], pts[3], col, 1.5f);
             }
@@ -577,8 +460,8 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
                 float world_cx = t.world_x + ox * e_cos - oy * e_sin;
                 float world_cy = t.world_y + ox * e_sin + oy * e_cos;
 
-                ImVec2 center = world_to_screen(world_cx, world_cy);
-                float screen_radius = circle.radius * avg_scale * camera.zoom;
+                ImVec2 center = wts(world_cx, world_cy);
+                float screen_radius = circle.radius * avg_scale * wts.zoom;
                 draw_list->AddCircle(center, screen_radius, col, 32, 1.5f);
             }
         }
@@ -624,9 +507,9 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
                 float bot_wx = t.world_x + local_bot_x * e_cos - local_bot_y * e_sin;
                 float bot_wy = t.world_y + local_bot_x * e_sin + local_bot_y * e_cos;
 
-                ImVec2 top_screen = world_to_screen(top_wx, top_wy);
-                ImVec2 bot_screen = world_to_screen(bot_wx, bot_wy);
-                float screen_rad = rad * camera.zoom;
+                ImVec2 top_screen = wts(top_wx, top_wy);
+                ImVec2 bot_screen = wts(bot_wx, bot_wy);
+                float screen_rad = rad * wts.zoom;
 
                 draw_list->AddCircle(top_screen, screen_rad, col, 32, 1.5f);
                 draw_list->AddCircle(bot_screen, screen_rad, col, 32, 1.5f);
@@ -639,14 +522,14 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
                 float side_wy1 = top_wy + perp_y * rad;
                 float side_wx2 = bot_wx + perp_x * rad;
                 float side_wy2 = bot_wy + perp_y * rad;
-                draw_list->AddLine(world_to_screen(side_wx1, side_wy1),
-                                   world_to_screen(side_wx2, side_wy2), col, 1.5f);
+                draw_list->AddLine(wts(side_wx1, side_wy1),
+                                   wts(side_wx2, side_wy2), col, 1.5f);
                 side_wx1 = top_wx - perp_x * rad;
                 side_wy1 = top_wy - perp_y * rad;
                 side_wx2 = bot_wx - perp_x * rad;
                 side_wy2 = bot_wy - perp_y * rad;
-                draw_list->AddLine(world_to_screen(side_wx1, side_wy1),
-                                   world_to_screen(side_wx2, side_wy2), col, 1.5f);
+                draw_list->AddLine(wts(side_wx1, side_wy1),
+                                   wts(side_wx2, side_wy2), col, 1.5f);
             }
         }
     }
@@ -667,7 +550,7 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
                         // Convert world-space vertices to screen and draw closed polyline
                         std::vector<ImVec2> screen_pts(verts.size());
                         for (size_t i = 0; i < verts.size(); i++) {
-                            screen_pts[i] = world_to_screen(verts[i].x, verts[i].y);
+                            screen_pts[i] = wts(verts[i].x, verts[i].y);
                         }
                         draw_list->AddPolyline(screen_pts.data(),
                                                static_cast<int>(screen_pts.size()),
@@ -684,7 +567,7 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
         for (auto entity : view) {
             if (!should_draw(vis.object_origin, entity)) continue;
             auto& t = view.get<engine::Transform>(entity);
-            ImVec2 center = world_to_screen(t.world_x, t.world_y);
+            ImVec2 center = wts(t.world_x, t.world_y);
             constexpr float cross = 6.0f;
             draw_list->AddLine(ImVec2(center.x - cross, center.y),
                                ImVec2(center.x + cross, center.y), origin_color, 1.0f);
@@ -700,7 +583,7 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
             if (!should_draw(vis.object_name, entity)) continue;
             auto& t = view.get<engine::Transform>(entity);
             auto& info = view.get<EntityInfo>(entity);
-            ImVec2 screen_pos = world_to_screen(t.world_x, t.world_y);
+            ImVec2 screen_pos = wts(t.world_x, t.world_y);
             ImVec2 text_size = ImGui::CalcTextSize(info.name.c_str());
             draw_list->AddText(ImVec2(screen_pos.x - text_size.x * 0.5f, screen_pos.y - 20.0f),
                                name_color, info.name.c_str());
@@ -717,14 +600,14 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
             if (!cam.enabled) continue;
 
             // Use the viewport panel size as reference (matches what the game camera would see)
-            float ref_w = vp_size.x;
-            float ref_h = vp_size.y;
+            float ref_w = wts.viewport_width;
+            float ref_h = wts.viewport_height;
             float half_w = cam.visible_width(ref_w) * 0.5f;
             float half_h = cam.visible_height(ref_h) * 0.5f;
 
             // Camera bounds rectangle
-            ImVec2 tl = world_to_screen(t.world_x - half_w, t.world_y + half_h);
-            ImVec2 br = world_to_screen(t.world_x + half_w, t.world_y - half_h);
+            ImVec2 tl = wts(t.world_x - half_w, t.world_y + half_h);
+            ImVec2 br = wts(t.world_x + half_w, t.world_y - half_h);
             draw_list->AddRect(tl, br, camera_color, 0.0f, 0, 1.5f);
 
             // Corner brackets (fixed screen-space size, always visible when corners are in view)
@@ -743,7 +626,7 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
             draw_list->AddLine(ImVec2(tl.x, br.y), ImVec2(tl.x, br.y - bracket_len), camera_color, 2.0f);
 
             // Camera icon at entity position (small diamond, always visible)
-            ImVec2 center = world_to_screen(t.world_x, t.world_y);
+            ImVec2 center = wts(t.world_x, t.world_y);
             constexpr float icon_size = 8.0f;
             ImVec2 diamond[4] = {
                 ImVec2(center.x, center.y - icon_size),
@@ -782,10 +665,10 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
                 float nx = vel.x / speed;
                 float ny = vel.y / speed;
 
-                ImVec2 origin_s = world_to_screen(t.world_x, t.world_y);
+                ImVec2 origin_s = wts(t.world_x, t.world_y);
                 // In screen space: +world_x → +screen_x, +world_y → -screen_y
-                ImVec2 tip_s = ImVec2(origin_s.x + nx * arrow_len * camera.zoom,
-                                      origin_s.y - ny * arrow_len * camera.zoom);
+                ImVec2 tip_s = ImVec2(origin_s.x + nx * arrow_len * wts.zoom,
+                                      origin_s.y - ny * arrow_len * wts.zoom);
 
                 draw_list->AddLine(origin_s, tip_s, velocity_color, 2.0f);
 
@@ -835,7 +718,7 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
             for (int i = 0; i < 4; i++) {
                 float wx = t.world_x + lx[i] * cos_r - ly[i] * sin_r;
                 float wy = t.world_y + lx[i] * sin_r + ly[i] * cos_r;
-                pts[i] = world_to_screen(wx, wy);
+                pts[i] = wts(wx, wy);
             }
             draw_list->AddQuad(pts[0], pts[1], pts[2], pts[3], grid_bounds_color, 1.5f);
         }
@@ -853,8 +736,8 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
 
             auto& child_t = view.get<engine::Transform>(entity);
             auto& parent_t = registry->get<engine::Transform>(hierarchy.parent);
-            ImVec2 child_s = world_to_screen(child_t.world_x, child_t.world_y);
-            ImVec2 parent_s = world_to_screen(parent_t.world_x, parent_t.world_y);
+            ImVec2 child_s = wts(child_t.world_x, child_t.world_y);
+            ImVec2 parent_s = wts(parent_t.world_x, parent_t.world_y);
             draw_list->AddLine(parent_s, child_s, link_color, 1.0f);
         }
     }
@@ -862,7 +745,7 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, ImVec2 vp_pos, 
 
 void ViewportPanel::handle_input() {
     ImGuiIO& io = ImGui::GetIO();
-    auto& camera = m_context.camera();
+    auto& camera = m_context.viewport().camera;
 
     // Get viewport info for hit detection
     ImVec2 viewport_pos = ImGui::GetItemRectMin();
@@ -931,4 +814,4 @@ void ViewportPanel::handle_input() {
     }
 }
 
-} // namespace editor
+}

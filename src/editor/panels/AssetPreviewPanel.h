@@ -6,7 +6,7 @@
 
 namespace editor {
 
-/// Panel for previewing selected assets (textures, etc.)
+// Panel for previewing selected assets (textures, etc.)
 class AssetPreviewPanel : public Panel {
 public:
     AssetPreviewPanel();
@@ -16,10 +16,8 @@ public:
     void on_close() override;
     void on_gui() override;
 
-    /// Set the asset to preview.
     void set_asset(const std::string& path);
 
-    /// Clear the current preview.
     void clear_preview();
 
 private:
@@ -27,10 +25,9 @@ private:
     void unload_texture();
 
     std::string m_current_path;
-    std::string m_asset_type;  // "texture", "scene", "prefab", etc.
+    std::string m_asset_type;
 
-    // For texture preview
     engine::graphics::Texture m_preview_texture;
 };
 
-} // namespace editor
+}

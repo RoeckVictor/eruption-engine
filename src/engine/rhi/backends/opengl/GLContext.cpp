@@ -4,17 +4,45 @@
 #include "GLTexture.h"
 #include "GLFramebuffer.h"
 #include "GLShader.h"
+#include "GLCommandBuffer.h"
+#include "GLDescriptorSet.h"
+#include "GLSynchronization.h"
+#include "engine/core/Logger.h"
 #include <glad/gl.h>
-#include <cstdio>
 
 namespace engine::rhi {
 
+namespace {
+
+GLenum primitive_topology_to_gl(PrimitiveTopology topology) {
+    switch (topology) {
+        case PrimitiveTopology::Points:        return GL_POINTS;
+        case PrimitiveTopology::Lines:         return GL_LINES;
+        case PrimitiveTopology::LineStrip:     return GL_LINE_STRIP;
+        case PrimitiveTopology::Triangles:     return GL_TRIANGLES;
+        case PrimitiveTopology::TriangleStrip: return GL_TRIANGLE_STRIP;
+        case PrimitiveTopology::TriangleFan:   return GL_TRIANGLE_FAN;
+    }
+    return GL_TRIANGLES;
+}
+
+const char* gl_error_to_string(GLenum err) {
+    switch (err) {
+        case GL_INVALID_ENUM:                  return "GL_INVALID_ENUM";
+        case GL_INVALID_VALUE:                 return "GL_INVALID_VALUE";
+        case GL_INVALID_OPERATION:             return "GL_INVALID_OPERATION";
+        case GL_INVALID_FRAMEBUFFER_OPERATION: return "GL_INVALID_FRAMEBUFFER_OPERATION";
+        case GL_OUT_OF_MEMORY:                 return "GL_OUT_OF_MEMORY";
+        default:                               return "Unknown error";
+    }
+}
+
+} // anonymous namespace
+
 void GLContext::begin_frame() {
-    // Reset state for new frame if needed
 }
 
 void GLContext::end_frame() {
-    // Flush any pending commands
     glFlush();
 }
 
@@ -98,15 +126,7 @@ void GLContext::bind_image(RHITexture* texture, uint32_t unit, ImageAccess acces
 void GLContext::draw(uint32_t vertex_count, uint32_t first_vertex, uint32_t instance_count) {
     if (!m_current_pipeline) return;
 
-    GLenum mode = GL_TRIANGLES;
-    switch (m_current_pipeline->primitive_type()) {
-        case PrimitiveTopology::Points: mode = GL_POINTS; break;
-        case PrimitiveTopology::Lines: mode = GL_LINES; break;
-        case PrimitiveTopology::LineStrip: mode = GL_LINE_STRIP; break;
-        case PrimitiveTopology::Triangles: mode = GL_TRIANGLES; break;
-        case PrimitiveTopology::TriangleStrip: mode = GL_TRIANGLE_STRIP; break;
-        case PrimitiveTopology::TriangleFan: mode = GL_TRIANGLE_FAN; break;
-    }
+    GLenum mode = primitive_topology_to_gl(m_current_pipeline->primitive_type());
 
     if (instance_count > 1) {
         glDrawArraysInstanced(mode, static_cast<GLint>(first_vertex),
@@ -121,18 +141,9 @@ void GLContext::draw_indexed(uint32_t index_count, uint32_t first_index,
                              int vertex_offset, uint32_t instance_count) {
     if (!m_current_pipeline) return;
 
-    GLenum mode = GL_TRIANGLES;
-    switch (m_current_pipeline->primitive_type()) {
-        case PrimitiveTopology::Points: mode = GL_POINTS; break;
-        case PrimitiveTopology::Lines: mode = GL_LINES; break;
-        case PrimitiveTopology::LineStrip: mode = GL_LINE_STRIP; break;
-        case PrimitiveTopology::Triangles: mode = GL_TRIANGLES; break;
-        case PrimitiveTopology::TriangleStrip: mode = GL_TRIANGLE_STRIP; break;
-        case PrimitiveTopology::TriangleFan: mode = GL_TRIANGLE_FAN; break;
-    }
-
+    GLenum mode = primitive_topology_to_gl(m_current_pipeline->primitive_type());
     GLenum type = (m_index_type == 2) ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT;
-    const void* offset = reinterpret_cast<const void*>(first_index * m_index_type);
+    const void* offset = reinterpret_cast<const void*>(static_cast<uintptr_t>(first_index) * m_index_type);
 
     if (instance_count > 1) {
         glDrawElementsInstancedBaseVertex(mode, static_cast<GLsizei>(index_count), type,
@@ -159,11 +170,8 @@ void GLContext::copy_texture_to_buffer(
     auto* gl_tex = static_cast<const GLTexture*>(src_texture);
     auto* gl_buf = static_cast<GLBuffer*>(dst_buffer);
 
-    // Bind the destination buffer as pixel pack target
     glBindBuffer(GL_PIXEL_PACK_BUFFER, gl_buf->handle());
 
-    // Use glGetTextureSubImage to copy texture data into the PBO.
-    // When a PBO is bound, the pointer argument is treated as a byte offset.
     glGetTextureSubImage(
         gl_tex->handle(), 0,
         x, y, 0,
@@ -208,22 +216,32 @@ void GLContext::memory_barrier(BarrierFlags flags) {
     }
 }
 
+void GLContext::submit(RHICommandBuffer* cmd_buffer, RHIFence* signal_fence) {
+    if (!cmd_buffer) return;
+
+    auto* gl_cmd_buffer = static_cast<GLCommandBuffer*>(cmd_buffer);
+    gl_cmd_buffer->execute();
+
+    if (signal_fence) {
+        auto* gl_fence = static_cast<GLFence*>(signal_fence);
+        gl_fence->insert();
+    }
+}
+
+void GLContext::bind_descriptor_set(RHIDescriptorSet* set, uint32_t /*index*/) {
+    if (!set) return;
+
+    auto* gl_set = static_cast<GLDescriptorSet*>(set);
+    gl_set->apply();
+}
+
 bool GLContext::check_error(const char* context) {
     GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
-        const char* err_str = "Unknown error";
-        switch (err) {
-            case GL_INVALID_ENUM: err_str = "GL_INVALID_ENUM"; break;
-            case GL_INVALID_VALUE: err_str = "GL_INVALID_VALUE"; break;
-            case GL_INVALID_OPERATION: err_str = "GL_INVALID_OPERATION"; break;
-            case GL_INVALID_FRAMEBUFFER_OPERATION: err_str = "GL_INVALID_FRAMEBUFFER_OPERATION"; break;
-            case GL_OUT_OF_MEMORY: err_str = "GL_OUT_OF_MEMORY"; break;
-        }
-
         if (context) {
-            fprintf(stderr, "OpenGL error in %s: %s (0x%x)\n", context, err_str, err);
+            Logger::instance().error("OpenGL", "Error in %s: %s (0x%x)", context, gl_error_to_string(err), err);
         } else {
-            fprintf(stderr, "OpenGL error: %s (0x%x)\n", err_str, err);
+            Logger::instance().error("OpenGL", "Error: %s (0x%x)", gl_error_to_string(err), err);
         }
         return true;
     }

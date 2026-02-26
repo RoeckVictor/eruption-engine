@@ -27,6 +27,7 @@
 #include <imgui.h>
 #include <algorithm>
 #include <map>
+#include <memory>
 
 namespace editor {
 
@@ -37,7 +38,7 @@ InspectorPanel::InspectorPanel(EditorContext& context)
 }
 
 void InspectorPanel::on_gui() {
-    const auto& selection = m_context.selection();
+    const auto& selection = m_context.selection().selection();
 
     if (selection.empty()) {
         render_no_selection();
@@ -59,7 +60,7 @@ void InspectorPanel::render_no_selection() {
 }
 
 void InspectorPanel::render_multi_selection() {
-    ImGui::TextDisabled("%zu entities selected", m_context.selection().size());
+    ImGui::TextDisabled("%zu entities selected", m_context.selection().selection().size());
     ImGui::TextDisabled("");
     ImGui::TextDisabled("Multi-entity editing");
     ImGui::TextDisabled("is not yet supported.");
@@ -80,7 +81,7 @@ void InspectorPanel::render_entity_inspector(entt::entity entity) {
         bool enabled = info.enabled;
         if (ImGui::Checkbox("##Enabled", &enabled)) {
             set_entity_enabled(*registry, entity, enabled);
-            m_context.mark_dirty();
+            m_context.scene_state().mark_dirty();
         }
         ImGui::SameLine();
 
@@ -93,7 +94,7 @@ void InspectorPanel::render_entity_inspector(entt::entity entity) {
         ImGui::SetNextItemWidth(-1);
         if (ImGui::InputText("##EntityName", name_buffer, sizeof(name_buffer))) {
             info.name = name_buffer;
-            m_context.mark_dirty();
+            m_context.scene_state().mark_dirty();
         }
         ImGui::PopID();
 
@@ -188,7 +189,7 @@ void InspectorPanel::render_entity_inspector(entt::entity entity) {
                     if (sc.empty()) {
                         registry->remove<runtime::ScriptComponent>(entity);
                     }
-                    m_context.mark_dirty();
+                    m_context.scene_state().mark_dirty();
                     ImGui::PopStyleColor(3);
                     ImGui::PopID();
                     break; // List changed, bail out of loop
@@ -231,7 +232,8 @@ void InspectorPanel::render_entity_inspector(entt::entity entity) {
                     // Edit mode: create temporary script for inspector
                     auto* sm = m_context.script_manager();
                     if (sm && sm->are_scripts_loaded()) {
-                        auto* temp_script = sm->dll_manager().create_script(sc.script_types[i]);
+                        auto temp_script = std::unique_ptr<runtime::ComponentScript>(
+                            sm->dll_manager().create_script(sc.script_types[i]));
                         if (temp_script) {
                             // Initialize script context so it can access registry for entity pickers
                             temp_script->init_context(entity, m_context.registry(), nullptr, nullptr);
@@ -267,8 +269,7 @@ void InspectorPanel::render_entity_inspector(entt::entity entity) {
 
                             // Clean up injected data (not needed in saved scene)
                             sc.script_properties[i].erase("__available_cameras__");
-
-                            delete temp_script;
+                            // unique_ptr automatically cleans up temp_script
                         } else {
                             ImGui::TextDisabled("Script not found in DLL");
                         }
@@ -339,7 +340,7 @@ void InspectorPanel::render_transform_component(entt::entity entity) {
         }
 
         if (changed) {
-            m_context.mark_dirty();
+            m_context.scene_state().mark_dirty();
         }
 
         ImGui::PopID();
@@ -395,8 +396,8 @@ void InspectorPanel::render_component_inspector(entt::entity entity, const engin
         }
 
         // Paste: only if same type (updates values)
-        bool can_paste = m_context.has_component_clipboard() &&
-                        m_context.component_clipboard_type() == type_info.type_index();
+        bool can_paste = m_context.clipboard().has_component_clipboard() &&
+                        m_context.clipboard().component_clipboard_type() == type_info.type_index();
 
         if (ImGui::MenuItem("Paste Component Values", nullptr, false, can_paste)) {
             paste_component_from_clipboard(entity, type_info.type_index());
@@ -406,7 +407,7 @@ void InspectorPanel::render_component_inspector(entt::entity entity, const engin
 
         // Paste as New: any type (creates if missing)
         if (ImGui::MenuItem("Paste Component as New", nullptr, false,
-                           m_context.has_component_clipboard())) {
+                           m_context.clipboard().has_component_clipboard())) {
             paste_component_as_new_from_clipboard(entity);
         }
 
@@ -462,13 +463,13 @@ void InspectorPanel::render_component_inspector(entt::entity entity, const engin
             changed = AnimatorInspector::draw(*static_cast<engine::animation::Animator*>(component_ptr));
         }
         else if (type_info.name() == "engine::simulation::PixelGridComponent") {
-            changed = PixelGridComponentInspector::draw(*static_cast<engine::simulation::PixelGridComponent*>(component_ptr), m_context.project_path());
+            changed = PixelGridComponentInspector::draw(*static_cast<engine::simulation::PixelGridComponent*>(component_ptr), m_context.scene_state().project_path());
         }
         else if (type_info.name() == "engine::render::Image") {
-            changed = ImageInspector::draw(*static_cast<engine::render::Image*>(component_ptr), m_context.project_path());
+            changed = ImageInspector::draw(*static_cast<engine::render::Image*>(component_ptr), m_context.scene_state().project_path());
         }
         else if (type_info.name() == "engine::render::Text") {
-            changed = TextInspector::draw(*static_cast<engine::render::Text*>(component_ptr), m_context.project_path());
+            changed = TextInspector::draw(*static_cast<engine::render::Text*>(component_ptr), m_context.scene_state().project_path());
         }
         else {
             // Fall back to AutoInspector for components without custom inspectors
@@ -476,7 +477,7 @@ void InspectorPanel::render_component_inspector(entt::entity entity, const engin
         }
 
         if (changed) {
-            m_context.mark_dirty();
+            m_context.scene_state().mark_dirty();
         }
     }
 
@@ -604,7 +605,7 @@ void InspectorPanel::render_add_component_button(entt::entity entity) {
                             sc = &registry->emplace<runtime::ScriptComponent>(entity);
                         }
                         sc->script_types.push_back(script_name);
-                        m_context.mark_dirty();
+                        m_context.scene_state().mark_dirty();
                         ImGui::CloseCurrentPopup();
                     }
                 }
@@ -634,7 +635,7 @@ void InspectorPanel::render_scene_settings() {
     // Background color
     ImGui::Text("Background Color");
     if (ImGui::ColorEdit4("##BgColor", settings.bg_color)) {
-        m_context.mark_dirty();
+        m_context.scene_state().mark_dirty();
     }
 
     ImGui::Spacing();
@@ -646,12 +647,12 @@ void InspectorPanel::render_scene_settings() {
         if (ImGui::DragFloat2("##Gravity", gravity, 10.0f)) {
             settings.gravity_x = gravity[0];
             settings.gravity_y = gravity[1];
-            m_context.mark_dirty();
+            m_context.scene_state().mark_dirty();
         }
 
         ImGui::Text("Pixels Per Meter");
         if (ImGui::DragFloat("##PPM", &settings.pixels_per_meter, 0.1f, 1.0f, 100.0f, "%.1f")) {
-            m_context.mark_dirty();
+            m_context.scene_state().mark_dirty();
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Conversion factor for physics calculations");
@@ -659,7 +660,7 @@ void InspectorPanel::render_scene_settings() {
 
         ImGui::Text("Substeps");
         if (ImGui::DragInt("##Substeps", &settings.physics_substeps, 1, 1, 10)) {
-            m_context.mark_dirty();
+            m_context.scene_state().mark_dirty();
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Higher values = more accurate but slower");
@@ -710,7 +711,7 @@ void InspectorPanel::add_component_to_entity(entt::entity entity, std::type_inde
             }
         }
 
-        m_context.mark_dirty();
+        m_context.scene_state().mark_dirty();
         engine::Logger::instance().info("Inspector", "Added component to entity");
     } else {
         engine::Logger::instance().warning("Inspector", "Failed to add component - type not registered");
@@ -745,7 +746,7 @@ void InspectorPanel::remove_component_from_entity(entt::entity entity, std::type
         }
     }
 
-    m_context.mark_dirty();
+    m_context.scene_state().mark_dirty();
 
     engine::Logger::instance().info("Inspector", "Removed component from entity");
 }
@@ -754,19 +755,19 @@ void InspectorPanel::copy_component_to_clipboard(entt::entity entity, const engi
     SceneSerializer serializer(*m_context.registry());
     nlohmann::json json = serializer.serialize_component(entity, type_info, component_ptr);
 
-    m_context.set_component_clipboard(json.dump(), type_info.type_index());
+    m_context.clipboard().set_component_clipboard(json.dump(), type_info.type_index());
 }
 
 void InspectorPanel::paste_component_from_clipboard(entt::entity entity, std::type_index type) {
     // Type check: only paste if same type (updates values)
-    if (m_context.component_clipboard_type() != type) return;
+    if (m_context.clipboard().component_clipboard_type() != type) return;
 
     try {
-        nlohmann::json json = nlohmann::json::parse(m_context.component_clipboard());
+        nlohmann::json json = nlohmann::json::parse(m_context.clipboard().component_clipboard());
         SceneSerializer serializer(*m_context.registry());
 
         if (serializer.deserialize_component(entity, json)) {
-            m_context.mark_dirty();
+            m_context.scene_state().mark_dirty();
             engine::Logger::instance().info("Inspector", "Pasted component values");
         }
     } catch (const std::exception& e) {
@@ -777,11 +778,11 @@ void InspectorPanel::paste_component_from_clipboard(entt::entity entity, std::ty
 void InspectorPanel::paste_component_as_new_from_clipboard(entt::entity entity) {
     // No type check: creates component if missing
     try {
-        nlohmann::json json = nlohmann::json::parse(m_context.component_clipboard());
+        nlohmann::json json = nlohmann::json::parse(m_context.clipboard().component_clipboard());
         SceneSerializer serializer(*m_context.registry());
 
         if (serializer.deserialize_component(entity, json)) {
-            m_context.mark_dirty();
+            m_context.scene_state().mark_dirty();
             engine::Logger::instance().info("Inspector", "Pasted component as new");
         }
     } catch (const std::exception& e) {
@@ -824,7 +825,7 @@ void InspectorPanel::move_component(entt::entity entity, size_t from_index, size
     info.component_order.erase(info.component_order.begin() + from_index);
     info.component_order.insert(info.component_order.begin() + to_index, moving);
 
-    m_context.mark_dirty();
+    m_context.scene_state().mark_dirty();
 }
 
 std::string InspectorPanel::get_component_category(const std::string& type_name) {
@@ -843,4 +844,4 @@ std::string InspectorPanel::get_component_category(const std::string& type_name)
     return "Other";
 }
 
-} // namespace editor
+}

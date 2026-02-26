@@ -7,7 +7,7 @@ namespace editor {
 
 class ProjectManager;
 
-/// Panel for editing project settings.
+// Panel for editing project settings
 class ProjectSettingsPanel : public Panel {
 public:
     explicit ProjectSettingsPanel(ProjectManager& project_manager);
@@ -27,18 +27,15 @@ private:
 
     ProjectManager& m_project_manager;
 
-    // Buffers for editing
     char m_project_name[128] = "";
     char m_default_scene[256] = "";
     char m_company_name[128] = "";
     char m_version[64] = "1.0.0";
 
-    // Physics settings
     float m_gravity_x = 0.0f;
     float m_gravity_y = -9.81f;
     int m_physics_iterations = 8;
 
-    // Build settings
     int m_target_fps = 60;
     bool m_vsync = true;
     int m_window_width = 1280;
@@ -49,4 +46,4 @@ private:
     bool m_settings_changed = false;
 };
 
-} // namespace editor
+}

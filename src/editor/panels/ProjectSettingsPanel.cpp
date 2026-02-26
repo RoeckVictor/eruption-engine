@@ -11,7 +11,7 @@ namespace fs = std::filesystem;
 namespace editor {
 
 ProjectSettingsPanel::ProjectSettingsPanel(ProjectManager& project_manager)
-    : Panel("Project Settings")
+    : Panel("Project Settings", PanelVisibilityMode::OnDemand)
     , m_project_manager(project_manager)
 {
 }
@@ -317,4 +317,4 @@ void ProjectSettingsPanel::save_settings() {
     }
 }
 
-} // namespace editor
+}

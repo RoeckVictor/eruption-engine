@@ -14,7 +14,7 @@ namespace fs = std::filesystem;
 namespace editor {
 
 BuildSettingsPanel::BuildSettingsPanel()
-    : Panel("Build Settings")
+    : Panel("Build Settings", PanelVisibilityMode::OnDemand)
 {
     // Default product name
     std::strncpy(m_product_name_buffer, "MyGame", sizeof(m_product_name_buffer) - 1);
@@ -240,4 +240,4 @@ void BuildSettingsPanel::render_build_status() {
     }
 }
 
-} // namespace editor
+}
