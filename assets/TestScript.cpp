@@ -274,7 +274,7 @@ void TestScript::on_inspector_gui(nlohmann::json& properties) {
     ImGui::Text("Is patrolling: %s", m_is_patrolling ? "Yes" : "No");
 
     ImGui::Separator();
-    ImGui::SliderFloat("Move Speed", &m_move_speed, 10.0f, 500.0f);
+    ImGui::DragFloat("Move Speed", &m_move_speed, 1.0f, 10.0f, 500.0f);
 
     ImGui::Separator();
     ImGui::Text("Controls:");

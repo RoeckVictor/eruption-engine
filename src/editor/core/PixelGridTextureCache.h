@@ -4,7 +4,10 @@
 #include <entt/entt.hpp>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
+#include <cstdint>
+#include <vector>
 
 namespace editor {
 
@@ -12,11 +15,22 @@ class PixelGridTextureCache {
 public:
     ~PixelGridTextureCache() = default;
 
-    // Get or load a texture for a pixel grid entity
     void* get(entt::entity entity, const std::string& path);
 
-    void cleanup(entt::registry* registry);
+    void* update_from_data(entt::entity entity, int width, int height,
+                           const std::vector<uint8_t>& rgba_data);
 
+    void* update_from_materials(entt::entity entity, int width, int height,
+                                const std::vector<uint8_t>& material_ids,
+                                const std::string& material_set = "default");
+
+    void mark_dirty(entt::entity entity);
+    bool is_dirty(entt::entity entity) const;
+    void clear_dirty(entt::entity entity);
+
+    void invalidate(entt::entity entity);
+
+    void cleanup(entt::registry* registry);
     void clear();
 
 private:
@@ -27,6 +41,7 @@ private:
         int height = 0;
     };
     std::unordered_map<entt::entity, Entry> m_cache;
+    std::unordered_set<entt::entity> m_dirty_entities;
 };
 
 }

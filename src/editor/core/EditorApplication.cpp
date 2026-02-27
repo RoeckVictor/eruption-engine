@@ -47,6 +47,7 @@ EditorApplication::EditorApplication()
     m_context.set_registry(&m_scene_registry);
 
     m_runtime.init(&m_scene_registry, &m_script_manager);
+    m_runtime.set_pixel_grid_loader(&m_context.pixel_grid_loader());
 
     m_context.set_runtime(&m_runtime);
 }
@@ -90,7 +91,7 @@ bool EditorApplication::on_init(engine::Engine& engine) {
     // Add profiler panel and wire up GPU profiler
     auto* profiler_panel = m_panel_manager.add_panel<ProfilerPanel>(engine, m_context);
     profiler_panel->set_gpu_profiler(engine.gpu_profiler());
-    profiler_panel->set_visible(false);  // Hidden by default
+    profiler_panel->set_visible(false);
 
     // Wire up menu bar callbacks
     m_panel_manager.menu_callbacks.new_scene = [this]() {
@@ -160,7 +161,8 @@ void EditorApplication::on_update(engine::Engine& engine, float dt) {
         build_settings->update();
     }
 
-    m_context.pixel_grid_loader().update(m_context.registry());
+    // Always use scene_registry for pixel grid loading (not prefab editing registry)
+    m_context.pixel_grid_loader().update(m_context.scene_registry());
 
     update_world_transforms(*m_context.registry());
 

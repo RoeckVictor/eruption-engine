@@ -26,6 +26,10 @@ namespace prefab {
 class ComponentRegistry;
 class PrefabManager;
 }
+
+namespace simulation {
+class IPixelGridLoader;
+}
 }
 
 namespace editor {
@@ -43,7 +47,6 @@ enum class PlayState {
 };
 
 class RuntimeContext {
-    // Friend declarations for host functions that need private member access
     friend runtime::CoroutineHandle host_start_coroutine(runtime::ScriptHostAPI*, entt::entity, void*);
     friend void host_stop_coroutine(runtime::ScriptHostAPI*, runtime::CoroutineHandle);
     friend void host_stop_all_coroutines(runtime::ScriptHostAPI*, entt::entity);
@@ -95,6 +98,11 @@ public:
 
     void set_project_assets_path(const std::string& path) { m_project_assets_path = path; }
 
+    void set_pixel_grid_loader(engine::simulation::IPixelGridLoader* loader) { m_pixel_grid_loader = loader; }
+    engine::simulation::IPixelGridLoader* pixel_grid_loader() { return m_pixel_grid_loader; }
+
+    void queue_dynamic_collider_split_check(entt::entity entity);
+
     void set_viewport(float x, float y, float width, float height) {
         m_viewport_x = x;
         m_viewport_y = y;
@@ -126,6 +134,7 @@ private:
     entt::registry* m_editor_registry = nullptr;
     ScriptManager* m_script_manager = nullptr;
     engine::Engine* m_engine = nullptr;
+    engine::simulation::IPixelGridLoader* m_pixel_grid_loader = nullptr;
 
     std::string m_scene_snapshot;
 
@@ -144,29 +153,28 @@ private:
     runtime::ScriptHostAPI m_host_api;
 
     std::vector<entt::entity> m_deferred_destroys;
+    std::vector<entt::entity> m_pending_split_checks;
+
+    void process_dynamic_collider_splits();
 
     std::unique_ptr<engine::prefab::ComponentRegistry> m_component_registry;
     std::unique_ptr<engine::prefab::PrefabManager> m_prefab_manager;
     std::string m_project_assets_path;
 
-    // Viewport info for correct screen-to-world conversion in editor panels
     float m_viewport_x = 0.0f;
     float m_viewport_y = 0.0f;
     float m_viewport_w = 0.0f;
     float m_viewport_h = 0.0f;
 
-    // Maps body -> entity for looking up entities from Box2D bodies
     std::unordered_map<uint64_t, entt::entity> m_body_to_entity;
     bool m_body_map_dirty = true;
 
-    // Extended contact info stored per pair (keeps best data from multiple events)
     struct ContactData {
         runtime::ContactPair pair;
         runtime::CollisionInfo info_for_a;
         runtime::CollisionInfo info_for_b;
     };
 
-    // Current frame contacts (pair -> extended info)
     std::unordered_map<runtime::ContactPair, ContactData, runtime::ContactPairHash> m_current_contacts;
     std::unordered_set<runtime::ContactPair, runtime::ContactPairHash> m_previous_contact_pairs;
 
@@ -182,7 +190,6 @@ private:
     void update_coroutines(float dt);
     void cleanup_entity_coroutines(entt::entity entity);
 
-    /// Helper to safely destroy a coroutine handle and mark it inactive
     static void destroy_coroutine(runtime::CoroutineInstance& coro) {
         coro.active = false;
         if (coro.coro_handle) {
@@ -191,7 +198,6 @@ private:
         }
     }
 
-    // Use random_device with time-based fallback (random_device may be deterministic on MinGW)
     static uint32_t generate_seed() {
         std::random_device rd;
         uint32_t seed = rd();

@@ -113,7 +113,7 @@ bool AutoInspector::draw_int(const PropertyInfo& prop, void* instance) {
 
     bool modified = false;
     if (has_flag(prop.flags, PropertyFlags::Slider)) {
-        modified = ImGui::SliderInt("##value", value,
+        modified = ImGui::DragInt("##value", value, prop.step,
             static_cast<int>(prop.min_value),
             static_cast<int>(prop.max_value));
     } else {
@@ -138,12 +138,12 @@ bool AutoInspector::draw_float(const PropertyInfo& prop, void* instance) {
         // Display as angle with degree symbol
         modified = ImGui::DragFloat("##value", value, 0.5f, -360.0f, 360.0f, "%.1f deg");
     } else if (has_flag(prop.flags, PropertyFlags::Slider)) {
-        modified = ImGui::SliderFloat("##value", value, prop.min_value, prop.max_value);
+        modified = ImGui::DragFloat("##value", value, prop.step, prop.min_value, prop.max_value);
     } else if (has_flag(prop.flags, PropertyFlags::Normalized)) {
-        modified = ImGui::SliderFloat("##value", value, 0.0f, 1.0f);
+        modified = ImGui::DragFloat("##value", value, 0.01f, 0.0f, 1.0f);
     } else if (has_flag(prop.flags, PropertyFlags::Percentage)) {
         float percent = *value * 100.0f;
-        if (ImGui::SliderFloat("##value", &percent, 0.0f, 100.0f, "%.1f%%")) {
+        if (ImGui::DragFloat("##value", &percent, 0.5f, 0.0f, 100.0f, "%.1f%%")) {
             *value = percent / 100.0f;
             modified = true;
         }

@@ -220,9 +220,9 @@ void ProfilerPanel::render_settings_popup() {
         ImGui::Text("Display Settings");
         ImGui::Separator();
 
-        ImGui::SliderFloat("Target FPS", &m_target_fps, 30.0f, 144.0f);
-        ImGui::SliderFloat("Flame chart height", &m_flame_chart_height, 80.0f, 300.0f);
-        ImGui::SliderFloat("Frame graph height", &m_frame_graph_height, 40.0f, 150.0f);
+        ImGui::DragFloat("Target FPS", &m_target_fps, 1.0f, 30.0f, 144.0f);
+        ImGui::DragFloat("Flame chart height", &m_flame_chart_height, 1.0f, 80.0f, 300.0f);
+        ImGui::DragFloat("Frame graph height", &m_frame_graph_height, 1.0f, 40.0f, 150.0f);
         ImGui::Checkbox("Show GPU in flame chart", &m_show_gpu_in_flame);
 
         ImGui::EndPopup();

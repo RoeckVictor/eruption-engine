@@ -77,7 +77,7 @@ void PixArtApp::render_toolbar() {
 
     ImGui::SameLine();
     ImGui::SetNextItemWidth(120);
-    ImGui::SliderInt("Brush", &m_tools.draw_state.brush_size, 1, 32);
+    ImGui::DragInt("Brush", &m_tools.draw_state.brush_size, 1, 1, 32);
 
     ImGui::SameLine();
     ImGui::TextDisabled("|");
@@ -198,7 +198,7 @@ void PixArtApp::render_layer_panel() {
 
         // Opacity slider
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-        if (ImGui::SliderFloat("##opacity", &layer.opacity, 0.0f, 1.0f, "%.2f")) {
+        if (ImGui::DragFloat("##opacity", &layer.opacity, 0.01f, 0.0f, 1.0f, "%.2f")) {
             m_canvas_dirty = true;
         }
 
@@ -241,7 +241,7 @@ void PixArtApp::render_value_picker() {
 
     case LayerType::UInt8:
         ImGui::Text("Value (0-255):");
-        ImGui::SliderInt("##dataval", &m_tools.draw_state.data_value, 0, 255);
+        ImGui::DragInt("##dataval", &m_tools.draw_state.data_value, 1, 0, 255);
         break;
 
     case LayerType::Enum:
@@ -261,7 +261,7 @@ void PixArtApp::render_value_picker() {
                 ImGui::EndCombo();
             }
         } else {
-            ImGui::SliderInt("##enumidx", &m_tools.draw_state.enum_value, 0, 255);
+            ImGui::DragInt("##enumidx", &m_tools.draw_state.enum_value, 1, 0, 255);
         }
         break;
     }

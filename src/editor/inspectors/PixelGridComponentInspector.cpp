@@ -52,6 +52,16 @@ bool PixelGridComponentInspector::draw(engine::simulation::PixelGridComponent& c
 
     ImGui::Spacing();
 
+    // Destructible checkbox
+    if (ImGui::Checkbox("Destructible", &component.destructible)) {
+        changed = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("When enabled, pixels can be erased at runtime\n(e.g., by PixelBrush right-click)");
+    }
+
+    ImGui::Spacing();
+
     // Read-only info
     ImGui::BeginDisabled();
     ImGui::Text("Dimensions: %dx%d", component.width, component.height);

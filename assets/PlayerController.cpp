@@ -10,17 +10,13 @@ void PlayerController::on_fixed_update() {
     using namespace engine::platform;
     float dt = fixed_delta_time();
 
-    // Read input
     int move_dir = 0;
     if (is_key_held(KeyCode::A) || is_key_held(KeyCode::Left)) move_dir -= 1;
     if (is_key_held(KeyCode::D) || is_key_held(KeyCode::Right)) move_dir += 1;
-    // Use is_key_held for jump - is_grounded() prevents continuous jumping
     bool jump = is_key_held(KeyCode::Space);
 
-    // Get current velocity
     auto vel = get_velocity();
 
-    // Horizontal movement with acceleration
     if (move_dir != 0) {
         float target_vx = static_cast<float>(move_dir) * max_move_speed;
         float accel = move_accel * dt;
@@ -30,7 +26,6 @@ void PlayerController::on_fixed_update() {
             vel.x = std::max(vel.x - accel, target_vx);
         }
     } else {
-        // Apply friction when no input
         float friction_decel = friction * max_move_speed * dt;
         if (vel.x > 0) {
             vel.x = std::max(0.0f, vel.x - friction_decel);
@@ -39,15 +34,14 @@ void PlayerController::on_fixed_update() {
         }
     }
 
-    // Jumping (only when grounded and haven't already jumped this press)
     bool grounded = is_grounded();
 
     if (!jump) {
-        m_jump_consumed = false;  // Reset when Space released
+        m_jump_consumed = false;
     }
     if (jump && grounded && !m_jump_consumed) {
         vel.y = jump_velocity;
-        m_jump_consumed = true;  // Consume jump until Space released
+        m_jump_consumed = true;
     }
 
     set_velocity(vel.x, vel.y);
@@ -68,19 +62,16 @@ void PlayerController::deserialize_properties(const nlohmann::json& data) {
 }
 
 void PlayerController::on_inspector_gui(nlohmann::json& props) {
-    // Read current values from JSON (with defaults)
     float accel = props.value("move_accel", 1500.0f);
     float max_speed = props.value("max_move_speed", 100.0f);
     float jump_vel = props.value("jump_velocity", 180.0f);
     float fric = props.value("friction", 10.0f);
 
-    // Render ImGui widgets
     ImGui::DragFloat("Move Accel", &accel, 10.0f, 0.0f, 5000.0f);
     ImGui::DragFloat("Max Speed", &max_speed, 5.0f, 0.0f, 500.0f);
     ImGui::DragFloat("Jump Velocity", &jump_vel, 5.0f, 0.0f, 500.0f);
     ImGui::DragFloat("Friction", &fric, 0.5f, 0.0f, 50.0f);
 
-    // Always write values back to JSON (ensures persistence)
     props["move_accel"] = accel;
     props["max_move_speed"] = max_speed;
     props["jump_velocity"] = jump_vel;

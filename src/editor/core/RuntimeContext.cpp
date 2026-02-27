@@ -15,6 +15,7 @@
 #include "engine/physics/Colliders.h"
 #include "engine/animation/AnimationSystem.h"
 #include "engine/render/Camera2D.h"
+#include "engine/render/PixelGridRenderer.h"
 #include "engine/simulation/PixelGridComponent.h"
 #include "engine/simulation/SimSurface.h"
 #include "engine/simulation/MaterialDefs.h"
@@ -427,21 +428,18 @@ static void host_set_entity_active(runtime::ScriptHostAPI* /*api*/, entt::regist
 
 static bool host_spawn_pixels_at_world(runtime::ScriptHostAPI* api, float world_x, float world_y, int radius, int material_id, bool erase) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
-    if (!rt || !rt->editor_registry() || !rt->sim_playback()) return false;
+    if (!rt || !rt->editor_registry()) {
+        return false;
+    }
 
     auto* registry = rt->editor_registry();
     bool spawned = false;
 
-    for (auto& state : rt->sim_playback()->surfaces()) {
-        if (!registry->valid(state->entity)) continue;
-        if (!registry->all_of<engine::Transform>(state->entity)) continue;
-        if (!registry->all_of<engine::simulation::PixelGridComponent>(state->entity)) continue;
-        if (!registry->all_of<engine::simulation::SimSurface>(state->entity)) continue;
-
-        auto& transform = registry->get<engine::Transform>(state->entity);
-        auto& grid_comp = registry->get<engine::simulation::PixelGridComponent>(state->entity);
-        auto& sim_surface = registry->get<engine::simulation::SimSurface>(state->entity);
-
+    // Helper to convert world coords to grid coords
+    auto world_to_grid = [](const engine::Transform& transform,
+                            const engine::simulation::PixelGridComponent& grid_comp,
+                            float world_x, float world_y,
+                            int& out_px, int& out_py) -> bool {
         // Convert world position to entity-local coords
         float local_x = world_x - transform.world_x;
         float local_y = world_y - transform.world_y;
@@ -461,53 +459,114 @@ static bool host_spawn_pixels_at_world(runtime::ScriptHostAPI* api, float world_
         float grid_x = unscaled_x + static_cast<float>(grid_comp.origin_x);
         float grid_y = static_cast<float>(grid_comp.height - grid_comp.origin_y) - unscaled_y;
 
-        int px = static_cast<int>(std::floor(grid_x));
-        int py = static_cast<int>(std::floor(grid_y));
+        out_px = static_cast<int>(std::floor(grid_x));
+        out_py = static_cast<int>(std::floor(grid_y));
 
-        if (px < 0 || px >= grid_comp.width || py < 0 || py >= grid_comp.height) {
-            continue;
-        }
+        return (out_px >= 0 && out_px < grid_comp.width &&
+                out_py >= 0 && out_py < grid_comp.height);
+    };
 
-        if (erase) {
-            if (grid_comp.destructible) {
-                state->pixel_grid.spawn_material(px, py, radius, 0, engine::simulation::CAT_EMPTY, 0);
+    if (erase) {
+        auto view = registry->view<engine::Transform, engine::simulation::PixelGridComponent>();
+
+        for (auto entity : view) {
+            // Skip SimSurface entities (check them later as fallback)
+            if (registry->all_of<engine::simulation::SimSurface>(entity)) continue;
+
+            auto& transform = view.get<engine::Transform>(entity);
+            auto& grid_comp = view.get<engine::simulation::PixelGridComponent>(entity);
+
+            if (!grid_comp.loaded || !grid_comp.destructible) {
+                continue;
+            }
+
+            int px, py;
+            if (!world_to_grid(transform, grid_comp, world_x, world_y, px, py)) {
+                continue;
+            }
+
+            // Get the pixel grid loader to modify pixel data
+            auto* loader = rt->pixel_grid_loader();
+            if (!loader) continue;
+
+            // Erase pixels
+            if (loader->erase_pixels(entity, px, py, radius)) {
                 spawned = true;
 
-                // Mark affected chunks dirty for collider regeneration
-                if (state->terrain_colliders) {
+                // If entity has DynamicCollider, mark for regeneration and split check
+                if (auto* collider = registry->try_get<engine::physics::DynamicCollider>(entity)) {
+                    if (collider->enabled) {
+                        collider->generated = false;
+                        rt->queue_dynamic_collider_split_check(entity);
+                    }
+                }
+
+                // Return after successfully erasing from a rigidbody
+                return spawned;
+            }
+        }
+    }
+
+    // --- Handle SimSurface entities (CA simulation grids) ---
+    // For erase: only reached if no rigidbody was hit above
+    // For spawn: always process here
+    if (rt->sim_playback()) {
+        for (auto& state : rt->sim_playback()->surfaces()) {
+            if (!registry->valid(state->entity)) continue;
+            if (!registry->all_of<engine::Transform>(state->entity)) continue;
+            if (!registry->all_of<engine::simulation::PixelGridComponent>(state->entity)) continue;
+            if (!registry->all_of<engine::simulation::SimSurface>(state->entity)) continue;
+
+            auto& transform = registry->get<engine::Transform>(state->entity);
+            auto& grid_comp = registry->get<engine::simulation::PixelGridComponent>(state->entity);
+            auto& sim_surface = registry->get<engine::simulation::SimSurface>(state->entity);
+
+            int px, py;
+            if (!world_to_grid(transform, grid_comp, world_x, world_y, px, py)) {
+                continue;
+            }
+
+            if (erase) {
+                if (grid_comp.destructible) {
+                    state->pixel_grid.spawn_material(px, py, radius, 0, engine::simulation::CAT_EMPTY, 0);
+                    spawned = true;
+
+                    // Mark affected chunks dirty for collider regeneration
+                    if (state->terrain_colliders) {
+                        state->terrain_colliders->mark_dirty_region(
+                            px - radius, py - radius, radius * 2 + 1, radius * 2 + 1);
+                    }
+                    return spawned;
+                }
+            } else {
+                auto* lib = engine::simulation::MaterialLibraryRegistry::instance()
+                    .get_library(sim_surface.material_set);
+
+                uint8_t category = engine::simulation::CAT_POWDER;
+                uint8_t temperature = 128;
+
+                if (lib) {
+                    auto* mat = lib->get_material(static_cast<uint8_t>(material_id));
+                    if (mat) {
+                        category = static_cast<uint8_t>(mat->category);
+                        temperature = mat->default_temp;
+                    }
+                }
+
+                state->pixel_grid.spawn_material(px, py, radius, static_cast<uint8_t>(material_id), category, temperature);
+                spawned = true;
+
+                // Mark affected chunks dirty for collider regeneration (for solid materials)
+                if (state->terrain_colliders &&
+                    (category == engine::simulation::CAT_STATIC || category == engine::simulation::CAT_POWDER)) {
                     state->terrain_colliders->mark_dirty_region(
                         px - radius, py - radius, radius * 2 + 1, radius * 2 + 1);
                 }
-            }
-        } else {
-            auto* lib = engine::simulation::MaterialLibraryRegistry::instance()
-                .get_library(sim_surface.material_set);
 
-            uint8_t category = engine::simulation::CAT_POWDER;
-            uint8_t temperature = 128;
-
-            if (lib) {
-                auto* mat = lib->get_material(static_cast<uint8_t>(material_id));
-                if (mat) {
-                    category = static_cast<uint8_t>(mat->category);
-                    temperature = mat->default_temp;
-                }
-            }
-
-            state->pixel_grid.spawn_material(px, py, radius, static_cast<uint8_t>(material_id), category, temperature);
-            spawned = true;
-
-            // Mark affected chunks dirty for collider regeneration (for solid materials)
-            // CAT_STATIC and CAT_POWDER are both considered solid for collision purposes
-            if (state->terrain_colliders &&
-                (category == engine::simulation::CAT_STATIC || category == engine::simulation::CAT_POWDER)) {
-                state->terrain_colliders->mark_dirty_region(
-                    px - radius, py - radius, radius * 2 + 1, radius * 2 + 1);
+                // Only process one grid per spawn
+                return spawned;
             }
         }
-
-        // Only process one grid per spawn
-        break;
     }
 
     return spawned;
@@ -648,7 +707,7 @@ void RuntimeContext::play(const SceneSettings& settings) {
             return;
         }
 
-        m_physics_playback = std::make_unique<PhysicsPlayback>(*m_editor_registry, *m_physics_world);
+        m_physics_playback = std::make_unique<PhysicsPlayback>(*m_editor_registry, *m_physics_world, m_pixel_grid_loader);
         m_physics_playback->init_bodies();
 
         m_sim_playback = std::make_unique<SimulationPlayback>(*m_editor_registry);
@@ -787,6 +846,11 @@ void RuntimeContext::update(float dt) {
             fixed_update_scripts();
         }
 
+        if (m_physics_playback) {
+            PROFILE_SCOPE("Runtime::DynamicColliders");
+            m_physics_playback->update_dynamic_colliders();
+        }
+
         if (m_physics_world) {
             PROFILE_SCOPE("Runtime::PhysicsStep");
             m_physics_world->step(m_fixed_timestep, 4);
@@ -819,6 +883,11 @@ void RuntimeContext::update(float dt) {
     if (m_sim_playback) {
         PROFILE_SCOPE("Runtime::PixelSimulation");
         m_sim_playback->update(m_frame_count);
+    }
+
+    {
+        PROFILE_SCOPE("Runtime::DynamicColliderSplits");
+        process_dynamic_collider_splits();
     }
 
     {
@@ -869,6 +938,248 @@ void* RuntimeContext::get_sim_texture(entt::entity entity) const {
 const std::vector<std::unique_ptr<SimSurfaceState>>& RuntimeContext::sim_surfaces() const {
     static const std::vector<std::unique_ptr<SimSurfaceState>> empty;
     return m_sim_playback ? m_sim_playback->surfaces() : empty;
+}
+
+void RuntimeContext::queue_dynamic_collider_split_check(entt::entity entity) {
+    for (auto e : m_pending_split_checks) {
+        if (e == entity) return;
+    }
+    m_pending_split_checks.push_back(entity);
+}
+
+void RuntimeContext::process_dynamic_collider_splits() {
+    if (m_pending_split_checks.empty() || !m_pixel_grid_loader || !m_editor_registry) {
+        m_pending_split_checks.clear();
+        return;
+    }
+
+    constexpr int MIN_FRAGMENT_PIXELS = 4;
+
+    for (auto entity : m_pending_split_checks) {
+        if (!m_editor_registry->valid(entity)) continue;
+        if (!m_editor_registry->all_of<engine::simulation::PixelGridComponent,
+                                       engine::physics::DynamicCollider>(entity)) continue;
+
+        int component_count = m_pixel_grid_loader->count_components(entity);
+
+        if (component_count <= 1) {
+            auto* grid_data = m_pixel_grid_loader->get_loaded_grid_data(entity);
+            if (grid_data) {
+                int pixel_count = 0;
+                for (auto m : grid_data->material_ids) {
+                    if (m != 0) pixel_count++;
+                }
+                if (pixel_count < MIN_FRAGMENT_PIXELS) {
+                    engine::Logger::instance().info("Runtime",
+                        "DynamicCollider entity destroyed (too few pixels: %d)", pixel_count);
+                    queue_destroy(entity);
+                }
+            }
+            continue;
+        }
+
+        engine::Logger::instance().info("Runtime",
+            "DynamicCollider split detected: %d components", component_count);
+
+        auto fragments = m_pixel_grid_loader->extract_components(entity);
+        if (fragments.size() <= 1) continue;
+
+        auto& orig_transform = m_editor_registry->get<engine::Transform>(entity);
+        auto& orig_grid_comp = m_editor_registry->get<engine::simulation::PixelGridComponent>(entity);
+        auto& orig_collider = m_editor_registry->get<engine::physics::DynamicCollider>(entity);
+
+        const int stored_orig_height = orig_grid_comp.height;
+        const int stored_orig_origin_x = orig_grid_comp.origin_x;
+        const int stored_orig_origin_y = orig_grid_comp.origin_y;
+        const float stored_orig_world_x = orig_transform.world_x;
+        const float stored_orig_world_y = orig_transform.world_y;
+
+        engine::physics::Rigidbody* orig_rb = m_editor_registry->try_get<engine::physics::Rigidbody>(entity);
+        b2Vec2 orig_velocity = {0.0f, 0.0f};
+        float orig_angular_velocity = 0.0f;
+        if (orig_rb && m_physics_world && b2Body_IsValid(orig_rb->body_id)) {
+            orig_velocity = m_physics_world->get_body_linear_velocity(orig_rb->body_id);
+            orig_angular_velocity = m_physics_world->get_body_angular_velocity(orig_rb->body_id);
+        }
+
+        float rot_rad = orig_transform.world_rotation * engine::DEG_TO_RAD;
+        float cos_r = std::cos(rot_rad);
+        float sin_r = std::sin(rot_rad);
+
+        auto compute_fragment_world_pos = [&](const engine::simulation::PixelGridComponent_Fragment& f,
+                                               float& out_world_x, float& out_world_y,
+                                               float& out_offset_x, float& out_offset_y) {
+
+            float local_x = (f.center_x - stored_orig_origin_x) * orig_transform.world_scale_x;
+            float local_y = ((stored_orig_height - f.center_y) - stored_orig_origin_y) * orig_transform.world_scale_y;
+
+            out_offset_x = local_x * cos_r - local_y * sin_r;
+            out_offset_y = local_x * sin_r + local_y * cos_r;
+
+            out_world_x = stored_orig_world_x + out_offset_x;
+            out_world_y = stored_orig_world_y + out_offset_y;
+        };
+
+        // Calculate total pixels across all valid fragments for correct mass distribution
+        int total_fragment_pixels = 0;
+        for (const auto& f : fragments) {
+            if (f.pixel_count >= MIN_FRAGMENT_PIXELS) {
+                total_fragment_pixels += f.pixel_count;
+            }
+        }
+
+        bool first = true;
+        for (const auto& frag : fragments) {
+            if (frag.pixel_count < MIN_FRAGMENT_PIXELS) {
+                engine::Logger::instance().info("Runtime",
+                    "Skipping fragment with %d pixels (below minimum)", frag.pixel_count);
+                continue;
+            }
+
+            float frag_world_x, frag_world_y, frag_offset_x, frag_offset_y;
+            compute_fragment_world_pos(frag, frag_world_x, frag_world_y, frag_offset_x, frag_offset_y);
+
+            float frag_local_center_x = frag.center_x - frag.offset_x;
+            float frag_local_center_y = frag.center_y - frag.offset_y;
+            int new_origin_x = static_cast<int>(std::round(frag_local_center_x));
+            int new_origin_y = static_cast<int>(std::round(frag_local_center_y));
+
+            if (first) {
+                engine::simulation::LoadedPixelGridData new_data;
+                new_data.width = frag.width;
+                new_data.height = frag.height;
+                new_data.material_ids = frag.material_ids;
+                new_data.color_rgba = frag.color_rgba;
+                new_data.has_material_layer = !frag.material_ids.empty();
+                new_data.has_color_layer = !frag.color_rgba.empty();
+                new_data.origin_x = new_origin_x;
+                new_data.origin_y = new_origin_y;
+
+                m_pixel_grid_loader->update_grid_data(entity, new_data);
+
+                orig_grid_comp.width = frag.width;
+                orig_grid_comp.height = frag.height;
+                orig_grid_comp.origin_x = new_origin_x;
+                orig_grid_comp.origin_y = new_origin_y;
+
+                orig_transform.x = frag_world_x;
+                orig_transform.y = frag_world_y;
+                orig_transform.world_x = frag_world_x;
+                orig_transform.world_y = frag_world_y;
+
+                if (orig_rb && m_physics_world && b2Body_IsValid(orig_rb->body_id)) {
+                    m_physics_world->set_body_transform(orig_rb->body_id, frag_world_x, frag_world_y,
+                                                         orig_transform.world_rotation);
+                }
+
+                orig_collider.generated = false;
+
+                first = false;
+            } else {
+                auto new_entity = m_editor_registry->create();
+
+                auto& new_transform = m_editor_registry->emplace<engine::Transform>(new_entity);
+                new_transform.x = frag_world_x;
+                new_transform.y = frag_world_y;
+                new_transform.rotation = orig_transform.world_rotation;
+                new_transform.scale_x = orig_transform.world_scale_x;
+                new_transform.scale_y = orig_transform.world_scale_y;
+                new_transform.world_x = new_transform.x;
+                new_transform.world_y = new_transform.y;
+                new_transform.world_rotation = new_transform.rotation;
+                new_transform.world_scale_x = new_transform.scale_x;
+                new_transform.world_scale_y = new_transform.scale_y;
+
+                auto& new_grid = m_editor_registry->emplace<engine::simulation::PixelGridComponent>(new_entity);
+                new_grid.width = frag.width;
+                new_grid.height = frag.height;
+                new_grid.origin_x = new_origin_x;
+                new_grid.origin_y = new_origin_y;
+                new_grid.destructible = orig_grid_comp.destructible;
+                new_grid.enabled = true;
+                new_grid.loaded = true;
+                new_grid.pixel_grid_path = "";
+
+                auto& new_collider = m_editor_registry->emplace<engine::physics::DynamicCollider>(new_entity);
+                new_collider.enabled = orig_collider.enabled;
+                new_collider.is_trigger = orig_collider.is_trigger;
+                new_collider.simplification = orig_collider.simplification;
+                new_collider.min_contour_area = orig_collider.min_contour_area;
+                new_collider.density = orig_collider.density;
+                new_collider.friction = orig_collider.friction;
+                new_collider.restitution = orig_collider.restitution;
+                new_collider.generated = false;
+
+                if (orig_rb && total_fragment_pixels > 0) {
+                    auto& new_rb = m_editor_registry->emplace<engine::physics::Rigidbody>(new_entity);
+                    new_rb.body_type = orig_rb->body_type;
+                    new_rb.mass = orig_rb->mass * (static_cast<float>(frag.pixel_count) / static_cast<float>(total_fragment_pixels));
+                    new_rb.gravity_scale = orig_rb->gravity_scale;
+                    new_rb.lock_rotation = orig_rb->lock_rotation;
+                    new_rb.lock_position_x = orig_rb->lock_position_x;
+                    new_rb.lock_position_y = orig_rb->lock_position_y;
+                    new_rb.enabled = true;
+
+                    if (m_physics_world) {
+                        float r_x = frag_offset_x;
+                        float r_y = frag_offset_y;
+                        float vx = orig_velocity.x + (-orig_angular_velocity * r_y);
+                        float vy = orig_velocity.y + (orig_angular_velocity * r_x);
+                        new_rb.initial_velocity_x = vx * m_physics_world->pixels_per_meter();
+                        new_rb.initial_velocity_y = vy * m_physics_world->pixels_per_meter();
+                        new_rb.initial_angular_velocity = orig_angular_velocity;
+                    }
+
+                    if (m_physics_playback) {
+                        m_physics_playback->create_body_for_entity(new_entity);
+                    }
+                }
+
+                engine::simulation::LoadedPixelGridData frag_data;
+                frag_data.width = frag.width;
+                frag_data.height = frag.height;
+                frag_data.material_ids = frag.material_ids;
+                frag_data.color_rgba = frag.color_rgba;
+                frag_data.has_material_layer = !frag.material_ids.empty();
+                frag_data.has_color_layer = !frag.color_rgba.empty();
+                frag_data.origin_x = new_origin_x;
+                frag_data.origin_y = new_origin_y;
+                m_pixel_grid_loader->update_grid_data(new_entity, frag_data);
+
+                // Create EntityInfo for the fragment
+                auto& new_info = m_editor_registry->emplace<EntityInfo>(new_entity);
+                new_info.name = "Fragment";
+                new_info.enabled = true;
+                new_info.enabled_in_hierarchy = true;
+
+                // Inherit parent from original entity
+                if (auto* orig_hierarchy = m_editor_registry->try_get<engine::Hierarchy>(entity)) {
+                    if (orig_hierarchy->parent != entt::null && m_editor_registry->valid(orig_hierarchy->parent)) {
+                        set_parent(*m_editor_registry, new_entity, orig_hierarchy->parent);
+                    }
+                }
+
+                // Copy PixelGridRenderer if source entity has one
+                if (auto* orig_renderer = m_editor_registry->try_get<engine::render::PixelGridRenderer>(entity)) {
+                    auto& new_renderer = m_editor_registry->emplace<engine::render::PixelGridRenderer>(new_entity);
+                    new_renderer.enabled = orig_renderer->enabled;
+                    new_renderer.layer = orig_renderer->layer;
+                    new_renderer.opacity = orig_renderer->opacity;
+                    new_renderer.pixel_perfect = orig_renderer->pixel_perfect;
+                    new_renderer.tint_r = orig_renderer->tint_r;
+                    new_renderer.tint_g = orig_renderer->tint_g;
+                    new_renderer.tint_b = orig_renderer->tint_b;
+                    new_renderer.tint_a = orig_renderer->tint_a;
+                }
+
+                engine::Logger::instance().info("Runtime",
+                    "Created fragment entity with %d pixels at (%.1f, %.1f)",
+                    frag.pixel_count, new_transform.x, new_transform.y);
+            }
+        }
+    }
+
+    m_pending_split_checks.clear();
 }
 
 void RuntimeContext::init_scripts() {

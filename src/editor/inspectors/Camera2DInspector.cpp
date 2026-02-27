@@ -28,7 +28,7 @@ bool Camera2DInspector::draw(engine::render::Camera2D& camera) {
 
     // Zoom controls with visual feedback
     ImGui::Text("Zoom: %.2f", camera.zoom);
-    if (ImGui::SliderFloat("##Zoom", &camera.zoom, camera.min_zoom, camera.max_zoom, "%.2f")) {
+    if (ImGui::DragFloat("##Zoom", &camera.zoom, 0.01f, camera.min_zoom, camera.max_zoom, "%.2f")) {
         changed = true;
     }
 
@@ -67,7 +67,7 @@ bool Camera2DInspector::draw(engine::render::Camera2D& camera) {
 
     // Smoothing
     ImGui::Text("Smoothing");
-    if (ImGui::SliderFloat("##Smoothing", &camera.smoothing, 0.0f, 20.0f, "%.1f")) {
+    if (ImGui::DragFloat("##Smoothing", &camera.smoothing, 0.1f, 0.0f, 20.0f, "%.1f")) {
         changed = true;
     }
     if (ImGui::IsItemHovered()) {

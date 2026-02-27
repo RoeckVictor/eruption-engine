@@ -1,8 +1,10 @@
 #pragma once
 
 #include "engine/core/System.h"
+#include "engine/physics/PixelGridTriangulation.h"
 #include <entt/fwd.hpp>
 #include <box2d/id.h>
+#include <unordered_map>
 
 namespace engine { struct Transform; }
 
@@ -38,6 +40,10 @@ public:
 private:
     entt::registry* m_registry = nullptr;
     physics::PhysicsWorld* m_physics_world = nullptr;
+    simulation::IPixelGridLoader* m_pixel_grid_loader = nullptr;
+
+    /// Cached triangulated meshes for DynamicColliders
+    std::unordered_map<entt::entity, physics::PixelGridMesh> m_collider_meshes;
 
     // --- Body Management ---
 
@@ -56,6 +62,9 @@ private:
     void create_circle_collider(b2BodyId body, physics::CircleCollider& collider, const Transform& transform);
     void create_capsule_collider(b2BodyId body, physics::CapsuleCollider& collider, const Transform& transform);
     void create_dynamic_collider(entt::entity entity, b2BodyId body, physics::DynamicCollider& collider);
+
+    /// Destroy existing shapes for a DynamicCollider
+    void destroy_dynamic_collider_shapes(physics::DynamicCollider& collider);
 
     // --- DynamicCollider Triangulation ---
 

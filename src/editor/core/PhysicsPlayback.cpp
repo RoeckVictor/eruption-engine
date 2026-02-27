@@ -5,6 +5,8 @@
 #include "engine/physics/PhysicsWorld.h"
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
+#include "engine/physics/PixelGridTriangulation.h"
+#include "engine/simulation/PixelGridComponent.h"
 #include <box2d/box2d.h>
 #include <algorithm>
 #include <cmath>
@@ -12,8 +14,9 @@
 
 namespace editor {
 
-PhysicsPlayback::PhysicsPlayback(entt::registry& registry, engine::physics::PhysicsWorld& world)
-    : m_registry(registry), m_world(world) {}
+PhysicsPlayback::PhysicsPlayback(entt::registry& registry, engine::physics::PhysicsWorld& world,
+                                 engine::simulation::IPixelGridLoader* pixel_grid_loader)
+    : m_registry(registry), m_world(world), m_pixel_grid_loader(pixel_grid_loader) {}
 
 void PhysicsPlayback::init_bodies() {
     int body_count = 0;
@@ -232,6 +235,180 @@ void PhysicsPlayback::attach_collider_shapes(entt::entity entity, engine::physic
             cap.shape_ids.push_back(b2CreateCircleShape(rb.body_id, &shape_def, &bottom_circle));
         }
     }
+
+    // DynamicCollider - defer to update_dynamic_colliders() since pixel grid may not be loaded yet
+    // Just mark as needing generation
+    if (m_registry.all_of<engine::physics::DynamicCollider>(entity)) {
+        auto& dynamic = m_registry.get<engine::physics::DynamicCollider>(entity);
+        if (dynamic.enabled) {
+            // Will be processed in update_dynamic_colliders()
+            dynamic.generated = false;
+        }
+    }
+}
+
+void PhysicsPlayback::update_dynamic_colliders() {
+    auto view = m_registry.view<engine::physics::Rigidbody, engine::physics::DynamicCollider,
+                                 engine::simulation::PixelGridComponent>();
+
+    for (auto entity : view) {
+        auto& rb = view.get<engine::physics::Rigidbody>(entity);
+        auto& collider = view.get<engine::physics::DynamicCollider>(entity);
+        auto& grid_comp = view.get<engine::simulation::PixelGridComponent>(entity);
+
+        if (!b2Body_IsValid(rb.body_id) || !collider.enabled || !grid_comp.loaded) {
+            continue;
+        }
+
+        // Check if regeneration is needed
+        if (!collider.generated && !collider.shape_ids.empty()) {
+            // Destroy old shapes before regenerating
+            destroy_dynamic_collider_shapes(collider);
+            m_collider_meshes.erase(entity);
+        }
+
+        // Skip if already generated
+        if (collider.generated && !collider.shape_ids.empty()) {
+            continue;
+        }
+
+        // Generate and attach collider
+        attach_dynamic_collider(entity, rb);
+    }
+}
+
+void PhysicsPlayback::attach_dynamic_collider(entt::entity entity, engine::physics::Rigidbody& rb) {
+    auto* collider = m_registry.try_get<engine::physics::DynamicCollider>(entity);
+    if (!collider || !collider->enabled) return;
+
+    // Triangulate if needed
+    if (!collider->generated) {
+        triangulate_pixel_grid(entity, *collider);
+    }
+
+    if (!collider->generated) return;
+
+    // Get cached mesh
+    auto mesh_it = m_collider_meshes.find(entity);
+    if (mesh_it == m_collider_meshes.end() || mesh_it->second.triangles.empty()) {
+        engine::Logger::instance().info("PhysicsPlayback", "DynamicCollider has no geometry");
+        return;
+    }
+
+    const auto& mesh = mesh_it->second;
+
+    // Get pixel grid component for origin offset
+    auto* grid_comp = m_registry.try_get<engine::simulation::PixelGridComponent>(entity);
+    if (!grid_comp) return;
+
+    // Get transform for scaling
+    auto* transform = m_registry.try_get<engine::Transform>(entity);
+    float scale_x = transform ? std::abs(transform->world_scale_x) : 1.0f;
+    float scale_y = transform ? std::abs(transform->world_scale_y) : 1.0f;
+
+    // Create shape definition
+    b2ShapeDef shape_def = b2DefaultShapeDef();
+    shape_def.density = collider->density;
+    shape_def.material.friction = collider->friction;
+    shape_def.material.restitution = collider->restitution;
+    shape_def.isSensor = collider->is_trigger;
+
+    // Set up coordinate transform parameters
+    engine::physics::GridToLocalParams params;
+    params.origin_x = static_cast<float>(grid_comp->origin_x);
+    params.origin_y = static_cast<float>(grid_comp->origin_y);
+    params.grid_height = static_cast<float>(grid_comp->height);
+    params.scale_x = scale_x;
+    params.scale_y = scale_y;
+    params.offset_x = collider->offset_x;
+    params.offset_y = collider->offset_y;
+
+    // Create a Box2D polygon for each triangle
+    collider->shape_ids.reserve(mesh.triangles.size());
+
+    for (const auto& tri : mesh.triangles) {
+        auto [lx_a, ly_a] = engine::physics::PixelGridTriangulation::grid_to_local(tri.a, params);
+        auto [lx_b, ly_b] = engine::physics::PixelGridTriangulation::grid_to_local(tri.b, params);
+        auto [lx_c, ly_c] = engine::physics::PixelGridTriangulation::grid_to_local(tri.c, params);
+
+        b2Vec2 verts[3] = {
+            m_world.pixels_to_meters(lx_a, ly_a),
+            m_world.pixels_to_meters(lx_b, ly_b),
+            m_world.pixels_to_meters(lx_c, ly_c)
+        };
+
+        // Check winding and ensure CCW
+        if (engine::physics::PixelGridTriangulation::is_clockwise(
+                verts[0].x, verts[0].y, verts[1].x, verts[1].y, verts[2].x, verts[2].y)) {
+            std::swap(verts[1], verts[2]);
+        }
+
+        // Skip degenerate triangles
+        float area = engine::physics::PixelGridTriangulation::triangle_area(
+            verts[0].x, verts[0].y, verts[1].x, verts[1].y, verts[2].x, verts[2].y);
+        if (area < 1e-6f) continue;
+
+        b2Hull hull = b2ComputeHull(verts, 3);
+        if (hull.count < 3) continue;
+
+        b2Polygon polygon = b2MakePolygon(&hull, 0.0f);
+        b2ShapeId shape_id = b2CreatePolygonShape(rb.body_id, &shape_def, &polygon);
+        collider->shape_ids.push_back(shape_id);
+    }
+
+    collider->triangle_count = static_cast<int>(collider->shape_ids.size());
+    engine::Logger::instance().info("PhysicsPlayback", "Created DynamicCollider with %d shapes",
+                                    collider->triangle_count);
+}
+
+void PhysicsPlayback::triangulate_pixel_grid(entt::entity entity, engine::physics::DynamicCollider& collider) {
+    auto* grid_comp = m_registry.try_get<engine::simulation::PixelGridComponent>(entity);
+    if (!grid_comp || !grid_comp->loaded) return;
+
+    const engine::simulation::LoadedPixelGridData* loaded_grid = nullptr;
+    if (m_pixel_grid_loader) {
+        loaded_grid = m_pixel_grid_loader->get_loaded_grid_data(entity);
+    }
+
+    if (!loaded_grid || loaded_grid->material_ids.empty()) {
+        engine::Logger::instance().warning("PhysicsPlayback", "DynamicCollider: No pixel data");
+        collider.generated = true;
+        collider.triangle_count = 0;
+        return;
+    }
+
+    engine::Logger::instance().info("PhysicsPlayback", "Triangulating pixel grid (%dx%d)",
+                                    loaded_grid->width, loaded_grid->height);
+
+    // Use shared triangulation utility
+    auto result = engine::physics::PixelGridTriangulation::triangulate(
+        loaded_grid, collider.simplification, collider.min_contour_area);
+
+    if (result.triangles.empty()) {
+        engine::Logger::instance().info("PhysicsPlayback", "DynamicCollider: No geometry generated");
+        collider.generated = true;
+        collider.triangle_count = 0;
+        return;
+    }
+
+    engine::Logger::instance().info("PhysicsPlayback", "Generated %zu triangles",
+                                    result.triangles.size());
+
+    // Cache the mesh
+    m_collider_meshes[entity] = std::move(result);
+
+    collider.generated = true;
+    collider.triangle_count = static_cast<int>(m_collider_meshes[entity].triangles.size());
+}
+
+void PhysicsPlayback::destroy_dynamic_collider_shapes(engine::physics::DynamicCollider& collider) {
+    for (auto shape_id : collider.shape_ids) {
+        if (b2Shape_IsValid(shape_id)) {
+            b2DestroyShape(shape_id, true);
+        }
+    }
+    collider.shape_ids.clear();
+    collider.triangle_count = 0;
 }
 
 void PhysicsPlayback::sync_to_transforms() {

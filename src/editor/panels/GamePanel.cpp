@@ -2,12 +2,16 @@
 #include "editor/core/EditorContext.h"
 #include "editor/core/EditorComponents.h"
 #include "editor/core/RuntimeContext.h"
+#include "editor/core/SimulationPlayback.h"
 #include "editor/render/SceneRenderUtils.h"
 #include "engine/core/Transform.h"
 #include "engine/core/ScreenRect.h"
+#include "engine/core/Logger.h"
 #include "engine/render/Camera2D.h"
 #include "engine/render/Image.h"
 #include "engine/render/Text.h"
+#include "engine/rhi/RHIDevice.h"
+#include "engine/rhi/RHIContext.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -23,33 +27,106 @@ GamePanel::GamePanel(EditorContext& context)
 {
 }
 
-GamePanel::~GamePanel() = default;
+GamePanel::~GamePanel() {
+    destroy_framebuffer();
+}
 
 void GamePanel::on_open() {}
-void GamePanel::on_close() {}
+
+void GamePanel::on_close() {
+    destroy_framebuffer();
+}
+
+void GamePanel::create_framebuffer(int width, int height) {
+    m_framebuffer_width = width;
+    m_framebuffer_height = height;
+
+    auto* device = engine::rhi::get_current_device();
+    if (!device) {
+        engine::Logger::instance().error("GamePanel", "No RHI device available");
+        m_resize_debouncer.set_failed();
+        return;
+    }
+
+    m_framebuffer = device->create_simple_framebuffer(width, height,
+                                                       engine::rhi::TextureFormat::RGBA8,
+                                                       false);  // No depth needed for particles
+    if (!m_framebuffer || !m_framebuffer->valid()) {
+        engine::Logger::instance().error("GamePanel", "Failed to create framebuffer");
+        m_framebuffer.reset();
+        m_resize_debouncer.set_failed();
+    }
+}
+
+void GamePanel::destroy_framebuffer() {
+    m_framebuffer.reset();
+    m_framebuffer_width = 0;
+    m_framebuffer_height = 0;
+}
+
+void GamePanel::render_particles_to_framebuffer(ImVec2 panel_size) {
+    if (!m_framebuffer) return;
+
+    auto* ctx = engine::rhi::get_current_context();
+    if (!ctx) return;
+
+    auto* runtime = m_context.runtime();
+    if (!runtime || !runtime->sim_playback()) return;
+
+    auto* registry = m_context.registry();
+    if (!registry) return;
+
+    entt::entity cam_entity = find_camera_entity();
+    if (cam_entity == entt::null) return;
+
+    auto& cam_transform = registry->get<engine::Transform>(cam_entity);
+    auto& cam2d = registry->get<engine::render::Camera2D>(cam_entity);
+
+    // Bind framebuffer and set viewport
+    ctx->bind_framebuffer(m_framebuffer.get());
+    ctx->set_viewport(0, 0, m_framebuffer_width, m_framebuffer_height);
+
+    // Clear with scene background color
+    const auto& bg = m_context.scene_settings().bg_color;
+    ctx->clear(bg[0], bg[1], bg[2], 1.0f);
+
+    // Render particles using the game camera
+    engine::render::Camera2D particle_camera;
+    particle_camera.x = cam_transform.world_x;
+    particle_camera.y = cam_transform.world_y;
+    particle_camera.zoom = cam2d.zoom;
+
+    runtime->sim_playback()->render_particles(
+        particle_camera,
+        panel_size.x,
+        panel_size.y);
+
+    ctx->bind_framebuffer(nullptr);
+}
 
 void GamePanel::on_gui() {
     ImVec2 avail = ImGui::GetContentRegionAvail();
     if (avail.x <= 0 || avail.y <= 0) return;
 
+    int width = static_cast<int>(avail.x);
+    int height = static_cast<int>(avail.y);
+
     ImVec2 panel_pos = ImGui::GetCursorScreenPos();
     ImVec2 panel_size = avail;
 
-    // Draw background using scene settings
-    const auto& bg = m_context.scene_settings().bg_color;
-    uint8_t bg_r = static_cast<uint8_t>(bg[0] * 255.0f);
-    uint8_t bg_g = static_cast<uint8_t>(bg[1] * 255.0f);
-    uint8_t bg_b = static_cast<uint8_t>(bg[2] * 255.0f);
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
-    draw_list->AddRectFilled(panel_pos,
-        ImVec2(panel_pos.x + panel_size.x, panel_pos.y + panel_size.y),
-        IM_COL32(bg_r, bg_g, bg_b, 255));
-
-    // Reserve the space so ImGui knows it's used
-    ImGui::Dummy(panel_size);
 
     if (!m_context.is_playing()) {
-        // Centered message when not playing
+        // Draw background and show message when not playing
+        const auto& bg = m_context.scene_settings().bg_color;
+        uint8_t bg_r = static_cast<uint8_t>(bg[0] * 255.0f);
+        uint8_t bg_g = static_cast<uint8_t>(bg[1] * 255.0f);
+        uint8_t bg_b = static_cast<uint8_t>(bg[2] * 255.0f);
+        draw_list->AddRectFilled(panel_pos,
+            ImVec2(panel_pos.x + panel_size.x, panel_pos.y + panel_size.y),
+            IM_COL32(bg_r, bg_g, bg_b, 255));
+        ImGui::Dummy(panel_size);
+
         const char* msg = "Enter Play Mode to see game view";
         ImVec2 text_size = ImGui::CalcTextSize(msg);
         ImVec2 text_pos(
@@ -63,6 +140,15 @@ void GamePanel::on_gui() {
     // Find camera entity
     entt::entity cam_entity = find_camera_entity();
     if (cam_entity == entt::null) {
+        const auto& bg = m_context.scene_settings().bg_color;
+        uint8_t bg_r = static_cast<uint8_t>(bg[0] * 255.0f);
+        uint8_t bg_g = static_cast<uint8_t>(bg[1] * 255.0f);
+        uint8_t bg_b = static_cast<uint8_t>(bg[2] * 255.0f);
+        draw_list->AddRectFilled(panel_pos,
+            ImVec2(panel_pos.x + panel_size.x, panel_pos.y + panel_size.y),
+            IM_COL32(bg_r, bg_g, bg_b, 255));
+        ImGui::Dummy(panel_size);
+
         const char* msg = "No active Camera2D in scene";
         ImVec2 text_size = ImGui::CalcTextSize(msg);
         ImVec2 text_pos(
@@ -81,6 +167,39 @@ void GamePanel::on_gui() {
         runtime->set_viewport(vp_x, vp_y, panel_size.x, panel_size.y);
     }
 
+    // Debounced framebuffer resize for particle rendering
+    if (m_resize_debouncer.should_resize(m_framebuffer_width, m_framebuffer_height,
+                                          width, height, ImGui::GetIO().DeltaTime)) {
+        destroy_framebuffer();
+        create_framebuffer(m_resize_debouncer.target_width(), m_resize_debouncer.target_height());
+    }
+
+    // Render particles to framebuffer and display it
+    if (m_framebuffer && m_context.runtime() && m_context.runtime()->sim_playback()) {
+        render_particles_to_framebuffer(panel_size);
+
+        // Display the framebuffer texture as the background
+        ImTextureID texture_id = (ImTextureID)(uintptr_t)(m_framebuffer->color_attachment(0)->native_handle());
+
+        // UV coordinates depend on texture origin convention
+        auto* device = engine::rhi::get_current_device();
+        bool flip_y = device && !device->uv_origin_top_left();
+        ImVec2 uv0 = flip_y ? ImVec2(0, 1) : ImVec2(0, 0);
+        ImVec2 uv1 = flip_y ? ImVec2(1, 0) : ImVec2(1, 1);
+        ImGui::Image(texture_id, panel_size, uv0, uv1);
+    } else {
+        // No framebuffer - draw background and reserve space
+        const auto& bg = m_context.scene_settings().bg_color;
+        uint8_t bg_r = static_cast<uint8_t>(bg[0] * 255.0f);
+        uint8_t bg_g = static_cast<uint8_t>(bg[1] * 255.0f);
+        uint8_t bg_b = static_cast<uint8_t>(bg[2] * 255.0f);
+        draw_list->AddRectFilled(panel_pos,
+            ImVec2(panel_pos.x + panel_size.x, panel_pos.y + panel_size.y),
+            IM_COL32(bg_r, bg_g, bg_b, 255));
+        ImGui::Dummy(panel_size);
+    }
+
+    // Render game view overlays (world entities, screen UI) on top of the framebuffer
     render_game_view(panel_pos, panel_size);
 }
 

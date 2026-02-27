@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/core/System.h"
+#include "engine/simulation/IPixelGridLoader.h"
 #include <entt/fwd.hpp>
 #include <unordered_map>
 #include <vector>
@@ -22,6 +23,9 @@ struct LoadedPixelGrid {
 
     bool has_color_layer = false;
     bool has_material_layer = false;
+
+    int origin_x = 0;
+    int origin_y = 0;
 };
 
 /// Loads .pxg files for entities with PixelGridComponent.
@@ -33,7 +37,7 @@ struct LoadedPixelGrid {
 ///
 /// Execution Order: Runs in update phase (not fixed_update) since file I/O
 /// doesn't need fixed timestep.
-class PixelGridLoaderSystem : public System {
+class PixelGridLoaderSystem : public System, public simulation::IPixelGridLoader {
 public:
     const char* name() const override { return "PixelGridLoaderSystem"; }
     bool init(Engine& engine) override;
@@ -42,9 +46,15 @@ public:
     /// Get loaded pixel grid data for an entity (or nullptr if not loaded)
     const LoadedPixelGrid* get_loaded_grid(entt::entity entity) const;
 
+    /// Implementation of IPixelGridLoader interface
+    const simulation::LoadedPixelGridData* get_loaded_grid_data(entt::entity entity) const override;
+
 private:
     entt::registry* m_registry = nullptr;
     std::unordered_map<entt::entity, LoadedPixelGrid> m_loaded_grids;
+
+    /// Cached converted data for the interface
+    mutable std::unordered_map<entt::entity, simulation::LoadedPixelGridData> m_interface_cache;
 
     /// Load a .pxg file and store in cache
     void load_grid_for_entity(entt::entity entity);

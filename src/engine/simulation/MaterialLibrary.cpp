@@ -41,7 +41,7 @@ bool MaterialLibrary::parse_json(const std::string& json_str) {
 
         const auto& materials_array = j["materials"];
         m_materials.clear();
-        m_materials.resize(256);  // Reserve full material ID space
+        m_materials.resize(256);
         m_name_to_id.clear();
 
         for (const auto& mat_json : materials_array) {
@@ -172,6 +172,8 @@ std::vector<uint32_t> MaterialLibrary::build_color_palette() const {
     for (size_t i = 0; i < m_materials.size(); i++) {
         palette[i] = m_materials[i].color;
     }
+    // Material ID 0 (air/empty) must always be fully transparent
+    palette[0] = 0x00000000;
     return palette;
 }
 
@@ -181,8 +183,6 @@ void MaterialLibrary::clear() {
     m_materials.clear();
     m_name_to_id.clear();
 }
-
-// ---- MaterialLibraryRegistry ----
 
 bool MaterialLibraryRegistry::load_library(const std::string& name, const std::string& path) {
     auto library = std::make_unique<MaterialLibrary>();

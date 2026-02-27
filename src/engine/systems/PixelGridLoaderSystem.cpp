@@ -78,10 +78,14 @@ void PixelGridLoaderSystem::load_grid_for_entity(entt::entity entity) {
     loaded_grid.material_ids = std::move(parsed.material_ids);
     loaded_grid.has_color_layer = parsed.has_color_layer;
     loaded_grid.has_material_layer = parsed.has_material_layer;
+    loaded_grid.origin_x = parsed.origin_x;
+    loaded_grid.origin_y = parsed.origin_y;
 
     // Update component
     grid_comp->width = parsed.width;
     grid_comp->height = parsed.height;
+    grid_comp->origin_x = parsed.origin_x;
+    grid_comp->origin_y = parsed.origin_y;
     grid_comp->loaded = true;
 
     // If entity has a DynamicCollider, mark it for regeneration
@@ -106,6 +110,34 @@ const LoadedPixelGrid* PixelGridLoaderSystem::get_loaded_grid(entt::entity entit
         return &it->second;
     }
     return nullptr;
+}
+
+const simulation::LoadedPixelGridData* PixelGridLoaderSystem::get_loaded_grid_data(entt::entity entity) const {
+    auto it = m_loaded_grids.find(entity);
+    if (it == m_loaded_grids.end()) {
+        return nullptr;
+    }
+
+    // Check cache first
+    auto cache_it = m_interface_cache.find(entity);
+    if (cache_it != m_interface_cache.end()) {
+        return &cache_it->second;
+    }
+
+    // Convert and cache
+    const auto& src = it->second;
+    simulation::LoadedPixelGridData data;
+    data.width = src.width;
+    data.height = src.height;
+    data.color_rgba = src.color_rgba;
+    data.material_ids = src.material_ids;
+    data.has_color_layer = src.has_color_layer;
+    data.has_material_layer = src.has_material_layer;
+    data.origin_x = src.origin_x;
+    data.origin_y = src.origin_y;
+
+    m_interface_cache[entity] = std::move(data);
+    return &m_interface_cache[entity];
 }
 
 } // namespace engine

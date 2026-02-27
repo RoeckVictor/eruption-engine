@@ -298,14 +298,13 @@ void SimulationPlayback::update(uint64_t frame_count) {
             }
         }
 
-        // --- Particle buffer maintenance ---
         {
             PROFILE_SCOPE("Sim::ParticleMaintenance");
             state->particle_buffer.reclaim_dead();
+            state->particle_buffer.reset_dead_counter();
             state->particle_buffer.flush_spawns();
         }
 
-        // --- Stamp rigidbody colliders into the grid ---
         if (m_physics_world) {
             PROFILE_SCOPE("Sim::StampColliders");
             state->collider_stamper.stamp_colliders(
@@ -314,13 +313,11 @@ void SimulationPlayback::update(uint64_t frame_count) {
                 &state->particle_buffer);
         }
 
-        // --- Run CA simulation ---
         {
             PROFILE_SCOPE("Sim::MargolusStep");
             state->simulation.simulate(state->pixel_grid, m_render_context);
         }
 
-        // --- Extract marked pixels and spawn as particles ---
         if (m_physics_world) {
             PROFILE_SCOPE("Sim::ExtractParticles");
             state->collision_extractor.extract(state->pixel_grid, m_render_context);
@@ -328,7 +325,6 @@ void SimulationPlayback::update(uint64_t frame_count) {
                 state->collider_stamper, state->particle_buffer);
         }
 
-        // --- Update particles (physics, collision, settling) ---
         {
             PROFILE_SCOPE("Sim::ParticleUpdate");
             state->particle_simulation.update(
@@ -336,20 +332,17 @@ void SimulationPlayback::update(uint64_t frame_count) {
                 m_render_context, 1.0f / 60.0f);
         }
 
-        // --- Clear stamped colliders from grid ---
         if (m_physics_world) {
             PROFILE_SCOPE("Sim::ClearColliders");
             state->collider_stamper.clear_colliders(state->pixel_grid);
         }
 
-        // --- Reintegrate settled particles back into the grid ---
         {
             PROFILE_SCOPE("Sim::ParticleReintegrate");
             state->particle_simulation.reintegrate(
                 state->particle_buffer, state->pixel_grid, m_render_context);
         }
 
-        // Convert SSBO -> RGBA8 color texture via palette lookup compute shader
         {
             PROFILE_SCOPE("Sim::ColorConversion");
             m_color_shader.use();
@@ -366,7 +359,6 @@ void SimulationPlayback::update(uint64_t frame_count) {
             m_render_context.dispatch_compute(groups_x, groups_y, 1, engine::rhi::BarrierFlags::TextureRead);
         }
 
-        // Update terrain colliders from settled pixels
         if (state->terrain_colliders && m_registry.valid(state->entity)) {
             PROFILE_SCOPE("Sim::TerrainColliders");
             engine::physics::TerrainColliderManager::EntityTransform et;

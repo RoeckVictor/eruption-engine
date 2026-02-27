@@ -1,6 +1,7 @@
 #include "ViewportPanel.h"
 #include "editor/core/EditorContext.h"
 #include "editor/core/EditorComponents.h"
+#include "editor/core/EditorPixelGridLoader.h"
 #include "editor/core/RuntimeContext.h"
 #include "editor/core/SimulationPlayback.h"
 #include "editor/render/SceneRenderUtils.h"
@@ -161,20 +162,18 @@ void ViewportPanel::render_scene() {
     render_entities();
 
     // Render particles from rigidbody-simulation collisions
+    // Use the editor viewport camera (same as grid/entity rendering) for consistency
     auto* runtime = m_context.runtime();
     if (runtime && runtime->state() == PlayState::Playing && runtime->sim_playback()) {
-        auto* registry = m_context.registry();
-        if (registry) {
-            auto camera_view = registry->view<engine::render::Camera2D>();
-            if (!camera_view.empty()) {
-                auto entity = camera_view.front();
-                auto& camera = camera_view.get<engine::render::Camera2D>(entity);
-                runtime->sim_playback()->render_particles(
-                    camera,
-                    static_cast<float>(m_viewport_width),
-                    static_cast<float>(m_viewport_height));
-            }
-        }
+        auto& vp_camera = m_context.viewport().camera;
+        engine::render::Camera2D particle_camera;
+        particle_camera.x = vp_camera.x;
+        particle_camera.y = vp_camera.y;
+        particle_camera.zoom = vp_camera.zoom;
+        runtime->sim_playback()->render_particles(
+            particle_camera,
+            static_cast<float>(m_viewport_width),
+            static_cast<float>(m_viewport_height));
     }
 
     ctx->bind_framebuffer(nullptr);
@@ -530,6 +529,64 @@ void ViewportPanel::render_debug_overlays(ImDrawList* draw_list, const Coordinat
                 side_wy2 = bot_wy - perp_y * rad;
                 draw_list->AddLine(wts(side_wx1, side_wy1),
                                    wts(side_wx2, side_wy2), col, 1.5f);
+            }
+        }
+
+        // DynamicCollider (uses triangulated shapes like other colliders)
+        {
+            auto view = registry->view<engine::Transform, engine::physics::DynamicCollider>();
+            for (auto entity : view) {
+                if (!should_draw(vis.colliders, entity)) continue;
+                auto& t = view.get<engine::Transform>(entity);
+                auto& dc = view.get<engine::physics::DynamicCollider>(entity);
+                if (!dc.enabled) continue;
+
+                // Get or generate debug contours
+                auto& loader = m_context.pixel_grid_loader();
+                const DebugContours* debug = loader.get_debug_contours(entity);
+                if (!debug) {
+                    // Generate contours if not cached
+                    loader.regenerate_debug_contours(entity, dc.simplification);
+                    debug = loader.get_debug_contours(entity);
+                }
+                if (!debug || debug->contours.empty()) continue;
+
+                ImU32 col = dc.is_trigger ? trigger_color : collider_color;
+
+                float abs_sx = std::abs(t.world_scale_x);
+                float abs_sy = std::abs(t.world_scale_y);
+                float e_rot = t.world_rotation * engine::DEG_TO_RAD;
+                float e_cos = std::cos(e_rot);
+                float e_sin = std::sin(e_rot);
+
+                // Grid height for Y-flip (grid Y=0 at top, world Y increases upward)
+                float grid_height = static_cast<float>(debug->height);
+                float origin_x = static_cast<float>(debug->origin_x);
+                float origin_y = static_cast<float>(debug->origin_y);
+
+                for (const auto& contour : debug->contours) {
+                    if (contour.vertices.size() < 3) continue;
+
+                    std::vector<ImVec2> screen_pts;
+                    screen_pts.reserve(contour.vertices.size());
+
+                    for (const auto& v : contour.vertices) {
+                        // Convert grid coords to local coords (matching physics formula)
+                        // Grid Y=0 is at top, so flip: local_y = (height - grid_y - origin_y)
+                        float lx = (v.x - origin_x) * abs_sx + dc.offset_x * t.world_scale_x;
+                        float ly = (grid_height - v.y - origin_y) * abs_sy + dc.offset_y * t.world_scale_y;
+
+                        // Apply entity rotation and translate to world position
+                        float wx = t.world_x + lx * e_cos - ly * e_sin;
+                        float wy = t.world_y + lx * e_sin + ly * e_cos;
+
+                        screen_pts.push_back(wts(wx, wy));
+                    }
+
+                    draw_list->AddPolyline(screen_pts.data(),
+                                           static_cast<int>(screen_pts.size()),
+                                           col, ImDrawFlags_Closed, 1.5f);
+                }
             }
         }
     }

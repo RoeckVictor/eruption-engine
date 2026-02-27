@@ -11,6 +11,7 @@
 #include "editor/core/RuntimeContext.h"
 #include "editor/core/EditorComponents.h"
 #include "editor/core/CoordinateUtils.h"
+#include "editor/core/EditorPixelGridLoader.h"
 
 #include <imgui.h>
 #include <entt/entt.hpp>
@@ -91,15 +92,54 @@ inline void draw_selection_outline(ImDrawList* draw_list, const PixelGridQuad& q
     );
 }
 
-// Resolve the texture handle for a pixel grid entity.
-// Prefers the live simulation texture (during play mode), falling back to the
-// cached static texture loaded from the .pxg file on disk.
 inline void* resolve_grid_texture(entt::entity entity,
                                    const std::string& pxg_path,
                                    RuntimeContext* runtime,
-                                   PixelGridTextureCache& cache) {
+                                   PixelGridTextureCache& cache,
+                                   EditorPixelGridLoader* loader = nullptr) {
+    // First, check for live simulation texture (SimSurface during play mode)
     void* tex = runtime ? runtime->get_sim_texture(entity) : nullptr;
-    return tex ? tex : cache.get(entity, pxg_path);
+    if (tex) return tex;
+
+    // Check if loader has dirty pixel data that needs texture update
+    if (loader && loader->is_dirty(entity)) {
+        const auto* grid = loader->get_loaded_grid(entity);
+        if (grid && grid->width > 0 && grid->height > 0) {
+            void* updated_tex = nullptr;
+
+            if (grid->has_color_layer && !grid->color_rgba.empty()) {
+                updated_tex = cache.update_from_data(entity, grid->width, grid->height, grid->color_rgba);
+            } else if (grid->has_material_layer && !grid->material_ids.empty()) {
+                updated_tex = cache.update_from_materials(entity, grid->width, grid->height, grid->material_ids);
+            }
+
+            if (updated_tex) {
+                loader->clear_dirty(entity);
+                return updated_tex;
+            }
+        }
+    }
+
+    if (loader && pxg_path.empty()) {
+        const auto* grid = loader->get_loaded_grid(entity);
+        if (grid && grid->width > 0 && grid->height > 0) {
+            // Check if we already have a cached texture for this entity
+            void* cached = cache.get(entity, "");
+            if (cached) return cached;
+
+            // First time seeing this fragment - create texture
+            void* updated_tex = nullptr;
+            if (grid->has_color_layer && !grid->color_rgba.empty()) {
+                updated_tex = cache.update_from_data(entity, grid->width, grid->height, grid->color_rgba);
+            } else if (grid->has_material_layer && !grid->material_ids.empty()) {
+                updated_tex = cache.update_from_materials(entity, grid->width, grid->height, grid->material_ids);
+            }
+            if (updated_tex) return updated_tex;
+        }
+    }
+
+    // Fall back to cached static texture from .pxg file
+    return cache.get(entity, pxg_path);
 }
 
 inline ImU32 compute_image_tint(const engine::render::Image& image) {

@@ -2,8 +2,10 @@
 
 #include "Panel.h"
 #include "editor/render/PanelSceneRenderer.h"
+#include "engine/rhi/RHIFramebuffer.h"
 #include <imgui.h>
 #include <entt/entt.hpp>
+#include <memory>
 #include <string>
 
 namespace editor {
@@ -23,6 +25,9 @@ public:
     void on_gui() override;
 
 private:
+    void create_framebuffer(int width, int height);
+    void destroy_framebuffer();
+    void render_particles_to_framebuffer(ImVec2 panel_size);
     void render_game_view(ImVec2 panel_pos, ImVec2 panel_size);
 
     entt::entity find_camera_entity() const;
@@ -35,6 +40,11 @@ private:
 
     EditorContext& m_context;
     PanelSceneRenderer m_scene_renderer;
+    FramebufferResizeDebouncer m_resize_debouncer;
+
+    std::unique_ptr<engine::rhi::RHIFramebuffer> m_framebuffer;
+    int m_framebuffer_width = 0;
+    int m_framebuffer_height = 0;
 };
 
 }

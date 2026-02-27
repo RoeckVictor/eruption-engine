@@ -169,8 +169,8 @@ void PixelBrush::on_inspector_gui(nlohmann::json& properties) {
     }
 
     ImGui::Separator();
-    ImGui::SliderInt("Brush Radius", &m_brush_radius, m_min_radius, m_max_radius);
-    ImGui::SliderInt("Material ID", &m_material_id, 1, 255);
+    ImGui::DragInt("Brush Radius", &m_brush_radius, 1, m_min_radius, m_max_radius);
+    ImGui::DragInt("Material ID", &m_material_id, 1, 1, 255);
 
     ImGui::Separator();
     ImGui::Text("Controls:");

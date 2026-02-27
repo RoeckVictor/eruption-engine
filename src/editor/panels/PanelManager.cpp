@@ -229,9 +229,9 @@ void PanelManager::setup_default_layout() {
     ImGui::DockBuilderDockWindow("Screen", dock_center);
     ImGui::DockBuilderDockWindow("Prefab Editor", dock_center);
     ImGui::DockBuilderDockWindow("Project Hub", dock_center);
-    ImGui::DockBuilderDockWindow("Viewport", dock_center);  // Viewport last to be the active tab
+    ImGui::DockBuilderDockWindow("Viewport", dock_center);
     ImGui::DockBuilderDockWindow("Inspector", dock_right);
-    ImGui::DockBuilderDockWindow("Asset Preview", dock_right);  // Tabbed with Inspector
+    ImGui::DockBuilderDockWindow("Asset Preview", dock_right);
     ImGui::DockBuilderDockWindow("File Browser", dock_bottom_left);
     ImGui::DockBuilderDockWindow("Console", dock_bottom_right);
 
@@ -297,8 +297,8 @@ void PanelManager::render_about_dialog() {
 
         // Description
         ImGui::TextWrapped(
-            "Eruption is a 2D falling sand physics game engine with a "
-            "Unity-like editor for creating games with particle simulation."
+            "Eruption is a 2D falling sand physics game engine with an "
+            "editor for creating games with particle simulation."
         );
         ImGui::Spacing();
 

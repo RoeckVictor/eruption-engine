@@ -1,12 +1,13 @@
 #include "Box2DPhysicsSystem.h"
+#include "PixelGridLoaderSystem.h"
 #include "engine/core/Engine.h"
 #include "engine/core/Transform.h"
 #include "engine/core/Logger.h"
 #include "engine/physics/PhysicsWorld.h"
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
+#include "engine/physics/PixelGridTriangulation.h"
 #include "engine/simulation/PixelGridComponent.h"
-#include "PixelGridLoaderSystem.h"
 #include "engine/core/EngineContext.h"
 #include "engine/profiler/Profiler.h"
 #include "editor/core/EditorComponents.h"
@@ -19,6 +20,9 @@ bool Box2DPhysicsSystem::init(Engine& engine) {
     auto& ctx = engine.app_context<EngineContext>();
     m_registry = &ctx.registry;
     m_physics_world = ctx.physics_world;
+
+    // Try to get PixelGridLoaderSystem from subsystem registry (implements IPixelGridLoader)
+    m_pixel_grid_loader = engine.subsystems().get<PixelGridLoaderSystem>();
 
     // Listen for Rigidbody component destruction to clean up Box2D bodies
     m_registry->on_destroy<physics::Rigidbody>().connect<&Box2DPhysicsSystem::on_rigidbody_destroyed>(this);
@@ -36,6 +40,9 @@ void Box2DPhysicsSystem::shutdown() {
     if (m_registry) {
         m_registry->on_destroy<physics::Rigidbody>().disconnect(this);
     }
+
+    // Clear cached meshes
+    m_collider_meshes.clear();
 }
 
 void Box2DPhysicsSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
@@ -145,7 +152,14 @@ void Box2DPhysicsSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
                 continue;
             }
 
-            // Skip if already generated
+            // Check if regeneration is needed (generated was reset to false)
+            if (!collider.generated && !collider.shape_ids.empty()) {
+                // Destroy old shapes before regenerating
+                destroy_dynamic_collider_shapes(collider);
+                m_collider_meshes.erase(entity);
+            }
+
+            // Skip if already generated with valid shapes
             if (collider.generated && !collider.shape_ids.empty()) {
                 continue;
             }
@@ -421,47 +435,147 @@ void Box2DPhysicsSystem::create_capsule_collider(b2BodyId body, physics::Capsule
                              collider.length, collider.radius, collider.shape_ids.size());
 }
 
+void Box2DPhysicsSystem::destroy_dynamic_collider_shapes(physics::DynamicCollider& collider) {
+    for (auto shape_id : collider.shape_ids) {
+        if (b2Shape_IsValid(shape_id)) {
+            b2DestroyShape(shape_id, true);
+        }
+    }
+    collider.shape_ids.clear();
+    collider.triangle_count = 0;
+}
+
 void Box2DPhysicsSystem::create_dynamic_collider(entt::entity entity, b2BodyId body, physics::DynamicCollider& collider) {
-    // Triangulate pixel grid if not already generated
+    // Triangulate pixel grid if not already done
     if (!collider.generated) {
         triangulate_pixel_grid(entity, collider);
     }
 
-    // If triangulation failed or produced no geometry, skip
-    if (!collider.generated || collider.triangle_count == 0) {
+    // If triangulation failed or produced no geometry, mark as generated but with no shapes
+    if (!collider.generated) {
         return;
     }
 
-    // Get pixel grid component to access triangulation results
+    // Get the cached mesh
+    auto mesh_it = m_collider_meshes.find(entity);
+    if (mesh_it == m_collider_meshes.end() || mesh_it->second.triangles.empty()) {
+        Logger::instance().info("Box2DPhysics", "DynamicCollider has no geometry (empty pixel grid)");
+        return;
+    }
+
+    const auto& mesh = mesh_it->second;
+
+    // Get pixel grid component for origin offset
     auto* grid_comp = m_registry->try_get<simulation::PixelGridComponent>(entity);
     if (!grid_comp) {
         return;
     }
 
-    // Known limitation: DynamicCollider polygon shape creation from triangulated
-    // pixel data is not yet implemented. Requires marching squares + polygon
-    // simplification to convert pixel grids into Box2D convex hull shapes.
+    // Get transform for scaling
+    auto* transform = m_registry->try_get<Transform>(entity);
+    float scale_x = transform ? std::abs(transform->scale_x) : 1.0f;
+    float scale_y = transform ? std::abs(transform->scale_y) : 1.0f;
 
-    Logger::instance().info("Box2DPhysics", "Created DynamicCollider with %d triangles", collider.triangle_count);
-    collider.generated = true;
+    // Create shape definition
+    b2ShapeDef shape_def = b2DefaultShapeDef();
+    shape_def.density = collider.density;
+    shape_def.material.friction = collider.friction;
+    shape_def.material.restitution = collider.restitution;
+    shape_def.isSensor = collider.is_trigger;
+
+    // Reserve space for shapes (one per triangle)
+    collider.shape_ids.reserve(mesh.triangles.size());
+
+    // Set up coordinate transform parameters
+    physics::GridToLocalParams params;
+    params.origin_x = static_cast<float>(grid_comp->origin_x);
+    params.origin_y = static_cast<float>(grid_comp->origin_y);
+    params.grid_height = static_cast<float>(grid_comp->height);
+    params.scale_x = scale_x;
+    params.scale_y = scale_y;
+    params.offset_x = collider.offset_x;
+    params.offset_y = collider.offset_y;
+
+    // Create a Box2D polygon for each triangle
+    for (const auto& tri : mesh.triangles) {
+        auto [lx_a, ly_a] = physics::PixelGridTriangulation::grid_to_local(tri.a, params);
+        auto [lx_b, ly_b] = physics::PixelGridTriangulation::grid_to_local(tri.b, params);
+        auto [lx_c, ly_c] = physics::PixelGridTriangulation::grid_to_local(tri.c, params);
+
+        b2Vec2 verts[3] = {
+            m_physics_world->pixels_to_meters(lx_a, ly_a),
+            m_physics_world->pixels_to_meters(lx_b, ly_b),
+            m_physics_world->pixels_to_meters(lx_c, ly_c)
+        };
+
+        // Check winding order and ensure CCW for Box2D
+        if (physics::PixelGridTriangulation::is_clockwise(
+                verts[0].x, verts[0].y, verts[1].x, verts[1].y, verts[2].x, verts[2].y)) {
+            std::swap(verts[1], verts[2]);
+        }
+
+        // Skip degenerate triangles
+        float area = physics::PixelGridTriangulation::triangle_area(
+            verts[0].x, verts[0].y, verts[1].x, verts[1].y, verts[2].x, verts[2].y);
+        if (area < 1e-6f) {
+            continue;
+        }
+
+        b2Hull hull = b2ComputeHull(verts, 3);
+        if (hull.count < 3) {
+            continue;
+        }
+
+        b2Polygon polygon = b2MakePolygon(&hull, 0.0f);
+        b2ShapeId shape_id = b2CreatePolygonShape(body, &shape_def, &polygon);
+        collider.shape_ids.push_back(shape_id);
+    }
+
+    collider.triangle_count = static_cast<int>(collider.shape_ids.size());
+    Logger::instance().info("Box2DPhysics", "Created DynamicCollider with %d shapes from %zu triangles",
+                            collider.triangle_count, mesh.triangles.size());
 }
 
 void Box2DPhysicsSystem::triangulate_pixel_grid(entt::entity entity, physics::DynamicCollider& collider) {
-    // Get the pixel grid component
     auto* grid_comp = m_registry->try_get<simulation::PixelGridComponent>(entity);
     if (!grid_comp || !grid_comp->loaded) {
         return;
     }
 
-    // Known limitation: Pixel grid triangulation is not yet implemented.
-    // Would need PixelGridLoaderSystem pixel data → bool array → marching squares → simplification.
+    const simulation::LoadedPixelGridData* loaded_grid = nullptr;
+    if (m_pixel_grid_loader) {
+        loaded_grid = m_pixel_grid_loader->get_loaded_grid_data(entity);
+    }
+
+    if (!loaded_grid || loaded_grid->material_ids.empty()) {
+        Logger::instance().warning("Box2DPhysics", "DynamicCollider: No pixel data available for entity");
+        collider.generated = true;
+        collider.triangle_count = 0;
+        return;
+    }
 
     Logger::instance().info("Box2DPhysics", "Triangulating pixel grid (%dx%d) with simplification=%.2f",
-                            grid_comp->width, grid_comp->height, collider.simplification);
+                            loaded_grid->width, loaded_grid->height, collider.simplification);
 
-    // Mark as generated (placeholder)
+    // Use shared triangulation utility
+    auto result = physics::PixelGridTriangulation::triangulate(
+        loaded_grid, collider.simplification, collider.min_contour_area);
+
+    if (result.triangles.empty()) {
+        Logger::instance().info("Box2DPhysics", "DynamicCollider: No geometry generated");
+        collider.generated = true;
+        collider.triangle_count = 0;
+        return;
+    }
+
+    Logger::instance().info("Box2DPhysics", "DynamicCollider: Generated %zu triangles",
+                            result.triangles.size());
+
+    // Cache the mesh
+    m_collider_meshes[entity] = std::move(result);
+
     collider.generated = true;
-    collider.triangle_count = 0;  // No actual triangles yet
+    collider.triangle_count = static_cast<int>(m_collider_meshes[entity].triangles.size());
 }
 
 } // namespace engine

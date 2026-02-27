@@ -80,7 +80,7 @@ void PanelSceneRenderer::render_pixel_grid(ImDrawList* draw_list, entt::registry
     auto& renderer = registry.get<engine::render::PixelGridRenderer>(entity);
 
     auto quad = compute_pixel_grid_quad(transform, grid_comp, renderer, wts);
-    void* grid_tex = resolve_grid_texture(entity, grid_comp.pixel_grid_path, runtime, m_grid_textures);
+    void* grid_tex = resolve_grid_texture(entity, grid_comp.pixel_grid_path, runtime, m_grid_textures, &m_context.pixel_grid_loader());
 
     draw_pixel_grid_quad(draw_list, quad, grid_tex);
 }

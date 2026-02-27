@@ -96,6 +96,7 @@ REFLECT_TYPE_BEGIN(engine::animation::Animator)
 REFLECT_TYPE_END()
 
 // PixelGridComponent reflection
+// Note: 'loaded' is NOT serialized - it's a runtime flag set when data is actually loaded
 REFLECT_TYPE_BEGIN(engine::simulation::PixelGridComponent)
     REFLECT_PROPERTY(enabled, "Enabled")
     REFLECT_PROPERTY(pixel_grid_path, "Pixel Grid Path")
@@ -103,7 +104,6 @@ REFLECT_TYPE_BEGIN(engine::simulation::PixelGridComponent)
     REFLECT_PROPERTY(height, "Height")
     REFLECT_PROPERTY(origin_x, "Origin X")
     REFLECT_PROPERTY(origin_y, "Origin Y")
-    REFLECT_PROPERTY(loaded, "Loaded")
     REFLECT_PROPERTY(destructible, "Destructible")
 REFLECT_TYPE_END()
 
