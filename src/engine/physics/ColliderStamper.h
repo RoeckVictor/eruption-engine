@@ -41,6 +41,7 @@ private:
     struct ColliderStamp {
         int region_x, region_y, region_w, region_h;
         std::vector<uint8_t> original_pixels;
+        std::vector<bool> was_stamped;
         float vel_x, vel_y;
         float center_x, center_y;
     };

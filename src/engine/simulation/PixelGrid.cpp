@@ -10,9 +10,12 @@ namespace engine::simulation {
 static constexpr int COPY_WORKGROUP_SIZE = 16;
 
 bool PixelGrid::init(int width, int height, size_t pixel_size) {
-    if (pixel_size < 4) {
-        ENGINE_ERR("Pixel size must be at least 4 bytes");
-        return false;
+    if (pixel_size < 8) {
+        ENGINE_LOG_WARN("Pixel size %zu < 8 bytes (no per-pixel color support)", pixel_size);
+        if (pixel_size < 4) {
+            ENGINE_ERR("Pixel size must be at least 4 bytes");
+            return false;
+        }
     }
 
     m_width = width;
@@ -196,7 +199,8 @@ void PixelGrid::readback_region(int x, int y, int w, int h,
 }
 
 void PixelGrid::spawn_material(int x, int y, int radius,
-                                uint8_t material, uint8_t category, uint8_t temp) {
+                                uint8_t material, uint8_t category, uint8_t temp,
+                                uint32_t color) {
     int min_x = x - radius;
     int max_x = x + radius;
     int min_y = y - radius;
@@ -220,17 +224,30 @@ void PixelGrid::spawn_material(int x, int y, int radius,
     int r2 = radius * radius;
     bool changed = false;
 
+    // Unpack color components (0xRRGGBBAA format)
+    uint8_t color_r = (color >> 24) & 0xFF;
+    uint8_t color_g = (color >> 16) & 0xFF;
+    uint8_t color_b = (color >> 8) & 0xFF;
+    uint8_t color_a = color & 0xFF;
+
     for (int row = 0; row < patch_h; row++) {
         for (int px = 0; px < patch_w; px++) {
             int dx = (min_x + px) - x;
             int dy = (min_y + row) - y;
             if (dx * dx + dy * dy <= r2) {
                 size_t idx = (static_cast<size_t>(row) * patch_w + px) * m_pixel_size;
-                m_work_buf[idx + 0] = material;   // byte 0 = material ID (game)
+                m_work_buf[idx + 0] = material;   // byte 0 = material ID
                 m_work_buf[idx + 1] = category;   // byte 1 = category (engine physics)
                 m_work_buf[idx + 2] = temp;       // byte 2 = temperature
-                m_work_buf[idx + 3] = 0;          // byte 3 = flags (reserved)
-                // Don't touch bytes 4+ (game-specific data)
+                m_work_buf[idx + 3] = 0;          // byte 3 = flags
+
+                // Set color bytes for 8-byte pixel mode
+                if (m_pixel_size >= 8) {
+                    m_work_buf[idx + 4] = color_r;
+                    m_work_buf[idx + 5] = color_g;
+                    m_work_buf[idx + 6] = color_b;
+                    m_work_buf[idx + 7] = color_a;
+                }
                 changed = true;
             }
         }

@@ -727,6 +727,18 @@ void FileBrowserPanel::render_file_list() {
                 std::memset(m_create_buffer, 0, sizeof(m_create_buffer));
                 m_create_focus_set = false;
             }
+            if (ImGui::MenuItem("Material (.material)")) {
+                // Use Material Editor panel for proper material creation
+                if (m_material_create_callback) {
+                    m_material_create_callback();
+                }
+            }
+            if (ImGui::MenuItem("Physical Category (.phys)")) {
+                // Use Material Editor panel for proper category creation
+                if (m_category_create_callback) {
+                    m_category_create_callback();
+                }
+            }
             ImGui::EndMenu();
         }
 
@@ -789,6 +801,7 @@ void FileBrowserPanel::navigate_to(const std::string& path) {
     m_creating_scene = false;
     m_creating_pxg = false;
     m_creating_prefab = false;
+    m_creating_script = false;
     refresh();
 }
 
@@ -903,7 +916,8 @@ void FileBrowserPanel::handle_keyboard_shortcuts() {
     if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows)) return;
 
     // Don't process shortcuts if rename or create is active
-    if (!m_rename_target.empty() || m_creating_folder || m_creating_scene || m_creating_pxg || m_creating_prefab) return;
+    if (!m_rename_target.empty() || m_creating_folder || m_creating_scene || m_creating_pxg ||
+        m_creating_prefab || m_creating_script) return;
 
     ImGuiIO& io = ImGui::GetIO();
 

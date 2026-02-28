@@ -75,12 +75,13 @@ void PixelBodyStamper::stamp_all(const std::vector<PixelBody*>& bodies,
         int region_h = max_wy - min_wy + 1;
 
         // Guard against integer overflow in region byte count
+        size_t pixel_size = grid.pixel_size();
         size_t region_pixels = static_cast<size_t>(region_w) * static_cast<size_t>(region_h);
-        if (region_pixels > static_cast<size_t>(INT_MAX / 4)) {
+        if (region_pixels > static_cast<size_t>(INT_MAX) / pixel_size) {
             ENGINE_ERR("PixelBodyStamper: region too large (%dx%d), skipping body", region_w, region_h);
             continue;
         }
-        int region_bytes = static_cast<int>(region_pixels * 4);
+        int region_bytes = static_cast<int>(region_pixels * pixel_size);
 
         // Single readback for the entire body AABB
         BodyStamp stamp_rec;
@@ -128,7 +129,7 @@ void PixelBodyStamper::stamp_all(const std::vector<PixelBody*>& bodies,
 
                 // Calculate buffer index using size_t arithmetic to prevent overflow
                 size_t ri = (static_cast<size_t>(local_y) * static_cast<size_t>(region_w)
-                           + static_cast<size_t>(local_x)) * 4;
+                           + static_cast<size_t>(local_x)) * pixel_size;
 
                 // Validate buffer bounds before accessing (defense in depth)
                 if (ri + 3 >= stamped.size()) {
@@ -168,6 +169,20 @@ void PixelBodyStamper::stamp_all(const std::vector<PixelBody*>& bodies,
                         req.material = original_mat;
                         req.lifetime = 5.0f; // 5 seconds before auto-settling
 
+                        // Extract color from original pixel (bytes 4-7 for 8-byte pixels)
+                        if (pixel_size >= 8) {
+                            uint8_t r = stamp_rec.original_pixels[ri + 4];
+                            uint8_t g = stamp_rec.original_pixels[ri + 5];
+                            uint8_t b = stamp_rec.original_pixels[ri + 6];
+                            uint8_t a = stamp_rec.original_pixels[ri + 7];
+                            req.color = (static_cast<uint32_t>(r)) |
+                                        (static_cast<uint32_t>(g) << 8) |
+                                        (static_cast<uint32_t>(b) << 16) |
+                                        (static_cast<uint32_t>(a) << 24);
+                        } else {
+                            req.color = 0xFFFFFFFF;
+                        }
+
                         particle_buffer->spawn(req);
 
                         // Clear the pixel from original_pixels so it doesn't get restored by clear_all()
@@ -176,6 +191,12 @@ void PixelBodyStamper::stamp_all(const std::vector<PixelBody*>& bodies,
                         stamp_rec.original_pixels[ri + 1] = 0; // category = EMPTY
                         stamp_rec.original_pixels[ri + 2] = 0; // temperature = 0
                         stamp_rec.original_pixels[ri + 3] = 0; // flags = 0
+                        if (pixel_size >= 8) {
+                            stamp_rec.original_pixels[ri + 4] = 0;
+                            stamp_rec.original_pixels[ri + 5] = 0;
+                            stamp_rec.original_pixels[ri + 6] = 0;
+                            stamp_rec.original_pixels[ri + 7] = 0;
+                        }
                     }
                 }
 

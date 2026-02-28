@@ -12,13 +12,7 @@
 #include "engine/rhi/RHIDevice.h"
 #include "engine/rhi/RHIContext.h"
 
-// NOTE: This file uses OpenGL-specific ImGui backend (imgui_impl_opengl3).
-// When adding support for other graphics APIs (Vulkan, D3D12, Metal),
-// this should be refactored to use an RHI ImGui abstraction layer.
-// For now, PixArt is OpenGL-only.
-
 int main(int argc, char* argv[]) {
-    // --- GLFW init ---
     if (!glfwInit()) {
         fprintf(stderr, "Failed to init GLFW\n");
         return 1;
@@ -41,7 +35,6 @@ int main(int argc, char* argv[]) {
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // vsync
 
-    // --- RHI init (handles GLAD loading internally) ---
     auto rhi_device = engine::rhi::create_rhi_device(
         engine::rhi::Backend::OpenGL,
         reinterpret_cast<engine::rhi::ProcAddressFunc>(glfwGetProcAddress));
@@ -53,7 +46,6 @@ int main(int argc, char* argv[]) {
     }
     engine::rhi::set_current_device(rhi_device.get());
 
-    // --- ImGui init ---
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -64,7 +56,6 @@ int main(int argc, char* argv[]) {
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 450");
 
-    // --- App init ---
     pixart::PixArtApp app;
     if (argc > 1) {
         app.init(argv[1]);
@@ -87,7 +78,6 @@ int main(int argc, char* argv[]) {
         }
     });
 
-    // --- Main loop ---
     while (!glfwWindowShouldClose(window) && !app.should_close()) {
         glfwPollEvents();
 
@@ -108,7 +98,6 @@ int main(int argc, char* argv[]) {
         glfwSwapBuffers(window);
     }
 
-    // --- Cleanup ---
     app.shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

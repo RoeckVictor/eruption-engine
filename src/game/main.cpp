@@ -1,5 +1,6 @@
 #include "engine/core/Engine.h"
 #include "game/GameApplication.h"
+#include "engine/platform/PlatformUtils.h"
 
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -19,11 +20,12 @@ int main(int /*argc*/, char* /*argv*/[]) {
     freopen("CONOUT$", "w", stderr);
 #endif
 
+    // Set working directory to executable directory for consistent path resolution
+    std::string exe_dir = engine::platform::executable_directory();
+    std::filesystem::current_path(exe_dir);
+
     printf("Working directory: %s\n", std::filesystem::current_path().string().c_str());
 
-    // -----------------------------------------------------------------------
-    // Read game_config.json (produced by GameBuilder)
-    // -----------------------------------------------------------------------
     std::string scene_path  = "Assets/Scenes/Main.json";
     std::string product_name = "Eruption Game";
     int width  = 1280;
@@ -59,9 +61,6 @@ int main(int /*argc*/, char* /*argv*/[]) {
     printf("=== %s ===\n", product_name.c_str());
     printf("Scene: %s\n", scene_path.c_str());
 
-    // -----------------------------------------------------------------------
-    // Create engine and run
-    // -----------------------------------------------------------------------
     engine::Engine engine;
 
     if (!engine.init(product_name.c_str(), width, height, "engine_config.json")) {

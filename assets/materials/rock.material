@@ -1,0 +1,38 @@
+{
+  "schema_version": 2,
+  "id": 1,
+  "name": "Rock",
+  "internal_name": "rock",
+
+  "physical": {
+    "density": 255,
+    "category": "static"
+  },
+
+  "thermal": {
+    "default_temp": 128,
+    "conductivity": 0.3
+  },
+
+  "rendering": {
+    "default_color": "#6B6B6BFF",
+    "color_variance": { "hue": 0, "saturation": 0, "lightness": 10 }
+  },
+
+  "flags": [],
+  "interactions": [
+    {
+      "id": "rock_melt",
+      "type": "temperature",
+      "priority": 50,
+      "probability": 0.1,
+      "sim_step_threshold": 30,
+      "conditions": {
+        "temp_above": 250
+      },
+      "effects": [
+        { "type": "transform", "into": "lava", "color_behavior": "replace" }
+      ]
+    }
+  ]
+}

@@ -7,5 +7,5 @@ struct Particle {
     uint material;      // CA material ID
     float lifetime;     // seconds remaining
     uint flags;         // 0=dead, 1=alive, 2=reintegrate
-    float _pad;
+    uint color;         // packed RGBA (r|g|b|a as bytes 0-3)
 };

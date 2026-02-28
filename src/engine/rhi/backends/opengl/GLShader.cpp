@@ -1,9 +1,11 @@
 #include "GLShader.h"
 #include "engine/core/Log.h"
+#include "engine/platform/PlatformUtils.h"
 #include <glad/gl.h>
 #include <fstream>
 #include <sstream>
 #include <unordered_set>
+#include <filesystem>
 
 namespace engine::rhi {
 
@@ -11,7 +13,7 @@ static constexpr int GL_LOG_BUFFER_SIZE = 1024;
 
 namespace {
 
-// Recursively resolve #include "filename" directives in GLSL source.
+// Recursively resolve #include "filename" directives in GLSL source
 std::string resolve_includes(const std::string& source,
                              const std::filesystem::path& base_dir,
                              std::unordered_set<std::string>& included) {
@@ -96,7 +98,17 @@ GLShader& GLShader::operator=(GLShader&& other) noexcept {
 }
 
 std::string GLShader::read_file(const char* path) {
-    std::ifstream file(path);
+    namespace fs = std::filesystem;
+
+    // Try the path as-is first (absolute paths or correct working directory)
+    fs::path file_path(path);
+    if (!fs::exists(file_path)) {
+        // If not found, try relative to executable directory
+        std::string exe_dir = platform::executable_directory();
+        file_path = fs::path(exe_dir) / path;
+    }
+
+    std::ifstream file(file_path);
     if (!file.is_open()) {
         ENGINE_ERR("Failed to open shader: %s", path);
         return "";
@@ -105,9 +117,9 @@ std::string GLShader::read_file(const char* path) {
     ss << file.rdbuf();
 
     std::unordered_set<std::string> included;
-    auto base_dir = std::filesystem::path(path).parent_path();
+    auto base_dir = file_path.parent_path();
     if (base_dir.empty()) base_dir = ".";
-    included.insert(std::filesystem::path(path).lexically_normal().string());
+    included.insert(file_path.lexically_normal().string());
     return resolve_includes(ss.str(), base_dir, included);
 }
 

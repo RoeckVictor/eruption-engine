@@ -26,3 +26,4 @@ public:
 
 private:
     bool m_jump_consumed = false;
+};

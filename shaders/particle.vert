@@ -1,12 +1,12 @@
 #version 450 core
 
 struct Particle {
-    vec2 pos;  // Y-down grid coords
+    vec2 pos;
     vec2 vel;
     uint material;
     float lifetime;
     uint flags;
-    float _pad;
+    uint color;
 };
 
 layout(std430, binding = 3) readonly buffer ParticleBuffer {
@@ -21,12 +21,21 @@ uniform int   u_grid_height;
 
 flat out uint v_material;
 flat out uint v_alive;
+flat out vec4 v_color;
 
 void main() {
     Particle p = particles[gl_VertexID];
 
     v_material = p.material;
     v_alive = p.flags & 1u;
+
+    // Unpack color (r|g|b|a as bytes 0-3)
+    v_color = vec4(
+        float((p.color >>  0) & 0xFFu) / 255.0,
+        float((p.color >>  8) & 0xFFu) / 255.0,
+        float((p.color >> 16) & 0xFFu) / 255.0,
+        float((p.color >> 24) & 0xFFu) / 255.0
+    );
 
     if (v_alive == 0u) {
         // Dead particle — clip it

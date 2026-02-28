@@ -1,0 +1,49 @@
+{
+  "schema_version": 2,
+  "id": 7,
+  "name": "Steam",
+  "internal_name": "steam",
+
+  "physical": {
+    "density": 10,
+    "category": "gas"
+  },
+
+  "thermal": {
+    "default_temp": 200,
+    "conductivity": 0.1
+  },
+
+  "rendering": {
+    "default_color": "#D0D0D0AA",
+    "color_variance": { "hue": 0, "saturation": 0, "lightness": 20 }
+  },
+
+  "flags": [],
+  "interactions": [
+    {
+      "id": "steam_condense",
+      "type": "temperature",
+      "priority": 50,
+      "probability": 0.1,
+      "sim_step_threshold": 60,
+      "conditions": {
+        "temp_below": 100
+      },
+      "effects": [
+        { "type": "transform", "into": "water", "color_behavior": "replace" }
+      ]
+    },
+    {
+      "id": "steam_dissipate",
+      "type": "time_decay",
+      "priority": 10,
+      "probability": 0.02,
+      "sim_step_threshold": 120,
+      "conditions": {},
+      "effects": [
+        { "type": "destroy" }
+      ]
+    }
+  ]
+}

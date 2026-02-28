@@ -83,6 +83,8 @@ public:
     void set_file_browser_refresh_callback(FileBrowserRefreshCallback cb) { m_file_browser_refresh = std::move(cb); }
     void refresh_file_browser() { if (m_file_browser_refresh) m_file_browser_refresh(); }
 
+    void update_material_tables();
+
     void set_runtime(RuntimeContext* runtime) { m_runtime = runtime; }
     RuntimeContext* runtime() { return m_runtime; }
     const RuntimeContext* runtime() const { return m_runtime; }

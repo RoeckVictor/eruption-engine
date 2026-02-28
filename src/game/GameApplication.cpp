@@ -14,6 +14,7 @@
 #include "editor/scripting/ScriptManager.h"
 #include "editor/serialization/SceneSerializer.h"
 #include "engine/simulation/MaterialLibrary.h"
+#include "engine/simulation/CategoryLibrary.h"
 #include "engine/simulation/PixelGridComponent.h"
 
 #include <imgui.h>
@@ -21,11 +22,6 @@
 
 namespace fs = std::filesystem;
 
-// ---------------------------------------------------------------------------
-// Minimal scene to satisfy the engine's scene stack requirement.
-// The game's entities live in GameApplication::m_registry (not the scene's
-// internal registry) — systems are registered here so the engine calls them.
-// ---------------------------------------------------------------------------
 class GameScene : public engine::scene::Scene {
 public:
     const char* name() const override { return "GameScene"; }
@@ -36,10 +32,6 @@ public:
 
     void on_exit(engine::Engine& /*engine*/) override {}
 };
-
-// ---------------------------------------------------------------------------
-// GameApplication
-// ---------------------------------------------------------------------------
 
 GameApplication::GameApplication(const std::string& scene_path, const std::string& product_name)
     : m_scene_path(scene_path)
@@ -53,21 +45,27 @@ bool GameApplication::on_init(engine::Engine& engine) {
     auto& log = engine::Logger::instance();
     log.info("Game", "Initializing game: %s", m_product_name.c_str());
 
-    // -----------------------------------------------------------------------
-    // 1. Initialize reflection and component type registries
-    // -----------------------------------------------------------------------
     engine::reflection::init_engine_reflections();
     editor::init_component_type_registry();
 
+    // Get executable directory for resolving asset paths
+    std::string exe_dir = engine::platform::executable_directory();
+
+    // Load categories first (materials need them to resolve category names)
+    std::string categories_path = exe_dir + "/assets/categories";
+    m_category_library.ensure_empty_category();
+    m_category_library.load_from_directory(categories_path, true);
+
     // Load default material library (required for pixel simulations)
     auto& mat_registry = engine::simulation::MaterialLibraryRegistry::instance();
-    if (!mat_registry.load_library("default", "assets/materials/default.json")) {
-        log.warning("Game", "Failed to load default material library — pixel simulations may not work");
+    auto* mat_lib = mat_registry.get_or_create_library("default");
+    mat_lib->set_category_library(&m_category_library);
+
+    std::string materials_path = exe_dir + "/assets/materials";
+    if (!mat_lib->load_from_directory(materials_path)) {
+        log.warning("Game", "Failed to load default material library from: %s — pixel simulations may not work", materials_path.c_str());
     }
 
-    // -----------------------------------------------------------------------
-    // 2. Load the scene
-    // -----------------------------------------------------------------------
     editor::SceneSerializer serializer(m_registry);
     bool scene_loaded = false;
 
@@ -96,9 +94,6 @@ bool GameApplication::on_init(engine::Engine& engine) {
     // Set clear color from scene background
     engine.set_clear_color(settings.bg_color[0], settings.bg_color[1], settings.bg_color[2]);
 
-    // -----------------------------------------------------------------------
-    // 3. Load script library (optional — game can run without scripts)
-    // -----------------------------------------------------------------------
     m_script_manager = std::make_unique<editor::ScriptManager>();
 
     std::string lib_name = engine::platform::shared_library_name("GameScripts");
@@ -116,9 +111,6 @@ bool GameApplication::on_init(engine::Engine& engine) {
         log.info("Game", "No %s found — running without scripts", lib_name.c_str());
     }
 
-    // -----------------------------------------------------------------------
-    // 4. Initialize RuntimeContext (physics, scripts, pixel simulation)
-    // -----------------------------------------------------------------------
     m_runtime = std::make_unique<editor::RuntimeContext>();
     m_runtime->init(&m_registry, m_script_manager.get());
     m_runtime->set_engine(&engine);
@@ -146,9 +138,6 @@ bool GameApplication::on_init(engine::Engine& engine) {
                  settings.gravity_x, settings.gravity_y);
     }
 
-    // -----------------------------------------------------------------------
-    // 5. Set up camera (find Camera2D entity or use fallback)
-    // -----------------------------------------------------------------------
     {
         auto view = m_registry.view<engine::render::Camera2D>();
         if (auto it = view.begin(); it != view.end()) {
@@ -156,17 +145,11 @@ bool GameApplication::on_init(engine::Engine& engine) {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // 6. Create EngineContext for engine systems (render, loader)
-    // -----------------------------------------------------------------------
     m_engine_ctx = std::make_unique<engine::EngineContext>(
         engine::EngineContext{m_registry, m_runtime->physics_world(), m_camera}
     );
     engine.set_app_context(*m_engine_ctx);
 
-    // -----------------------------------------------------------------------
-    // 7. Create scene with render systems and push it
-    // -----------------------------------------------------------------------
     auto scene = std::make_unique<GameScene>();
 
     // Register render systems into the scene
@@ -189,14 +172,9 @@ bool GameApplication::on_init(engine::Engine& engine) {
 }
 
 void GameApplication::on_update(engine::Engine& engine, float dt) {
-    // Update game logic (physics, scripts, pixel simulations)
     if (m_runtime && m_runtime->is_playing()) {
         m_runtime->update(dt);
 
-        // Sync simulation textures into the render system.
-        // RuntimeContext manages live GPU textures for simulated pixel grids;
-        // push them as overrides so PixelGridRenderSystem uses them instead of
-        // static textures loaded from disk.
         for (const auto& sim : m_runtime->sim_surfaces()) {
             auto* tex = sim->color_texture.rhi_texture();
             if (tex) {

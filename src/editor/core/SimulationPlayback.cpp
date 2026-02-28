@@ -7,6 +7,7 @@
 #include "engine/simulation/SimSurface.h"
 #include "engine/simulation/PixelGridComponent.h"
 #include "engine/simulation/MaterialLibrary.h"
+#include "engine/simulation/CategoryLibrary.h"
 #include "engine/asset/PixelGridFile.h"
 #include "engine/asset/PxgDataParser.h"
 #include "engine/render/Camera2D.h"
@@ -72,14 +73,15 @@ void SimulationPlayback::init(engine::physics::PhysicsWorld* physics_world,
         state->width = parsed.width;
         state->height = parsed.height;
 
-        if (!state->pixel_grid.init(parsed.width, parsed.height, 4)) {
+        // Initialize with 8 bytes per pixel (4 sim + 4 color)
+        if (!state->pixel_grid.init(parsed.width, parsed.height, 8)) {
             engine::Logger::instance().error("Runtime", "Failed to init PixelGrid %dx%d",
                 parsed.width, parsed.height);
             continue;
         }
 
         int pixel_count = parsed.width * parsed.height;
-        std::vector<uint8_t> pixel_data(pixel_count * 4, 0);
+        std::vector<uint8_t> pixel_data(pixel_count * 8, 0);
 
         for (int i = 0; i < pixel_count; i++) {
             uint8_t mat_id = 0;
@@ -89,28 +91,46 @@ void SimulationPlayback::init(engine::physics::PhysicsWorld* physics_world,
 
             uint8_t category = 0;
             uint8_t default_temp = 128;
+            uint32_t color = 0x00000000;
+
             if (mat_id > 0) {
                 auto* mat_def = lib->get_material(mat_id);
                 if (mat_def) {
                     category = static_cast<uint8_t>(mat_def->category);
                     default_temp = mat_def->default_temp;
+                    color = mat_def->color;
                 }
             }
 
-            pixel_data[i * 4 + 0] = mat_id;
-            pixel_data[i * 4 + 1] = category;
-            pixel_data[i * 4 + 2] = default_temp;
-            pixel_data[i * 4 + 3] = 0;
+            // Simulation data (bytes 0-3)
+            pixel_data[i * 8 + 0] = mat_id;
+            pixel_data[i * 8 + 1] = category;
+            pixel_data[i * 8 + 2] = default_temp;
+            pixel_data[i * 8 + 3] = 0;
+
+            // Color data (bytes 4-7): use .pxg color layer if available, else material default
+            if (parsed.has_color_layer && i * 4 + 3 < static_cast<int>(parsed.color_rgba.size())) {
+                pixel_data[i * 8 + 4] = parsed.color_rgba[i * 4 + 0]; // R
+                pixel_data[i * 8 + 5] = parsed.color_rgba[i * 4 + 1]; // G
+                pixel_data[i * 8 + 6] = parsed.color_rgba[i * 4 + 2]; // B
+                pixel_data[i * 8 + 7] = parsed.color_rgba[i * 4 + 3]; // A
+            } else {
+                // Use material's default color (0xRRGGBBAA format)
+                pixel_data[i * 8 + 4] = (color >> 24) & 0xFF; // R
+                pixel_data[i * 8 + 5] = (color >> 16) & 0xFF; // G
+                pixel_data[i * 8 + 6] = (color >> 8) & 0xFF;  // B
+                pixel_data[i * 8 + 7] = color & 0xFF;         // A
+            }
         }
 
         int mat_counts[256] = {};
         for (int i = 0; i < pixel_count; i++) {
-            mat_counts[pixel_data[i * 4 + 0]]++;
+            mat_counts[pixel_data[i * 8 + 0]]++;
         }
         int non_air = pixel_count - mat_counts[0];
         int mobile = 0;
         for (int i = 0; i < pixel_count; i++) {
-            uint8_t cat = pixel_data[i * 4 + 1];
+            uint8_t cat = pixel_data[i * 8 + 1];
             if (cat >= 2) mobile++; // powder=2, liquid=3, gas=4
         }
         engine::Logger::instance().info("Runtime",
@@ -122,31 +142,40 @@ void SimulationPlayback::init(engine::physics::PhysicsWorld* physics_world,
 
         state->pixel_grid.upload_both(0, 0, parsed.width, parsed.height, pixel_data.data());
 
-        auto slots = lib->build_material_slots();
-
-        // Resolve special material IDs for sim_step.comp uniforms
-        uint8_t mat_water = 0, mat_lava = 0, mat_ice = 0, mat_steam = 0;
-        if (auto* m = lib->get_material("water")) mat_water = m->id;
-        if (auto* m = lib->get_material("lava"))  mat_lava  = m->id;
-        if (auto* m = lib->get_material("ice"))   mat_ice   = m->id;
-        if (auto* m = lib->get_material("steam")) mat_steam = m->id;
-
-        // Init Margolus simulation with material uniform callback
-        auto uniform_callback = [mat_water, mat_lava, mat_ice, mat_steam](engine::graphics::Shader& shader) {
-            shader.set_uint("u_mat_water", mat_water);
-            shader.set_uint("u_mat_lava", mat_lava);
-            shader.set_uint("u_mat_ice", mat_ice);
-            shader.set_uint("u_mat_steam", mat_steam);
-        };
+        // Compile materials and interactions for GPU
+        if (!lib->compile_for_gpu()) {
+            engine::Logger::instance().error("Runtime", "Failed to compile materials for GPU");
+            state->pixel_grid.shutdown();
+            continue;
+        }
 
         // Pass chunk size to simulation for GPU dirty tracking
         int chunk_size_x = sim_surface.chunk_size_x;
         int chunk_size_y = sim_surface.chunk_size_y;
 
-        if (!state->simulation.init(slots.data(), static_cast<int>(slots.size()),
-                                     parsed.width, parsed.height,
-                                     "shaders/sim_step.comp", uniform_callback,
-                                     256, chunk_size_x, chunk_size_y)) {
+        // Build palette for simulation (needed for Blend color behavior)
+        auto sim_palette = lib->build_color_palette();
+        sim_palette.resize(256, 0x00000000);
+
+        // Compile category library to GPU format
+        // (Categories should be set via set_category_library() before init())
+        std::vector<uint32_t> category_table;
+        if (m_category_library && m_category_library->count() > 0) {
+            category_table = m_category_library->compile_gpu_table();
+        } else {
+            // Fallback: empty category table (engine will use defaults)
+            engine::Logger::instance().warning("Runtime", "No category library set, using default categories");
+            category_table.resize(16 * 10, 0);
+        }
+
+        // Initialize with compiled material, interaction, and category tables
+        if (!state->simulation.init(lib->get_material_table(),
+                                        lib->get_interaction_table(),
+                                        sim_palette,
+                                        category_table,
+                                        parsed.width, parsed.height,
+                                        "shaders/sim_step.comp", nullptr,
+                                        chunk_size_x, chunk_size_y)) {
             engine::Logger::instance().error("Runtime", "Failed to init MargolusSimulation");
             state->pixel_grid.shutdown();
             continue;
@@ -245,7 +274,7 @@ void SimulationPlayback::init(engine::physics::PhysicsWorld* physics_world,
         }
 
         engine::Logger::instance().info("Runtime", "Initialized pixel simulation: %dx%d, %zu materials",
-            parsed.width, parsed.height, slots.size());
+            parsed.width, parsed.height, lib->material_count());
 
         m_surfaces.push_back(std::move(state));
     }
@@ -386,6 +415,66 @@ void SimulationPlayback::update(uint64_t frame_count) {
     }
 }
 
+void SimulationPlayback::update_material_tables() {
+    // Category library should already be updated by the caller (EditorContext)
+    if (!m_category_library) {
+        engine::Logger::instance().warning("SimulationPlayback",
+            "No category library set, cannot update material tables");
+        return;
+    }
+
+    for (auto& state : m_surfaces) {
+        if (!m_registry.valid(state->entity)) continue;
+        if (!m_registry.all_of<engine::simulation::SimSurface>(state->entity)) continue;
+
+        auto& sim_surface = m_registry.get<engine::simulation::SimSurface>(state->entity);
+
+        auto* lib = engine::simulation::MaterialLibraryRegistry::instance().get_library(sim_surface.material_set);
+        if (!lib) continue;
+
+        // Recompile materials for GPU
+        if (!lib->compile_for_gpu()) {
+            engine::Logger::instance().error("SimulationPlayback",
+                "Failed to recompile materials for GPU");
+            continue;
+        }
+
+        // Build palette for simulation and rendering
+        auto palette = lib->build_color_palette();
+        palette.resize(256, 0x00000000);
+
+        // Compile category table for GPU
+        auto category_table = m_category_library->compile_gpu_table();
+
+        // Update the simulation's material, interaction, palette, and category tables
+        state->simulation.update_tables(lib->get_material_table(),
+                                         lib->get_interaction_table(),
+                                         palette,
+                                         category_table);
+
+        // Also update the rendering palette SSBO
+        state->palette_ssbo.update(0, palette.size() * sizeof(uint32_t), palette.data());
+
+        // Recreate 1D palette texture with updated colors
+        std::vector<uint8_t> palette_rgba(256 * 4);
+        for (size_t i = 0; i < 256; i++) {
+            uint32_t packed = palette[i];
+            palette_rgba[i * 4 + 0] = (packed >> 24) & 0xFF;  // R
+            palette_rgba[i * 4 + 1] = (packed >> 16) & 0xFF;  // G
+            palette_rgba[i * 4 + 2] = (packed >> 8) & 0xFF;   // B
+            palette_rgba[i * 4 + 3] = (packed >> 0) & 0xFF;   // A
+        }
+        state->palette_texture.destroy();
+        state->palette_texture.create_1d(256, engine::graphics::TextureFormat::RGBA8,
+                                          engine::graphics::TextureFilter::Nearest,
+                                          engine::graphics::TextureWrap::ClampToEdge,
+                                          palette_rgba.data());
+
+        engine::Logger::instance().info("SimulationPlayback",
+            "Updated material tables for simulation surface");
+    }
+}
+
 void SimulationPlayback::render_particles(const engine::render::Camera2D& camera,
                                             float screen_w, float screen_h) {
     for (auto& state : m_surfaces) {
@@ -393,7 +482,6 @@ void SimulationPlayback::render_particles(const engine::render::Camera2D& camera
 
         state->particle_renderer.draw(
             state->particle_buffer,
-            state->palette_texture,
             camera,
             screen_w, screen_h,
             state->origin_x, state->origin_y, state->pixel_grid.height());

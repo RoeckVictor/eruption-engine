@@ -1,0 +1,38 @@
+{
+  "schema_version": 2,
+  "id": 3,
+  "name": "Sand",
+  "internal_name": "sand",
+
+  "physical": {
+    "density": 180,
+    "category": "powder"
+  },
+
+  "thermal": {
+    "default_temp": 128,
+    "conductivity": 0.15
+  },
+
+  "rendering": {
+    "default_color": "#D4B96AFF",
+    "color_variance": { "hue": 5, "saturation": 5, "lightness": 20 }
+  },
+
+  "flags": [],
+  "interactions": [
+    {
+      "id": "sand_melt_to_glass",
+      "type": "temperature",
+      "priority": 50,
+      "probability": 0.1,
+      "sim_step_threshold": 30,
+      "conditions": {
+        "temp_above": 220
+      },
+      "effects": [
+        { "type": "transform", "into": "lava", "color_behavior": "replace" }
+      ]
+    }
+  ]
+}

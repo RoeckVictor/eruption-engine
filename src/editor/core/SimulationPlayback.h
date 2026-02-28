@@ -16,6 +16,7 @@
 #include "engine/graphics/Texture.h"
 #include "engine/graphics/ShaderStorageBuffer.h"
 #include "engine/graphics/Shader.h"
+#include "engine/simulation/CategoryLibrary.h"
 
 namespace engine { struct EngineConfig; }
 namespace engine::physics { class PhysicsWorld; }
@@ -62,12 +63,19 @@ public:
 
     const std::vector<std::unique_ptr<SimSurfaceState>>& surfaces() const { return m_surfaces; }
 
+    void update_material_tables();
+
+    void set_category_library(engine::simulation::CategoryLibrary* lib) { m_category_library = lib; }
+    engine::simulation::CategoryLibrary* category_library() { return m_category_library; }
+    const engine::simulation::CategoryLibrary* category_library() const { return m_category_library; }
+
 private:
     entt::registry& m_registry;
     std::vector<std::unique_ptr<SimSurfaceState>> m_surfaces;
     engine::graphics::RenderContext m_render_context;
     engine::graphics::Shader m_color_shader;
     engine::physics::PhysicsWorld* m_physics_world = nullptr;
+    engine::simulation::CategoryLibrary* m_category_library = nullptr;
 };
 
 }

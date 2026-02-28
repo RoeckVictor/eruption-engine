@@ -25,6 +25,12 @@ public:
     using FileOpenedCallback = std::function<void(const std::string&)>;
     void set_file_opened_callback(FileOpenedCallback callback) { m_file_opened_callback = std::move(callback); }
 
+    using MaterialCreateCallback = std::function<void()>;
+    void set_material_create_callback(MaterialCreateCallback callback) { m_material_create_callback = std::move(callback); }
+
+    using CategoryCreateCallback = std::function<void()>;
+    void set_category_create_callback(CategoryCreateCallback callback) { m_category_create_callback = std::move(callback); }
+
     const std::string& selected_file() const { return m_selected_file; }
 
     void set_editor_context(EditorContext* context) { m_editor_context = context; }
@@ -58,6 +64,8 @@ private:
 
     FileSelectedCallback m_file_selected_callback;
     FileOpenedCallback m_file_opened_callback;
+    MaterialCreateCallback m_material_create_callback;
+    CategoryCreateCallback m_category_create_callback;
 
     char m_filter[128] = "";
     bool m_show_hidden = false;

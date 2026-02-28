@@ -1,6 +1,5 @@
 #include "engine/particles/ParticleRenderer.h"
 #include "engine/particles/ParticleBuffer.h"
-#include "engine/graphics/Texture.h"
 #include "engine/render/Camera2D.h"
 #include "engine/rhi/RHIDevice.h"
 #include "engine/rhi/RHIContext.h"
@@ -47,10 +46,6 @@ bool ParticleRenderer::init() {
         return false;
     }
 
-    // Set constant uniforms
-    m_shader.use();
-    m_shader.set_int("u_palette", 0); // texture unit 0
-
     ENGINE_LOG("ParticleRenderer initialized");
     return true;
 }
@@ -61,7 +56,6 @@ void ParticleRenderer::shutdown() {
 }
 
 void ParticleRenderer::draw(ParticleBuffer& buffer,
-                             const graphics::Texture& palette,
                              const render::Camera2D& camera,
                              float screen_w, float screen_h,
                              float grid_origin_x, float grid_origin_y, int grid_height) {
@@ -75,8 +69,7 @@ void ParticleRenderer::draw(ParticleBuffer& buffer,
     // Bind pipeline (sets shader, blend state, point size, VAO)
     ctx->bind_pipeline(m_pipeline.get());
 
-    // Bind texture and SSBO
-    ctx->bind_texture(palette.rhi_texture(), 0);
+    // Bind particle SSBO (color comes from per-particle data, no palette needed)
     buffer.bind_particles();
 
     // Set per-draw uniforms

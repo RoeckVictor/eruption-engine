@@ -544,16 +544,18 @@ static bool host_spawn_pixels_at_world(runtime::ScriptHostAPI* api, float world_
 
                 uint8_t category = engine::simulation::CAT_POWDER;
                 uint8_t temperature = 128;
+                uint32_t color = 0xFFFFFFFF;
 
                 if (lib) {
                     auto* mat = lib->get_material(static_cast<uint8_t>(material_id));
                     if (mat) {
                         category = static_cast<uint8_t>(mat->category);
                         temperature = mat->default_temp;
+                        color = mat->color;
                     }
                 }
 
-                state->pixel_grid.spawn_material(px, py, radius, static_cast<uint8_t>(material_id), category, temperature);
+                state->pixel_grid.spawn_material(px, py, radius, static_cast<uint8_t>(material_id), category, temperature, color);
                 spawned = true;
 
                 // Mark affected chunks dirty for collider regeneration (for solid materials)
@@ -711,6 +713,13 @@ void RuntimeContext::play(const SceneSettings& settings) {
         m_physics_playback->init_bodies();
 
         m_sim_playback = std::make_unique<SimulationPlayback>(*m_editor_registry);
+
+        // Set category library (owned by EditorApplication, set via set_category_library)
+        // Categories should already be loaded by EditorApplication before play() is called
+        if (m_category_library) {
+            m_sim_playback->set_category_library(m_category_library);
+        }
+
         m_sim_playback->init(m_physics_world.get(), m_engine->config());
 
         m_component_registry = std::make_unique<engine::prefab::ComponentRegistry>();

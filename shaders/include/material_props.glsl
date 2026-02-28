@@ -1,20 +1,27 @@
 // Shared material property accessors.
 // Requires: SSBO `mat_props` with 2 uints per material entry bound at binding 2.
 //
-// Engine packing: Word 0 = density(8) | category(4) | user_data_low(20)
-//                 Word 1 = user_data_high(32)
-// Game packing:   user_data_low  = melt_point(8) | melt_into(8) | (unused 4)
-//                 user_data_high = boil_point(8) | boil_into(8) | default_temp(8) | flags(8)
+// Engine packing (v2 with interactions):
+//   Word 0: density(8) | category(4) | interaction_offset(12) | interaction_count(4) | flags(4)
+//   Word 1: default_temp(8) | conductivity_u8(8) | reserved(16)
+//
+// Interaction table (binding 4): 4 uints per interaction
+//   See InteractionCompiler.h for packed format
 
-uint getDensity(uint id)     { return (mat_props[id * 2u] >>  0) & 0xFFu; }
-uint getCategory(uint id)    { return (mat_props[id * 2u] >>  8) & 0x0Fu; }
-uint getMeltPoint(uint id)   { return (mat_props[id * 2u] >> 12) & 0xFFu; }
-uint getMeltInto(uint id)    { return (mat_props[id * 2u] >> 20) & 0xFFu; }
-uint getBoilPoint(uint id)   { return (mat_props[id * 2u + 1u] >>  0) & 0xFFu; }
-uint getBoilInto(uint id)    { return (mat_props[id * 2u + 1u] >>  8) & 0xFFu; }
-uint getDefaultTemp(uint id) { return (mat_props[id * 2u + 1u] >> 16) & 0xFFu; }
-uint getFlags(uint id)       { return (mat_props[id * 2u + 1u] >> 24) & 0xFFu; }
+uint getDensity(uint id)           { return (mat_props[id * 2u] >>  0) & 0xFFu; }
+uint getCategory(uint id)          { return (mat_props[id * 2u] >>  8) & 0x0Fu; }
+uint getInteractionOffset(uint id) { return (mat_props[id * 2u] >> 12) & 0xFFFu; }
+uint getInteractionCount(uint id)  { return (mat_props[id * 2u] >> 24) & 0x0Fu; }
+uint getMatFlags(uint id)          { return (mat_props[id * 2u] >> 28) & 0x0Fu; }
+uint getDefaultTemp(uint id)       { return (mat_props[id * 2u + 1u] >>  0) & 0xFFu; }
+uint getConductivity(uint id)      { return (mat_props[id * 2u + 1u] >>  8) & 0xFFu; }
 
+// Material flags (stored in MaterialDefinition.flags)
+const uint MAT_FLAG_HAZARD     = 0x01u;
+const uint MAT_FLAG_FLAMMABLE  = 0x02u;
+const uint MAT_FLAG_CONDUCTIVE = 0x04u;
+
+// Engine default category IDs (matching .phys files in assets/categories/)
 const uint CAT_EMPTY  = 0u;
 const uint CAT_STATIC = 1u;
 const uint CAT_POWDER = 2u;
@@ -24,10 +31,6 @@ const uint CAT_GAS    = 4u;
 // Pixel flags (stored in byte 3 / .a component of pixel data)
 const uint FLAG_RIGIDBODY = 0x01u;            // Pixel is part of a rigidbody
 const uint FLAG_CONVERT_TO_PARTICLE = 0x02u;  // Movable pixel should become a particle
-
-bool isMobile(uint cat) {
-    return cat == CAT_POWDER || cat == CAT_LIQUID || cat == CAT_GAS;
-}
 
 bool hasFlag(uvec4 pixel, uint flag) {
     return (pixel.a & flag) != 0u;

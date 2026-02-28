@@ -36,11 +36,11 @@ bool BodyCollisionExtractor::init(int grid_width, int grid_height, int max_extra
     m_extract_shader.set_int("u_grid_height", grid_height);
 
     // Create extraction buffer SSBO
-    // Layout: [count (1 uint), capacity (1 uint), entries (2 uints each)]
-    size_t buffer_size = (2 + max_extractions * 2) * sizeof(uint32_t);
+    // Layout: [count (1 uint), capacity (1 uint), entries (3 uints each: pos, material, color)]
+    size_t buffer_size = (2 + max_extractions * 3) * sizeof(uint32_t);
 
     // Initialize with count=0 and capacity
-    std::vector<uint32_t> init_data(2 + max_extractions * 2, 0);
+    std::vector<uint32_t> init_data(2 + max_extractions * 3, 0);
     init_data[0] = 0;  // count
     init_data[1] = static_cast<uint32_t>(max_extractions);  // capacity
 
@@ -52,7 +52,7 @@ bool BodyCollisionExtractor::init(int grid_width, int grid_height, int max_extra
     }
 
     // Allocate readback buffer
-    m_readback_buffer.resize(2 + max_extractions * 2);
+    m_readback_buffer.resize(2 + max_extractions * 3);
 
     // Initialize RNG for particle scatter
     std::random_device rd;
@@ -118,11 +118,12 @@ void BodyCollisionExtractor::spawn_particles(const StamperT& stamper,
 
     if (count == 0) return;
 
-    // Process each extracted pixel
+    // Process each extracted pixel (3 uints per entry: pos, material, color)
     for (uint32_t i = 0; i < count; i++) {
-        uint32_t entry_offset = 2 + i * 2;
+        uint32_t entry_offset = 2 + i * 3;
         uint32_t packed_pos = m_readback_buffer[entry_offset + 0];
         uint32_t material = m_readback_buffer[entry_offset + 1];
+        uint32_t color = m_readback_buffer[entry_offset + 2];
 
         // Unpack position (grid coordinates, Y-down)
         int gx = static_cast<int>(packed_pos & 0xFFFF);
@@ -145,6 +146,7 @@ void BodyCollisionExtractor::spawn_particles(const StamperT& stamper,
         req.vy = vel_y + scatter_y;
         req.material = material;
         req.lifetime = m_particle_lifetime;
+        req.color = color;
 
         particle_buffer.spawn(req);
     }

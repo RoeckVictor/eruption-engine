@@ -41,18 +41,26 @@ uint loadMaterial(uint wx, uint wy) {
     return readPackedPixel(ivec2(wx, wy)) & 0xFFu;
 }
 
-// Store pixel to both SSBOs (for aligned 4-byte pixels)
-void storePixelBoth(uint wx, uint wy, uint material, uint category, uint temperature, uint flags) {
+// Store pixel to both SSBOs (supports both 4-byte and 8-byte pixels)
+void storePixelBoth(uint wx, uint wy, uint material, uint category, uint temperature, uint flags, uint color) {
     uint idx = wy * uint(u_grid_width) + wx;
-    uint byte_offset = idx * u_pixel_size;
-    uint word_offset = byte_offset / 4u;
 
-    uint packed = packPixel(uvec4(material, category, temperature, flags));
-
-    // For now, assume aligned 4-byte pixels (common case)
-    // TODO: Handle misaligned/larger pixels if needed
-    pixels_a[word_offset] = packed;
-    pixels_b[word_offset] = packed;
+    if (u_pixel_size >= 8u) {
+        // 8-byte pixel: write word 0 (sim data) and word 1 (color)
+        uint word_offset = idx * 2u;
+        uint packed_sim = packPixel(uvec4(material, category, temperature, flags));
+        pixels_a[word_offset] = packed_sim;
+        pixels_a[word_offset + 1u] = color;
+        pixels_b[word_offset] = packed_sim;
+        pixels_b[word_offset + 1u] = color;
+    } else {
+        // 4-byte pixel: write only sim data
+        uint byte_offset = idx * u_pixel_size;
+        uint word_offset = byte_offset / 4u;
+        uint packed = packPixel(uvec4(material, category, temperature, flags));
+        pixels_a[word_offset] = packed;
+        pixels_b[word_offset] = packed;
+    }
 }
 
 void main() {
@@ -70,10 +78,10 @@ void main() {
         // Only write if the target cell is currently empty
         uint existing_mat = loadMaterial(uint(wx), uint(wy));
         if (existing_mat == 0u) {
-            // Write material to both ping-pong SSBOs
+            // Write material and color to both ping-pong SSBOs
             uint cat = getCategory(p.material);
             uint temp = getDefaultTemp(p.material);
-            storePixelBoth(uint(wx), uint(wy), p.material, cat, temp, 0u);
+            storePixelBoth(uint(wx), uint(wy), p.material, cat, temp, 0u, p.color);
         }
     }
 

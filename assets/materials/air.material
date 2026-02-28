@@ -1,0 +1,24 @@
+{
+  "schema_version": 2,
+  "id": 0,
+  "name": "Air",
+  "internal_name": "air",
+
+  "physical": {
+    "density": 0,
+    "category": "empty"
+  },
+
+  "thermal": {
+    "default_temp": 128,
+    "conductivity": 0.0
+  },
+
+  "rendering": {
+    "default_color": "#00000000",
+    "color_variance": { "hue": 0, "saturation": 0, "lightness": 0 }
+  },
+
+  "flags": [],
+  "interactions": []
+}

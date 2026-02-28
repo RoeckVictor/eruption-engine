@@ -1,5 +1,6 @@
 #include "EditorContext.h"
 #include "EditorComponents.h"
+#include "SimulationPlayback.h"
 #include "editor/commands/Command.h"
 #include "editor/commands/EntityCommands.h"
 #include "editor/serialization/SceneSerializer.h"
@@ -237,6 +238,12 @@ void EditorContext::sync_prefab_to_project_scenes(const std::string& prefab_path
     if (scenes_updated > 0) {
         engine::Logger::instance().info("EditorContext", "Updated %d scene file(s) with prefab changes: %s",
                                          scenes_updated, prefab_path.c_str());
+    }
+}
+
+void EditorContext::update_material_tables() {
+    if (m_runtime && m_runtime->sim_playback()) {
+        m_runtime->sim_playback()->update_material_tables();
     }
 }
 

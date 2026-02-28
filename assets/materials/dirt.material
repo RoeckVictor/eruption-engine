@@ -1,0 +1,38 @@
+{
+  "schema_version": 2,
+  "id": 2,
+  "name": "Dirt",
+  "internal_name": "dirt",
+
+  "physical": {
+    "density": 200,
+    "category": "powder"
+  },
+
+  "thermal": {
+    "default_temp": 128,
+    "conductivity": 0.2
+  },
+
+  "rendering": {
+    "default_color": "#8B6914FF",
+    "color_variance": { "hue": 5, "saturation": 10, "lightness": 15 }
+  },
+
+  "flags": [],
+  "interactions": [
+    {
+      "id": "dirt_melt",
+      "type": "temperature",
+      "priority": 50,
+      "probability": 0.1,
+      "sim_step_threshold": 20,
+      "conditions": {
+        "temp_above": 200
+      },
+      "effects": [
+        { "type": "transform", "into": "lava", "color_behavior": "replace" }
+      ]
+    }
+  ]
+}

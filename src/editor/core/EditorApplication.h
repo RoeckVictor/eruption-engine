@@ -6,6 +6,7 @@
 #include "editor/core/EditorContext.h"
 #include "editor/core/RuntimeContext.h"
 #include "editor/scripting/ScriptManager.h"
+#include "engine/simulation/CategoryLibrary.h"
 #include <string>
 #include <functional>
 
@@ -65,11 +66,7 @@ private:
     void render_unsaved_changes_dialog();
     void handle_shortcuts(engine::Engine& engine);
 
-    // Try to perform an action that requires the scene to be clean.
-    // If the scene is dirty, shows a confirmation dialog first.
-    // If the scene is clean, executes the action immediately.
     void confirm_discard_or_save(std::function<void()> action);
-
     void confirm_all_unsaved(std::function<void()> action);
 
     void on_file_opened(const std::string& path);
@@ -77,6 +74,8 @@ private:
     void launch_pixart(const std::string& file_path);
 
     void delete_selection();
+
+    void load_project_assets();
 
     PanelManager m_panel_manager;
     std::unique_ptr<ProjectManager> m_project_manager;
@@ -86,6 +85,8 @@ private:
     EditorToolbar m_toolbar{m_context, m_runtime, m_script_manager, m_panel_manager};
 
     entt::registry m_scene_registry;
+
+    engine::simulation::CategoryLibrary m_category_library;
 
     std::string m_engine_src_path;
 

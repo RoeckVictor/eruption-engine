@@ -1,11 +1,17 @@
 #include "engine/core/Engine.h"
 #include "editor/core/EditorApplication.h"
 #include "editor/core/ProjectManager.h"
+#include "engine/platform/PlatformUtils.h"
 
 #include <cstdio>
+#include <filesystem>
 
 int main(int argc, char* argv[]) {
     printf("=== Eruption Editor ===\n");
+
+    // Set working directory to executable directory for consistent path resolution
+    std::string exe_dir = engine::platform::executable_directory();
+    std::filesystem::current_path(exe_dir);
 
     // Parse command line arguments
     std::string project_path;

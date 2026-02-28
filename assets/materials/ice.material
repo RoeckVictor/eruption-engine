@@ -1,0 +1,53 @@
+{
+  "schema_version": 2,
+  "id": 6,
+  "name": "Ice",
+  "internal_name": "ice",
+
+  "physical": {
+    "density": 150,
+    "category": "static"
+  },
+
+  "thermal": {
+    "default_temp": 20,
+    "conductivity": 0.9
+  },
+
+  "rendering": {
+    "default_color": "#B0E0E6DD",
+    "color_variance": { "hue": 5, "saturation": 10, "lightness": 15 }
+  },
+
+  "flags": [],
+  "interactions": [
+    {
+      "id": "ice_melt",
+      "type": "temperature",
+      "priority": 50,
+      "probability": 0.2,
+      "sim_step_threshold": 10,
+      "conditions": {
+        "temp_above": 100
+      },
+      "effects": [
+        { "type": "transform", "into": "water", "color_behavior": "replace" }
+      ]
+    },
+    {
+      "id": "ice_lava_contact",
+      "type": "contact",
+      "priority": 100,
+      "probability": 0.25,
+      "sim_step_threshold": 0,
+      "conditions": {
+        "contact_with": ["lava"]
+      },
+      "effects": [
+        { "type": "transform", "into": "water", "color_behavior": "replace" },
+        { "type": "set_temp", "value": 128 },
+        { "type": "change_neighbor_temp", "delta": -30 }
+      ]
+    }
+  ]
+}

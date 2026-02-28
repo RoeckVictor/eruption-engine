@@ -104,7 +104,7 @@ void ParticleBuffer::flush_spawns() {
         p.material = req.material;
         p.lifetime = req.lifetime;
         p.flags = 1; // alive
-        p._pad = 0.0f;
+        p.color = req.color;
 
         size_t offset = static_cast<size_t>(slot) * sizeof(GpuParticle);
         m_particle_ssbo.update(offset, sizeof(GpuParticle), &p);

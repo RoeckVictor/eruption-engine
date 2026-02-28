@@ -1,0 +1,49 @@
+{
+  "schema_version": 2,
+  "id": 8,
+  "name": "Fire",
+  "internal_name": "fire",
+
+  "physical": {
+    "density": 5,
+    "category": "gas"
+  },
+
+  "thermal": {
+    "default_temp": 250,
+    "conductivity": 0.2
+  },
+
+  "rendering": {
+    "default_color": "#FF6600FF",
+    "color_variance": { "hue": 15, "saturation": 5, "lightness": 30 }
+  },
+
+  "flags": ["hazard"],
+  "interactions": [
+    {
+      "id": "fire_decay",
+      "type": "time_decay",
+      "priority": 10,
+      "probability": 0.02,
+      "sim_step_threshold": 120,
+      "conditions": {},
+      "effects": [
+        { "type": "destroy" }
+      ]
+    },
+    {
+      "id": "fire_spread_to_flammable",
+      "type": "contact",
+      "priority": 80,
+      "probability": 0.2,
+      "sim_step_threshold": 0,
+      "conditions": {
+        "contact_with_flag": 2
+      },
+      "effects": [
+        { "type": "set_neighbor_temp", "value": 200 }
+      ]
+    }
+  ]
+}

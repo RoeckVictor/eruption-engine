@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": 4,
+  "name": "Gas",
+  "internal_name": "gas",
+  "mobile": true,
+  "movement_rules": [
+    {
+      "direction": "up",
+      "priority": 0,
+      "swap_with": ["empty"],
+      "density_check": true
+    },
+    {
+      "direction": "up_left",
+      "priority": 1,
+      "swap_with": ["empty"],
+      "density_check": true
+    },
+    {
+      "direction": "up_right",
+      "priority": 1,
+      "swap_with": ["empty"],
+      "density_check": true
+    },
+    {
+      "direction": "left",
+      "priority": 2,
+      "swap_with": ["empty"],
+      "density_check": false
+    },
+    {
+      "direction": "right",
+      "priority": 2,
+      "swap_with": ["empty"],
+      "density_check": false
+    }
+  ],
+  "randomize_equal_priority": true,
+  "dissipation": {
+    "enabled": true,
+    "rate": 0.001,
+    "into": "air"
+  }
+}

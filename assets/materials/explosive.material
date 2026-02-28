@@ -1,0 +1,51 @@
+{
+  "schema_version": 2,
+  "id": 9,
+  "name": "Explosive",
+  "internal_name": "explosive",
+
+  "physical": {
+    "density": 190,
+    "category": "static"
+  },
+
+  "thermal": {
+    "default_temp": 128,
+    "conductivity": 0.1
+  },
+
+  "rendering": {
+    "default_color": "#CC0000FF",
+    "color_variance": { "hue": 5, "saturation": 10, "lightness": 10 }
+  },
+
+  "flags": ["flammable"],
+  "interactions": [
+    {
+      "id": "explosive_ignite",
+      "type": "temperature",
+      "priority": 100,
+      "probability": 1.0,
+      "sim_step_threshold": 1,
+      "conditions": {
+        "temp_above": 150
+      },
+      "effects": [
+        { "type": "transform", "into": "fire", "color_behavior": "replace" }
+      ]
+    },
+    {
+      "id": "explosive_fire_contact",
+      "type": "contact",
+      "priority": 100,
+      "probability": 0.5,
+      "sim_step_threshold": 0,
+      "conditions": {
+        "contact_with": ["fire", "lava"]
+      },
+      "effects": [
+        { "type": "transform", "into": "fire", "color_behavior": "replace" }
+      ]
+    }
+  ]
+}

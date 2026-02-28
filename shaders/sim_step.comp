@@ -21,46 +21,105 @@ layout(std430, binding = 3) coherent buffer DirtyChunks {
     uint dirty_chunks[];
 };
 
+// Interaction table SSBO - 6 uints per interaction (uvec4 + 2 color deltas)
+// Packed format: see InteractionCompiler.h for details
+// Used by data-driven interaction system (Phase 4)
+layout(std430, binding = 4) readonly buffer InteractionTable {
+    uint interaction_data[];
+};
+
+// Color palette SSBO - 256 entries (one per material)
+// Used for Blend color behavior (to get new material's default color)
+layout(std430, binding = 5) readonly buffer ColorPalette {
+    uint palette[];
+};
+
+// Category table SSBO - 10 uints per category, 16 categories max
+// Word 0 (header): mobile(1) | randomize(1) | dissipation(1) | rule_count(4) | diss_rate(8) | diss_into(8) | reserved(9)
+// Words 1-8: movement rules (direction(4) | priority(4) | density_check(1) | swap_mask(16) | reserved(7))
+// Word 9: reserved
+layout(std430, binding = 6) readonly buffer CategoryTable {
+    uint cat_table[];
+};
+
+// Category table constants
+#define CAT_WORDS 10u
+#define CAT_MAX_RULES 8u
+
+// Direction constants for category movement rules
+#define DIR_DOWN       0u
+#define DIR_DOWN_LEFT  1u
+#define DIR_DOWN_RIGHT 2u
+#define DIR_LEFT       3u
+#define DIR_RIGHT      4u
+#define DIR_UP         5u
+#define DIR_UP_LEFT    6u
+#define DIR_UP_RIGHT   7u
+#define DIR_NONE       15u
+
 uniform int u_phase;
 uniform int u_grid_width;
 uniform int u_grid_height;
 uniform uint u_frame;
-uniform uint u_pixel_size;  // bytes per pixel (4 for basic, more for extended)
+uniform uint u_pixel_size;
 
 // Chunk tracking uniforms
 uniform int u_chunk_size_x;
 uniform int u_chunk_size_y;
 uniform int u_num_chunks_x;
 
-// Material ID uniforms (avoids hardcoded magic numbers)
-uniform uint u_mat_water;
-uniform uint u_mat_lava;
-uniform uint u_mat_ice;
-uniform uint u_mat_steam;
-
 #define PIXEL_READ_SSBO pixels_read
+#define PIXEL_WRITE_SSBO pixels_write
 #include "include/pixel_access.glsl"
 #include "include/material_props.glsl"
 
-// Load pixel from read SSBO at grid position
-uvec4 loadPixel(ivec2 pos) {
-    return unpackPixel(readPackedPixel(pos));
+// Load pixel simulation data (bytes 0-3) from read SSBO at grid position
+uvec4 loadPixelSim(ivec2 pos) {
+    uint idx = uint(pos.y) * uint(u_grid_width) + uint(pos.x);
+    if (u_pixel_size >= 8u) {
+        return unpackPixel(pixels_read[idx * 2u]);
+    } else {
+        return unpackPixel(readPackedPixel(pos));
+    }
 }
 
-// Store pixel to write SSBO at grid position.
+// Load pixel color (bytes 4-7) from read SSBO at grid position
+// Returns uvec4(r, g, b, a) or (0,0,0,0) for 4-byte pixels
+uvec4 loadPixelColor(ivec2 pos) {
+    if (u_pixel_size >= 8u) {
+        uint idx = uint(pos.y) * uint(u_grid_width) + uint(pos.x);
+        return unpackPixel(pixels_read[idx * 2u + 1u]);
+    }
+    return uvec4(0u);
+}
+
+// Store pixel simulation data and color to write SSBO at grid position.
 // SAFETY: The Margolus scheme guarantees each 2x2 block is processed by exactly
-// one invocation with no overlap, so concurrent writes to different positions
-// are safe without atomics for the aligned 4-byte case.
+// one invocation with no overlap, so concurrent writes are safe.
+void storePixel8(ivec2 pos, uvec4 sim, uvec4 color) {
+    uint idx = uint(pos.y) * uint(u_grid_width) + uint(pos.x);
+    if (u_pixel_size >= 8u) {
+        pixels_write[idx * 2u] = packPixel(sim);
+        pixels_write[idx * 2u + 1u] = packPixel(color);
+    } else {
+        pixels_write[idx] = packPixel(sim);
+    }
+}
+
+// Legacy: load sim data only (for compatibility with existing code paths)
+uvec4 loadPixel(ivec2 pos) {
+    return loadPixelSim(pos);
+}
+
+// Legacy: store sim data only (for 4-byte pixel paths)
 void storePixel(ivec2 pos, uvec4 pixel) {
     uint idx = uint(pos.y) * uint(u_grid_width) + uint(pos.x);
-    uint byte_offset = idx * u_pixel_size;
-    uint word_offset = byte_offset / 4u;
-
-    uint packed = packPixel(pixel);
-
-    // Only the aligned 4-byte path is supported. The engine always uses
-    // u_pixel_size == 4, so this is the only active code path.
-    pixels_write[word_offset] = packed;
+    if (u_pixel_size >= 8u) {
+        pixels_write[idx * 2u] = packPixel(pixel);
+        // Preserve existing color - DON'T overwrite word 1
+    } else {
+        pixels_write[idx] = packPixel(pixel);
+    }
 }
 
 // Helper to update material and sync category in G channel
@@ -106,39 +165,612 @@ uint getCategoryFast(uvec4 pixel) {
     return pixel.g;
 }
 
-// ---- Direct contact reaction for specific material pairs ----
-// Returns true if a reaction occurred.
-bool tryContactReact(inout uvec4 a, inout uvec4 b, uint rng) {
-    uint mA = a.r, mB = b.r;
+// Category header accessors (word 0)
+uint getCatHeader(uint cat_id) {
+    return cat_table[cat_id * CAT_WORDS];
+}
 
-    // Lava + Water -> Steam + cooled Lava (probabilistic so it's not instant)
-    if (mA == u_mat_lava && mB == u_mat_water && (rng & 3u) == 0u) {
-        setMaterial(b, u_mat_steam); b.b = 200u;
-        a.b = a.b > 40u ? a.b - 40u : 0u;
-        return true;
+bool isCatMobile(uint cat_id) {
+    return (getCatHeader(cat_id) & 1u) != 0u;
+}
+
+bool isCatRandomize(uint cat_id) {
+    return (getCatHeader(cat_id) & 2u) != 0u;
+}
+
+bool isCatDissipation(uint cat_id) {
+    return (getCatHeader(cat_id) & 4u) != 0u;
+}
+
+uint getCatRuleCount(uint cat_id) {
+    return (getCatHeader(cat_id) >> 3) & 0xFu;
+}
+
+uint getCatDissipationRate(uint cat_id) {
+    return (getCatHeader(cat_id) >> 7) & 0xFFu;
+}
+
+uint getCatDissipationInto(uint cat_id) {
+    return (getCatHeader(cat_id) >> 15) & 0xFFu;
+}
+
+// Movement rule accessors (words 1-8)
+uint getCatRule(uint cat_id, uint rule_idx) {
+    return cat_table[cat_id * CAT_WORDS + 1u + rule_idx];
+}
+
+uint getRuleDirection(uint rule) {
+    return rule & 0xFu;
+}
+
+uint getRulePriority(uint rule) {
+    return (rule >> 4) & 0xFu;
+}
+
+bool getRuleDensityCheck(uint rule) {
+    return (rule & 0x100u) != 0u;
+}
+
+uint getRuleSwapMask(uint rule) {
+    return (rule >> 9) & 0xFFFFu;
+}
+
+bool canSwapWithCat(uint rule, uint target_cat) {
+    return (getRuleSwapMask(rule) & (1u << target_cat)) != 0u;
+}
+
+// Direction offset table for movement
+// Returns ivec2(dx, dy) for each direction within a 2x2 Margolus block
+// Note: Not all directions are reachable from all positions in a 2x2 block
+ivec2 getDirOffset(uint dir) {
+    switch (dir) {
+        case DIR_DOWN:       return ivec2(0, 1);
+        case DIR_DOWN_LEFT:  return ivec2(-1, 1);
+        case DIR_DOWN_RIGHT: return ivec2(1, 1);
+        case DIR_LEFT:       return ivec2(-1, 0);
+        case DIR_RIGHT:      return ivec2(1, 0);
+        case DIR_UP:         return ivec2(0, -1);
+        case DIR_UP_LEFT:    return ivec2(-1, -1);
+        case DIR_UP_RIGHT:   return ivec2(1, -1);
+        default:             return ivec2(0, 0);
     }
-    if (mB == u_mat_lava && mA == u_mat_water && (rng & 3u) == 0u) {
-        setMaterial(a, u_mat_steam); a.b = 200u;
-        b.b = b.b > 40u ? b.b - 40u : 0u;
-        return true;
+}
+
+// Check if a direction from a position in the 2x2 block leads to another position in the same block
+// pos is 0-3 for TL(0), TR(1), BL(2), BR(3)
+// Returns the target position index (0-3), or -1 if out of block
+int getDirTargetInBlock(int src_pos, uint dir) {
+    // Block layout: TL(0,0)=0, TR(1,0)=1, BL(0,1)=2, BR(1,1)=3
+    ivec2 src = ivec2(src_pos & 1, src_pos >> 1);
+    ivec2 offset = getDirOffset(dir);
+    ivec2 target = src + offset;
+
+    // Check bounds (must be within 0-1 range)
+    if (target.x < 0 || target.x > 1 || target.y < 0 || target.y > 1) {
+        return -1;  // Out of block
     }
 
-    // Lava + Ice -> Water + cooled Lava
-    if (mA == u_mat_lava && mB == u_mat_ice && (rng & 3u) == 0u) {
-        setMaterial(b, u_mat_water); b.b = 128u;
-        a.b = a.b > 30u ? a.b - 30u : 0u;
-        return true;
+    return target.y * 2 + target.x;
+}
+
+// Try to process dissipation for a category
+void tryDissipate(inout uvec4 pixel, inout uvec4 pixelColor, uint cat_id, uint rng) {
+    if (!isCatDissipation(cat_id)) return;
+
+    uint rate = getCatDissipationRate(cat_id);
+    if ((rng & 0xFFu) < rate) {
+        uint into_mat = getCatDissipationInto(cat_id);
+        setMaterial(pixel, into_mat);
+        pixelColor = uvec4(0u);  // Transparent
     }
-    if (mB == u_mat_lava && mA == u_mat_ice && (rng & 3u) == 0u) {
-        setMaterial(a, u_mat_water); a.b = 128u;
-        b.b = b.b > 30u ? b.b - 30u : 0u;
-        return true;
+}
+
+// Wrapper for isMobile that uses the category table
+bool isMobile(uint cat) {
+    return isCatMobile(cat);
+}
+
+// Try to move a single pixel using its category's movement rules
+// src_pos: position in block (0=TL, 1=TR, 2=BL, 3=BR)
+// Returns true if a swap occurred
+bool tryMovePixelInBlock(
+    int src_pos,
+    inout uvec4 pixels[4],
+    inout uvec4 colors[4],
+    uint rng
+) {
+    uvec4 src_pixel = pixels[src_pos];
+    uint cat_id = getCategoryFast(src_pixel);
+
+    // Skip if not mobile
+    if (!isCatMobile(cat_id)) return false;
+
+    uint rule_count = getCatRuleCount(cat_id);
+    if (rule_count == 0u) return false;
+
+    uint src_density = getDensity(src_pixel.r);
+    bool randomize = isCatRandomize(cat_id);
+
+    // Collect rules and their priorities
+    // We'll process them in priority order (lower = higher priority)
+    uint rules[8];
+    uint priorities[8];
+    uint actual_count = 0u;
+
+    for (uint i = 0u; i < rule_count && i < 8u; i++) {
+        uint rule = getCatRule(cat_id, i);
+        uint dir = getRuleDirection(rule);
+        if (dir == DIR_NONE) continue;
+
+        // Check if this direction is valid within the 2x2 block
+        int target_pos = getDirTargetInBlock(src_pos, dir);
+        if (target_pos < 0) continue;  // Direction goes outside block
+
+        rules[actual_count] = rule;
+        priorities[actual_count] = getRulePriority(rule);
+        actual_count++;
+    }
+
+    if (actual_count == 0u) return false;
+
+    // Process rules by priority (we'll do a simple approach: iterate through priorities 0-15)
+    for (uint prio = 0u; prio < 16u; prio++) {
+        // Collect all rules at this priority
+        uint prio_rules[8];
+        int prio_targets[8];
+        uint prio_count = 0u;
+
+        for (uint i = 0u; i < actual_count; i++) {
+            if (priorities[i] == prio) {
+                uint rule = rules[i];
+                uint dir = getRuleDirection(rule);
+                int target_pos = getDirTargetInBlock(src_pos, dir);
+
+                prio_rules[prio_count] = rule;
+                prio_targets[prio_count] = target_pos;
+                prio_count++;
+            }
+        }
+
+        if (prio_count == 0u) continue;
+
+        // Randomize order within this priority if enabled
+        uint order[8];
+        for (uint i = 0u; i < prio_count; i++) order[i] = i;
+
+        if (randomize && prio_count > 1u) {
+            // Fisher-Yates shuffle
+            for (uint i = prio_count - 1u; i > 0u; i--) {
+                uint j = rng % (i + 1u);
+                rng = rng * 1103515245u + 12345u;  // Simple LCG for next random
+                uint tmp = order[i];
+                order[i] = order[j];
+                order[j] = tmp;
+            }
+        }
+
+        // Try each rule in (possibly randomized) order
+        for (uint i = 0u; i < prio_count; i++) {
+            uint idx = order[i];
+            uint rule = prio_rules[idx];
+            int target_pos = prio_targets[idx];
+
+            uvec4 target_pixel = pixels[target_pos];
+            uint target_cat = getCategoryFast(target_pixel);
+
+            // Check if we can swap with this category
+            if (!canSwapWithCat(rule, target_cat)) continue;
+
+            // Check density if required
+            if (getRuleDensityCheck(rule)) {
+                uint target_density = getDensity(target_pixel.r);
+                if (target_density >= src_density) continue;
+            }
+
+            // Perform swap!
+            uvec4 tmp_pixel = pixels[src_pos];
+            uvec4 tmp_color = colors[src_pos];
+            pixels[src_pos] = pixels[target_pos];
+            colors[src_pos] = colors[target_pos];
+            pixels[target_pos] = tmp_pixel;
+            colors[target_pos] = tmp_color;
+
+            return true;
+        }
     }
 
     return false;
 }
 
-bool tryReact(inout uvec4 a, inout uvec4 b, uint rng) {
+// Process data-driven movement for all pixels in a 2x2 block
+// Returns true if any movement occurred
+bool processBlockMovement(
+    inout uvec4 tl, inout uvec4 tr, inout uvec4 bl, inout uvec4 br,
+    inout uvec4 tl_color, inout uvec4 tr_color, inout uvec4 bl_color, inout uvec4 br_color,
+    uint rng
+) {
+    // Pack into arrays for easier manipulation
+    uvec4 pixels[4];
+    uvec4 colors[4];
+    pixels[0] = tl; pixels[1] = tr; pixels[2] = bl; pixels[3] = br;
+    colors[0] = tl_color; colors[1] = tr_color; colors[2] = bl_color; colors[3] = br_color;
+
+    bool moved = false;
+
+    // Process each pixel in random order to avoid bias
+    uint order[4] = uint[4](0u, 1u, 2u, 3u);
+
+    // Shuffle order
+    for (uint i = 3u; i > 0u; i--) {
+        uint j = rng % (i + 1u);
+        rng = rng * 1103515245u + 12345u;
+        uint tmp = order[i];
+        order[i] = order[j];
+        order[j] = tmp;
+    }
+
+    // Try to move each pixel
+    for (uint i = 0u; i < 4u; i++) {
+        uint pos = order[i];
+        if (tryMovePixelInBlock(int(pos), pixels, colors, rng)) {
+            moved = true;
+            rng = rng * 1103515245u + 12345u;  // Advance RNG
+        }
+    }
+
+    // Unpack results
+    tl = pixels[0]; tr = pixels[1]; bl = pixels[2]; br = pixels[3];
+    tl_color = colors[0]; tr_color = colors[1]; bl_color = colors[2]; br_color = colors[3];
+
+    return moved;
+}
+
+// Process dissipation for all pixels in a 2x2 block
+void processBlockDissipation(
+    inout uvec4 tl, inout uvec4 tr, inout uvec4 bl, inout uvec4 br,
+    inout uvec4 tl_color, inout uvec4 tr_color, inout uvec4 bl_color, inout uvec4 br_color,
+    uint rng
+) {
+    uint cat_tl = getCategoryFast(tl);
+    uint cat_tr = getCategoryFast(tr);
+    uint cat_bl = getCategoryFast(bl);
+    uint cat_br = getCategoryFast(br);
+
+    tryDissipate(tl, tl_color, cat_tl, rng);
+    tryDissipate(tr, tr_color, cat_tr, rng >> 8u);
+    tryDissipate(bl, bl_color, cat_bl, rng >> 16u);
+    tryDissipate(br, br_color, cat_br, rng >> 24u);
+}
+
+// ============================================================================
+// Data-Driven Interaction System
+// ============================================================================
+
+// Interaction type constants (must match InteractionType enum in C++)
+const uint INT_TYPE_TEMPERATURE = 0u;
+const uint INT_TYPE_CONTACT = 1u;
+const uint INT_TYPE_TIME_DECAY = 2u;
+const uint INT_TYPE_RANDOM = 3u;
+const uint INT_TYPE_FLAG_BASED = 4u;
+
+// Effect type constants (must match EffectType enum in C++)
+const uint EFF_TRANSFORM = 0u;
+const uint EFF_TRANSFORM_NEIGHBOR = 1u;
+const uint EFF_SET_TEMP = 2u;
+const uint EFF_CHANGE_TEMP = 3u;
+const uint EFF_SET_NEIGHBOR_TEMP = 4u;
+const uint EFF_CHANGE_NEIGHBOR_TEMP = 5u;
+const uint EFF_SET_FLAG = 6u;
+const uint EFF_CLEAR_FLAG = 7u;
+const uint EFF_SET_NEIGHBOR_FLAG = 8u;
+const uint EFF_SPAWN_PARTICLE = 9u;
+const uint EFF_DESTROY = 10u;
+const uint EFF_NONE = 15u;
+
+// Color behavior constants (must match ColorBehavior enum in C++)
+const uint COLOR_NONE = 0u;      // No color change
+const uint COLOR_REPLACE = 1u;   // Use new material's default color
+const uint COLOR_INHERIT = 2u;   // Keep original color
+const uint COLOR_BLEND = 3u;     // Blend old and new colors 50/50
+const uint COLOR_ADD = 4u;       // Add color delta
+const uint COLOR_SUBTRACT = 5u;  // Subtract color delta
+
+// Interaction packing: 6 uints per interaction
+// Word 0: temp_above(8) | temp_below(8) | contact_mat_1(8) | contact_mat_2(8)
+// Word 1: contact_mat_3(8) | contact_mat_4(8) | type(4) | self_flag(4) | contact_flag(4) | contact_cat(4)
+// Word 2: eff_type_1(4) | eff_param_1(8) | eff_type_2(4) | eff_param_2(8) | color_behavior_1(3) | color_behavior_2(3) | reserved(2)
+// Word 3: priority(8) | probability(8) | sim_step_threshold(16)
+// Word 4: color_delta_1 (0xRRGGBBAA)
+// Word 5: color_delta_2 (0xRRGGBBAA)
+
+// Helper to read interaction data (6 uints per interaction)
+uvec4 getInteractionWords01(uint offset) {
+    uint base = offset * 6u;
+    return uvec4(interaction_data[base], interaction_data[base + 1u],
+                 interaction_data[base + 2u], interaction_data[base + 3u]);
+}
+
+uint getInteractionColorDelta1(uint offset) {
+    return interaction_data[offset * 6u + 4u];
+}
+
+uint getInteractionColorDelta2(uint offset) {
+    return interaction_data[offset * 6u + 5u];
+}
+
+uint getIntTempAbove(uvec4 packed) { return packed.x & 0xFFu; }
+uint getIntTempBelow(uvec4 packed) { return (packed.x >> 8) & 0xFFu; }
+uint getIntContactMat(uvec4 packed, uint idx) {
+    if (idx == 0u) return (packed.x >> 16) & 0xFFu;
+    if (idx == 1u) return (packed.x >> 24) & 0xFFu;
+    if (idx == 2u) return packed.y & 0xFFu;
+    return (packed.y >> 8) & 0xFFu;
+}
+uint getIntType(uvec4 packed) { return (packed.y >> 16) & 0xFu; }
+uint getIntSelfFlag(uvec4 packed) { return (packed.y >> 20) & 0xFu; }
+uint getIntContactFlag(uvec4 packed) { return (packed.y >> 24) & 0xFu; }
+uint getIntContactCat(uvec4 packed) { return (packed.y >> 28) & 0xFu; }
+
+uint getIntEffType1(uvec4 packed) { return packed.z & 0xFu; }
+uint getIntEffParam1(uvec4 packed) { return (packed.z >> 4) & 0xFFu; }
+uint getIntEffType2(uvec4 packed) { return (packed.z >> 12) & 0xFu; }
+uint getIntEffParam2(uvec4 packed) { return (packed.z >> 16) & 0xFFu; }
+uint getIntColorBehavior1(uvec4 packed) { return (packed.z >> 24) & 0x7u; }  // 3 bits
+uint getIntColorBehavior2(uvec4 packed) { return (packed.z >> 27) & 0x7u; }  // 3 bits
+
+uint getIntPriority(uvec4 packed) { return packed.w & 0xFFu; }
+uint getIntProbability(uvec4 packed) { return (packed.w >> 8) & 0xFFu; }
+uint getIntSimStepThreshold(uvec4 packed) { return (packed.w >> 16) & 0xFFFFu; }
+
+// Unpack color from uint32 (0xRRGGBBAA) to uvec4(r, g, b, a)
+uvec4 unpackColorRGBA(uint packed) {
+    return uvec4(
+        (packed >> 24) & 0xFFu,
+        (packed >> 16) & 0xFFu,
+        (packed >> 8) & 0xFFu,
+        packed & 0xFFu
+    );
+}
+
+// Check if contact materials match (supports up to 4 contact materials)
+bool checkContactMaterials(uvec4 interaction, uint neighborMat) {
+    for (uint i = 0u; i < 4u; i++) {
+        uint contactMat = getIntContactMat(interaction, i);
+        if (contactMat == 255u) continue;  // 255 = no material specified
+        if (contactMat == neighborMat) return true;
+    }
+    return false;
+}
+
+// Check if interaction conditions are met for a pixel pair
+bool checkConditions(uvec4 interaction, uvec4 self, uvec4 neighbor, uint selfTemp) {
+    uint intType = getIntType(interaction);
+
+    // Temperature conditions
+    if (intType == INT_TYPE_TEMPERATURE) {
+        uint tempAbove = getIntTempAbove(interaction);
+        uint tempBelow = getIntTempBelow(interaction);
+        if (tempAbove > 0u && selfTemp < tempAbove) return false;
+        if (tempBelow < 255u && selfTemp > tempBelow) return false;
+    }
+
+    // Contact conditions
+    if (intType == INT_TYPE_CONTACT) {
+        uint neighborMat = neighbor.r;
+        uint neighborCat = getCategoryFast(neighbor);
+
+        // Check specific materials
+        if (!checkContactMaterials(interaction, neighborMat)) {
+            // Check category if no specific material matched
+            uint contactCat = getIntContactCat(interaction);
+            if (contactCat < 15u && contactCat != neighborCat) return false;
+            if (contactCat == 15u) return false;  // No match
+        }
+
+        // Check contact material flags
+        uint contactFlag = getIntContactFlag(interaction);
+        if (contactFlag > 0u) {
+            uint neighborFlags = getMatFlags(neighborMat);
+            if ((neighborFlags & contactFlag) == 0u) return false;
+        }
+    }
+
+    // Self flag conditions
+    uint selfFlag = getIntSelfFlag(interaction);
+    if (selfFlag > 0u && (self.a & selfFlag) == 0u) return false;
+
+    return true;
+}
+
+// Apply color behavior to a pixel
+// targetColor: the color to modify
+// newMatId: the new material ID (for REPLACE/BLEND)
+// colorDelta: the color delta for ADD/SUBTRACT
+void applyColorBehavior(uint colorBehavior, inout uvec4 targetColor, uint newMatId, uint colorDelta) {
+    switch (colorBehavior) {
+        case COLOR_NONE:
+            // No color change
+            break;
+
+        case COLOR_REPLACE:
+            // Set color to transparent - color shader will use material's palette color
+            targetColor = uvec4(0u);
+            break;
+
+        case COLOR_INHERIT:
+            // Keep color as-is (do nothing)
+            break;
+
+        case COLOR_BLEND: {
+            // Blend old color with new material's default color (50/50)
+            uint newColor = palette[newMatId];
+            uvec4 newRGBA = unpackColorRGBA(newColor);
+            // Average the colors (preserving alpha from new material)
+            targetColor.r = (targetColor.r + newRGBA.r) / 2u;
+            targetColor.g = (targetColor.g + newRGBA.g) / 2u;
+            targetColor.b = (targetColor.b + newRGBA.b) / 2u;
+            targetColor.a = newRGBA.a;
+            break;
+        }
+
+        case COLOR_ADD: {
+            // Add color delta (clamped to 255)
+            uvec4 delta = unpackColorRGBA(colorDelta);
+            targetColor.r = min(targetColor.r + delta.r, 255u);
+            targetColor.g = min(targetColor.g + delta.g, 255u);
+            targetColor.b = min(targetColor.b + delta.b, 255u);
+            // Don't modify alpha with add
+            break;
+        }
+
+        case COLOR_SUBTRACT: {
+            // Subtract color delta (clamped to 0)
+            uvec4 delta = unpackColorRGBA(colorDelta);
+            targetColor.r = targetColor.r > delta.r ? targetColor.r - delta.r : 0u;
+            targetColor.g = targetColor.g > delta.g ? targetColor.g - delta.g : 0u;
+            targetColor.b = targetColor.b > delta.b ? targetColor.b - delta.b : 0u;
+            // Don't modify alpha with subtract
+            break;
+        }
+    }
+}
+
+// Apply a single effect to self or neighbor
+void applyEffect(uint effType, uint effParam, uint colorBehavior, uint colorDelta,
+                 inout uvec4 self, inout uvec4 selfColor,
+                 inout uvec4 neighbor, inout uvec4 neighborColor) {
+    switch (effType) {
+        case EFF_TRANSFORM:
+            // Transform self to new material
+            setMaterial(self, effParam);
+            applyColorBehavior(colorBehavior, selfColor, effParam, colorDelta);
+            break;
+
+        case EFF_TRANSFORM_NEIGHBOR:
+            // Transform neighbor to new material
+            setMaterial(neighbor, effParam);
+            applyColorBehavior(colorBehavior, neighborColor, effParam, colorDelta);
+            break;
+
+        case EFF_SET_TEMP:
+            self.b = effParam;
+            applyColorBehavior(colorBehavior, selfColor, self.r, colorDelta);
+            break;
+
+        case EFF_CHANGE_TEMP: {
+            // effParam is signed 8-bit packed into uint
+            int delta = int(effParam);
+            if (delta > 127) delta -= 256;  // Sign extend
+            int newTemp = int(self.b) + delta;
+            self.b = uint(clamp(newTemp, 0, 255));
+            applyColorBehavior(colorBehavior, selfColor, self.r, colorDelta);
+            break;
+        }
+
+        case EFF_SET_NEIGHBOR_TEMP:
+            neighbor.b = effParam;
+            applyColorBehavior(colorBehavior, neighborColor, neighbor.r, colorDelta);
+            break;
+
+        case EFF_CHANGE_NEIGHBOR_TEMP: {
+            int delta = int(effParam);
+            if (delta > 127) delta -= 256;
+            int newTemp = int(neighbor.b) + delta;
+            neighbor.b = uint(clamp(newTemp, 0, 255));
+            applyColorBehavior(colorBehavior, neighborColor, neighbor.r, colorDelta);
+            break;
+        }
+
+        case EFF_SET_FLAG:
+            self.a |= effParam;
+            applyColorBehavior(colorBehavior, selfColor, self.r, colorDelta);
+            break;
+
+        case EFF_CLEAR_FLAG:
+            self.a &= ~effParam;
+            applyColorBehavior(colorBehavior, selfColor, self.r, colorDelta);
+            break;
+
+        case EFF_SET_NEIGHBOR_FLAG:
+            neighbor.a |= effParam;
+            applyColorBehavior(colorBehavior, neighborColor, neighbor.r, colorDelta);
+            break;
+
+        case EFF_DESTROY:
+            setMaterial(self, 0u);  // Air
+            self.b = 128u;          // Room temp
+            selfColor = uvec4(0u);  // Transparent (ignore color behavior for destroy)
+            break;
+
+        // EFF_SPAWN_PARTICLE would need particle buffer support
+        default:
+            break;
+    }
+}
+
+// Process all interactions for a material, return true if any triggered
+bool processInteractions(inout uvec4 self, inout uvec4 selfColor,
+                         inout uvec4 neighbor, inout uvec4 neighborColor,
+                         uint rng) {
+    uint matId = self.r;
+    uint intOffset = getInteractionOffset(matId);
+    uint intCount = getInteractionCount(matId);
+
+    if (intCount == 0u) return false;
+
+    uint selfTemp = self.b;
+    bool triggered = false;
+
+    // Process interactions in priority order (pre-sorted by compiler)
+    for (uint i = 0u; i < intCount && i < 15u; i++) {
+        uint absOffset = intOffset + i;
+        uvec4 interaction = getInteractionWords01(absOffset);
+
+        // Check conditions
+        if (!checkConditions(interaction, self, neighbor, selfTemp)) continue;
+
+        // Check probability
+        uint prob = getIntProbability(interaction);
+        if (prob < 255u) {
+            uint roll = (rng >> (i * 2u)) & 0xFFu;
+            if (roll >= prob) continue;
+        }
+
+        // Get color deltas for this interaction
+        uint colorDelta1 = getInteractionColorDelta1(absOffset);
+        uint colorDelta2 = getInteractionColorDelta2(absOffset);
+
+        // Apply effects (each effect has its own color behavior and delta)
+        uint effType1 = getIntEffType1(interaction);
+        uint effParam1 = getIntEffParam1(interaction);
+        uint colorBehavior1 = getIntColorBehavior1(interaction);
+
+        if (effType1 != EFF_NONE) {
+            applyEffect(effType1, effParam1, colorBehavior1, colorDelta1,
+                       self, selfColor, neighbor, neighborColor);
+            triggered = true;
+        }
+
+        uint effType2 = getIntEffType2(interaction);
+        uint effParam2 = getIntEffParam2(interaction);
+        uint colorBehavior2 = getIntColorBehavior2(interaction);
+        if (effType2 != EFF_NONE) {
+            applyEffect(effType2, effParam2, colorBehavior2, colorDelta2,
+                       self, selfColor, neighbor, neighborColor);
+            triggered = true;
+        }
+
+        // Only process first matching interaction (highest priority)
+        if (triggered) break;
+    }
+
+    return triggered;
+}
+
+// Data-driven contact reactions with color support
+bool tryReactWithColor(inout uvec4 a, inout uvec4 b,
+                       inout uvec4 a_color, inout uvec4 b_color,
+                       uint rng) {
     uint matA = a.r, matB = b.r;
     if (matA == matB) return false;
 
@@ -146,74 +778,47 @@ bool tryReact(inout uvec4 a, inout uvec4 b, uint rng) {
     uint catA = getCategoryFast(a);
     uint catB = getCategoryFast(b);
 
-    // Skip if either cell is air
-    if (catA == CAT_EMPTY || catB == CAT_EMPTY) return false;
+    // Skip if BOTH cells are air (nothing can happen)
+    if (catA == CAT_EMPTY && catB == CAT_EMPTY) return false;
 
-    // Immediate contact reactions for specific pairs
-    if (tryContactReact(a, b, rng)) return true;
-
-    // General temperature diffusion for everything else
-    uint tempA = a.b, tempB = b.b;
     bool reacted = false;
+
+    // Try data-driven interactions for pixel A (even if B is air - allows transform_neighbor on air)
+    uint intCountA = getInteractionCount(matA);
+    if (intCountA > 0u) {
+        if (processInteractions(a, a_color, b, b_color, rng)) {
+            reacted = true;
+        }
+    }
+
+    // Try data-driven interactions for pixel B (even if A is air)
+    uint intCountB = getInteractionCount(matB);
+    if (intCountB > 0u && !reacted) {
+        if (processInteractions(b, b_color, a, a_color, rng >> 8u)) {
+            reacted = true;
+        }
+    }
+
+    // Temperature diffusion (always runs, engine-level behavior)
+    uint tempA = a.b, tempB = b.b;
 
     if (tempA > tempB + 5u) {
         uint transfer = min((tempA - tempB) / 3u, 30u);
         a.b = tempA - transfer;
         b.b = tempB + transfer;
-        tempA = a.b;
-        tempB = b.b;
     } else if (tempB > tempA + 5u) {
         uint transfer = min((tempB - tempA) / 3u, 30u);
         b.b = tempB - transfer;
         a.b = tempA + transfer;
-        tempA = a.b;
-        tempB = b.b;
     }
-
-    // Melt check (solid->liquid, e.g. ice->water via general heat)
-    uint meltB = getMeltPoint(matB);
-    if (meltB > 0u && tempB >= meltB) {
-        setMaterial(b, getMeltInto(matB));
-        b.b = tempB > 10u ? tempB - 10u : 0u;
-        reacted = true;
-    }
-    uint meltA = getMeltPoint(matA);
-    if (meltA > 0u && tempA >= meltA) {
-        setMaterial(a, getMeltInto(matA));
-        a.b = tempA > 10u ? tempA - 10u : 0u;
-        reacted = true;
-    }
-
-    // Re-read material IDs after melt (they may have changed)
-    matA = a.r;
-    matB = b.r;
-    tempA = a.b;
-    tempB = b.b;
-
-    // Boil check (liquid->gas, e.g. water->steam via general heat)
-    uint boilB = getBoilPoint(matB);
-    if (boilB > 0u && tempB >= boilB) {
-        setMaterial(b, getBoilInto(matB));
-        b.b = tempB > 20u ? tempB - 20u : 0u;
-        reacted = true;
-    }
-    uint boilA = getBoilPoint(matA);
-    if (boilA > 0u && tempA >= boilA) {
-        setMaterial(a, getBoilInto(matA));
-        a.b = tempA > 20u ? tempA - 20u : 0u;
-        reacted = true;
-    }
-
-    // Cooled lava evaporates into steam
-    if (a.r == u_mat_lava && a.b < 100u) { setMaterial(a, u_mat_steam); a.b = 180u; reacted = true; }
-    if (b.r == u_mat_lava && b.b < 100u) { setMaterial(b, u_mat_steam); b.b = 180u; reacted = true; }
 
     return reacted;
 }
 
 // ---- Gravity swap: A is above, B is below ----
 // Falls into empty space, and powders sink through liquids.
-bool trySwapGravity(inout uvec4 a, inout uvec4 b) {
+// Also swaps colors when pixels swap positions.
+bool trySwapGravity(inout uvec4 a, inout uvec4 b, inout uvec4 a_color, inout uvec4 b_color) {
     // Use cached category from pixel.g (faster than SSBO lookup)
     uint catA = getCategoryFast(a);
     uint catB = getCategoryFast(b);
@@ -221,11 +826,13 @@ bool trySwapGravity(inout uvec4 a, inout uvec4 b) {
     // Powder/liquid falls into empty
     if ((catA == CAT_POWDER || catA == CAT_LIQUID) && catB == CAT_EMPTY) {
         uvec4 tmp = a; a = b; b = tmp;
+        uvec4 tmp_c = a_color; a_color = b_color; b_color = tmp_c;
         return true;
     }
     // Powder sinks through liquid (sand falls through water)
     if (catA == CAT_POWDER && catB == CAT_LIQUID) {
         uvec4 tmp = a; a = b; b = tmp;
+        uvec4 tmp_c = a_color; a_color = b_color; b_color = tmp_c;
         return true;
     }
     return false;
@@ -245,7 +852,7 @@ void main() {
             for (int dx = 0; dx < 2; dx++) {
                 ivec2 p = block_base + ivec2(dx, dy);
                 if (p.x >= 0 && p.x < u_grid_width && p.y >= 0 && p.y < u_grid_height) {
-                    storePixel(p, loadPixel(p));
+                    storePixel8(p, loadPixelSim(p), loadPixelColor(p));
                 }
             }
         }
@@ -253,30 +860,49 @@ void main() {
     }
 
     // Load 2x2 block: TL TR / BL BR
-    uvec4 tl = loadPixel(block_base + ivec2(0, 0));
-    uvec4 tr = loadPixel(block_base + ivec2(1, 0));
-    uvec4 bl = loadPixel(block_base + ivec2(0, 1));
-    uvec4 br = loadPixel(block_base + ivec2(1, 1));
+    // Simulation data (material, category, temperature, flags)
+    uvec4 tl = loadPixelSim(block_base + ivec2(0, 0));
+    uvec4 tr = loadPixelSim(block_base + ivec2(1, 0));
+    uvec4 bl = loadPixelSim(block_base + ivec2(0, 1));
+    uvec4 br = loadPixelSim(block_base + ivec2(1, 1));
 
-    // ---- EARLY-OUT: Skip processing if all pixels are empty or static ----
-    // These blocks cannot change, so we can write them unchanged immediately.
+    // Per-pixel color (r, g, b, a) - travels with the pixel during swaps
+    uvec4 tl_color = loadPixelColor(block_base + ivec2(0, 0));
+    uvec4 tr_color = loadPixelColor(block_base + ivec2(1, 0));
+    uvec4 bl_color = loadPixelColor(block_base + ivec2(0, 1));
+    uvec4 br_color = loadPixelColor(block_base + ivec2(1, 1));
+
+    // ---- EARLY-OUT: Skip processing if all pixels are immobile AND have no interactions ----
+    // Use data-driven isCatMobile() to check mobility from category table
     uint cat_tl = getCategoryFast(tl);
     uint cat_tr = getCategoryFast(tr);
     uint cat_bl = getCategoryFast(bl);
     uint cat_br = getCategoryFast(br);
 
-    bool tl_static = (cat_tl == CAT_EMPTY || cat_tl == CAT_STATIC);
-    bool tr_static = (cat_tr == CAT_EMPTY || cat_tr == CAT_STATIC);
-    bool bl_static = (cat_bl == CAT_EMPTY || cat_bl == CAT_STATIC);
-    bool br_static = (cat_br == CAT_EMPTY || cat_br == CAT_STATIC);
+    bool tl_immobile = !isCatMobile(cat_tl);
+    bool tr_immobile = !isCatMobile(cat_tr);
+    bool bl_immobile = !isCatMobile(cat_bl);
+    bool br_immobile = !isCatMobile(cat_br);
 
-    if (tl_static && tr_static && bl_static && br_static) {
-        // All pixels are immobile - write unchanged and skip all physics
-        storePixel(block_base + ivec2(0, 0), tl);
-        storePixel(block_base + ivec2(1, 0), tr);
-        storePixel(block_base + ivec2(0, 1), bl);
-        storePixel(block_base + ivec2(1, 1), br);
-        return;
+    // Also check for dissipation (immobile categories might still dissipate)
+    bool has_dissipation = isCatDissipation(cat_tl) || isCatDissipation(cat_tr) ||
+                           isCatDissipation(cat_bl) || isCatDissipation(cat_br);
+
+    if (tl_immobile && tr_immobile && bl_immobile && br_immobile && !has_dissipation) {
+        // Check if any pixel has interactions that could trigger
+        bool has_interactions = getInteractionCount(tl.r) > 0u ||
+                                getInteractionCount(tr.r) > 0u ||
+                                getInteractionCount(bl.r) > 0u ||
+                                getInteractionCount(br.r) > 0u;
+
+        if (!has_interactions) {
+            // All pixels are immobile AND have no interactions/dissipation - safe to skip
+            storePixel8(block_base + ivec2(0, 0), tl, tl_color);
+            storePixel8(block_base + ivec2(1, 0), tr, tr_color);
+            storePixel8(block_base + ivec2(0, 1), bl, bl_color);
+            storePixel8(block_base + ivec2(1, 1), br, br_color);
+            return;
+        }
     }
 
     // Single base hash, derive variants via XOR (cheaper than multiple hash() calls)
@@ -285,147 +911,34 @@ void main() {
 
     // ---- PASS 1: Contact reactions (temperature transfer + state changes) ----
     // Process ALL adjacent pairs for reactions BEFORE movement.
+    // Use tryReactWithColor to properly handle color during material transformations.
     uint react_rng = base_rng ^ 0x9E3779B9u;  // Golden ratio derived variant
-    tryReact(tl, tr, react_rng);
-    tryReact(bl, br, react_rng >> 2u);
-    tryReact(tl, bl, react_rng >> 4u);
-    tryReact(tr, br, react_rng >> 6u);
-    tryReact(tl, br, react_rng >> 8u);
-    tryReact(tr, bl, react_rng >> 10u);
+    tryReactWithColor(tl, tr, tl_color, tr_color, react_rng);
+    tryReactWithColor(bl, br, bl_color, br_color, react_rng >> 2u);
+    tryReactWithColor(tl, bl, tl_color, bl_color, react_rng >> 4u);
+    tryReactWithColor(tr, br, tr_color, br_color, react_rng >> 6u);
+    tryReactWithColor(tl, br, tl_color, br_color, react_rng >> 8u);
+    tryReactWithColor(tr, bl, tr_color, bl_color, react_rng >> 10u);
 
-    // ---- PASS 2: Gravity (vertical, heavy sinks) ----
+    // ---- PASS 2: Data-driven movement (replaces hardcoded powder/liquid/gas) ----
     // Track if any movement occurred to mark chunks dirty
     bool moved = false;
 
-    if (trySwapGravity(tl, bl)) moved = true;
-    if (trySwapGravity(tr, br)) moved = true;
+    // First, do gravity-based swaps (heavy sinks) - this handles density-based falling
+    if (trySwapGravity(tl, bl, tl_color, bl_color)) moved = true;
+    if (trySwapGravity(tr, br, tr_color, br_color)) moved = true;
 
-    // ---- PASS 3: Diagonal slide for powders ----
-    // Re-read categories after potential swaps
-    cat_tl = getCategoryFast(tl);
-    cat_tr = getCategoryFast(tr);
-    cat_bl = getCategoryFast(bl);
-    cat_br = getCategoryFast(br);
-
-    if ((rng & 2u) != 0u) {
-        if (cat_tl == CAT_POWDER && cat_br == CAT_EMPTY) {
-            uvec4 tmp = tl; tl = br; br = tmp;
-            moved = true;
-        }
-        // Re-read after potential swap
-        cat_tr = getCategoryFast(tr);
-        cat_bl = getCategoryFast(bl);
-        if (cat_tr == CAT_POWDER && cat_bl == CAT_EMPTY) {
-            uvec4 tmp = tr; tr = bl; bl = tmp;
-            moved = true;
-        }
-    } else {
-        if (cat_tr == CAT_POWDER && cat_bl == CAT_EMPTY) {
-            uvec4 tmp = tr; tr = bl; bl = tmp;
-            moved = true;
-        }
-        // Re-read after potential swap
-        cat_tl = getCategoryFast(tl);
-        cat_br = getCategoryFast(br);
-        if (cat_tl == CAT_POWDER && cat_br == CAT_EMPTY) {
-            uvec4 tmp = tl; tl = br; br = tmp;
-            moved = true;
-        }
-    }
-
-    // ---- PASS 4: Lateral spread for liquids ----
-    rng = base_rng ^ 0x85EBCA6Bu;  // Derived variant for liquid spread
-    // Re-read categories
-    cat_tl = getCategoryFast(tl);
-    cat_tr = getCategoryFast(tr);
-    cat_bl = getCategoryFast(bl);
-    cat_br = getCategoryFast(br);
-
-    // Top row
-    if (cat_tl == CAT_LIQUID && cat_tr == CAT_EMPTY && (rng & 1u) == 0u) {
-        uvec4 tmp = tl; tl = tr; tr = tmp;
-        moved = true;
-    } else if (cat_tr == CAT_LIQUID && cat_tl == CAT_EMPTY && (rng & 1u) == 0u) {
-        uvec4 tmp = tl; tl = tr; tr = tmp;
-        moved = true;
-    }
-    // Bottom row
-    cat_bl = getCategoryFast(bl);
-    cat_br = getCategoryFast(br);
-    if (cat_bl == CAT_LIQUID && cat_br == CAT_EMPTY && (rng & 4u) == 0u) {
-        uvec4 tmp = bl; bl = br; br = tmp;
-        moved = true;
-    } else if (cat_br == CAT_LIQUID && cat_bl == CAT_EMPTY && (rng & 4u) == 0u) {
-        uvec4 tmp = bl; bl = br; br = tmp;
+    // Then process data-driven movement rules from category definitions
+    // This handles diagonal slides, lateral spread, rising, etc. based on each category's rules
+    uint move_rng = base_rng ^ 0x85EBCA6Bu;
+    if (processBlockMovement(tl, tr, bl, br, tl_color, tr_color, bl_color, br_color, move_rng)) {
         moved = true;
     }
 
-    // ---- PASS 5: Gas rises ----
-    rng = base_rng ^ 0xC2B2AE35u;  // Derived variant for gas movement
-    // Re-read categories
-    cat_tl = getCategoryFast(tl);
-    cat_tr = getCategoryFast(tr);
-    cat_bl = getCategoryFast(bl);
-    cat_br = getCategoryFast(br);
-
-    // Gas rises (swap upward if above is empty or non-gas mobile)
-    if (cat_bl == CAT_GAS && (cat_tl == CAT_EMPTY ||
-        (isMobile(cat_tl) && cat_tl != CAT_GAS)) && (rng & 3u) != 0u) {
-        uvec4 tmp = tl; tl = bl; bl = tmp;
-        moved = true;
-    }
-    cat_tr = getCategoryFast(tr);
-    cat_br = getCategoryFast(br);
-    if (cat_br == CAT_GAS && (cat_tr == CAT_EMPTY ||
-        (isMobile(cat_tr) && cat_tr != CAT_GAS)) && (rng & 12u) != 0u) {
-        uvec4 tmp = tr; tr = br; br = tmp;
-        moved = true;
-    }
-    // Gas lateral spread
-    cat_tl = getCategoryFast(tl);
-    cat_tr = getCategoryFast(tr);
-    if (cat_tl == CAT_GAS && cat_tr == CAT_EMPTY && (rng & 16u) != 0u) {
-        uvec4 tmp = tl; tl = tr; tr = tmp;
-        moved = true;
-    } else if (cat_tr == CAT_GAS && cat_tl == CAT_EMPTY && (rng & 16u) != 0u) {
-        uvec4 tmp = tl; tl = tr; tr = tmp;
-        moved = true;
-    }
-
-    // ---- PASS 6: Gas dissipation ----
-    // Process directly without temporary array (avoid extra indirection)
-    cat_tl = getCategoryFast(tl);
-    if (cat_tl == CAT_GAS) {
-        uint drng = hash(uvec3(block_base, u_frame + 999u));
-        if ((drng & 63u) == 0u) {
-            tl = uvec4(0u, 0u, 128u, 0u); // dissipate to AIR
-            moved = true;
-        }
-    }
-    cat_tr = getCategoryFast(tr);
-    if (cat_tr == CAT_GAS) {
-        uint drng = hash(uvec3(block_base + ivec2(1, 0), u_frame + 999u));
-        if ((drng & 63u) == 0u) {
-            tr = uvec4(0u, 0u, 128u, 0u);
-            moved = true;
-        }
-    }
-    cat_bl = getCategoryFast(bl);
-    if (cat_bl == CAT_GAS) {
-        uint drng = hash(uvec3(block_base + ivec2(0, 1), u_frame + 999u));
-        if ((drng & 63u) == 0u) {
-            bl = uvec4(0u, 0u, 128u, 0u);
-            moved = true;
-        }
-    }
-    cat_br = getCategoryFast(br);
-    if (cat_br == CAT_GAS) {
-        uint drng = hash(uvec3(block_base + ivec2(1, 1), u_frame + 999u));
-        if ((drng & 63u) == 0u) {
-            br = uvec4(0u, 0u, 128u, 0u);
-            moved = true;
-        }
-    }
+    // ---- PASS 3: Data-driven dissipation ----
+    // Each category can define its own dissipation rate and target material
+    uint diss_rng = hash(uvec3(block_base, u_frame + 999u));
+    processBlockDissipation(tl, tr, bl, br, tl_color, tr_color, bl_color, br_color, diss_rng);
 
     // Mark affected chunks as dirty if any pixel moved
     if (moved) {
@@ -520,8 +1033,8 @@ void main() {
     }
 
     // ---- Write results ----
-    storePixel(block_base + ivec2(0, 0), tl);
-    storePixel(block_base + ivec2(1, 0), tr);
-    storePixel(block_base + ivec2(0, 1), bl);
-    storePixel(block_base + ivec2(1, 1), br);
+    storePixel8(block_base + ivec2(0, 0), tl, tl_color);
+    storePixel8(block_base + ivec2(1, 0), tr, tr_color);
+    storePixel8(block_base + ivec2(0, 1), bl, bl_color);
+    storePixel8(block_base + ivec2(1, 1), br, br_color);
 }

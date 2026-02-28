@@ -1,0 +1,67 @@
+{
+  "schema_version": 2,
+  "id": 4,
+  "name": "Water",
+  "internal_name": "water",
+
+  "physical": {
+    "density": 100,
+    "category": "liquid"
+  },
+
+  "thermal": {
+    "default_temp": 128,
+    "conductivity": 0.8
+  },
+
+  "rendering": {
+    "default_color": "#3A7BD5CC",
+    "color_variance": { "hue": 5, "saturation": 10, "lightness": 10 }
+  },
+
+  "flags": [],
+  "interactions": [
+    {
+      "id": "water_freeze",
+      "type": "temperature",
+      "priority": 50,
+      "probability": 0.1,
+      "sim_step_threshold": 30,
+      "conditions": {
+        "temp_below": 50
+      },
+      "effects": [
+        { "type": "transform", "into": "ice", "color_behavior": "replace" }
+      ]
+    },
+    {
+      "id": "water_boil",
+      "type": "temperature",
+      "priority": 50,
+      "probability": 0.2,
+      "sim_step_threshold": 1,
+      "conditions": {
+        "temp_above": 200
+      },
+      "effects": [
+        { "type": "transform", "into": "steam", "color_behavior": "replace" },
+        { "type": "set_temp", "value": 180 }
+      ]
+    },
+    {
+      "id": "water_lava_contact",
+      "type": "contact",
+      "priority": 100,
+      "probability": 0.25,
+      "sim_step_threshold": 0,
+      "conditions": {
+        "contact_with": ["lava"]
+      },
+      "effects": [
+        { "type": "transform", "into": "steam", "color_behavior": "replace" },
+        { "type": "set_temp", "value": 200 },
+        { "type": "change_neighbor_temp", "delta": -40 }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "id": 3,
+  "name": "Liquid",
+  "internal_name": "liquid",
+  "mobile": true,
+  "movement_rules": [
+    {
+      "direction": "down",
+      "priority": 0,
+      "swap_with": ["empty", "gas"],
+      "density_check": true
+    },
+    {
+      "direction": "down_left",
+      "priority": 1,
+      "swap_with": ["empty", "gas"],
+      "density_check": true
+    },
+    {
+      "direction": "down_right",
+      "priority": 1,
+      "swap_with": ["empty", "gas"],
+      "density_check": true
+    },
+    {
+      "direction": "left",
+      "priority": 2,
+      "swap_with": ["empty", "gas"],
+      "density_check": false
+    },
+    {
+      "direction": "right",
+      "priority": 2,
+      "swap_with": ["empty", "gas"],
+      "density_check": false
+    }
+  ],
+  "randomize_equal_priority": true,
+  "dissipation": {
+    "enabled": false
+  }
+}

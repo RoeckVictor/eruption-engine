@@ -4,53 +4,61 @@
 #include <cstdint>
 
 namespace engine::simulation {
-
 /// Per-pixel data structure for SSBO-based grid storage.
-///
-/// This struct defines the engine-mandated fields that every pixel must have.
-/// Games can extend this by defining their own pixel struct that includes
-/// these fields plus game-specific ones (pressure, velocity, etc.).
-///
-/// The struct is designed to be GPU-friendly:
-/// - Tightly packed (no padding within the base fields)
-/// - Power-of-2 aligned when extended
-/// - Fields ordered by frequency of access
-///
-/// GLSL equivalent (must match exactly):
-/// ```glsl
-/// struct Pixel {
-///     uint material;    // byte 0: game-defined material ID
-///     uint category;    // byte 1: engine physics category
-///     uint temperature; // byte 2: thermal value (0-255)
-///     uint flags;       // byte 3: engine flags
-/// };
-/// ```
 struct PixelData {
-    uint8_t material;    // Game-defined material ID (for color lookup, game logic)
-    uint8_t category;    // Engine physics category (CAT_EMPTY, CAT_STATIC, etc.)
-    uint8_t temperature; // Thermal value (0-255)
-    uint8_t flags;       // Engine flags (reserved for future use)
+    // Bytes 0-3: Simulation data
+    uint8_t material;
+    uint8_t category;
+    uint8_t temperature;
+    uint8_t flags;
 
-    // Default constructor: empty pixel
-    PixelData() : material(0), category(CAT_EMPTY), temperature(128), flags(0) {}
+    // Bytes 4-7: Per-pixel color (decoupled from material)
+    uint8_t color_r;
+    uint8_t color_g;
+    uint8_t color_b;
+    uint8_t color_a;
 
-    // Construct with all fields
+    PixelData()
+        : material(0), category(CAT_EMPTY), temperature(128), flags(0)
+        , color_r(0), color_g(0), color_b(0), color_a(0) {}
+
     PixelData(uint8_t mat, uint8_t cat, uint8_t temp, uint8_t flg = 0)
-        : material(mat), category(cat), temperature(temp), flags(flg) {}
+        : material(mat), category(cat), temperature(temp), flags(flg)
+        , color_r(0), color_g(0), color_b(0), color_a(0) {}
 
-    // Check if pixel is empty (no material)
+    PixelData(uint8_t mat, uint8_t cat, uint8_t temp, uint8_t flg,
+              uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+        : material(mat), category(cat), temperature(temp), flags(flg)
+        , color_r(r), color_g(g), color_b(b), color_a(a) {}
+
+    PixelData(uint8_t mat, uint8_t cat, uint8_t temp, uint8_t flg, uint32_t rgba)
+        : material(mat), category(cat), temperature(temp), flags(flg)
+        , color_r((rgba >> 24) & 0xFF)
+        , color_g((rgba >> 16) & 0xFF)
+        , color_b((rgba >> 8) & 0xFF)
+        , color_a(rgba & 0xFF) {}
+
+    void set_color(uint32_t rgba) {
+        color_r = (rgba >> 24) & 0xFF;
+        color_g = (rgba >> 16) & 0xFF;
+        color_b = (rgba >> 8) & 0xFF;
+        color_a = rgba & 0xFF;
+    }
+
+    uint32_t get_color() const {
+        return (static_cast<uint32_t>(color_r) << 24) |
+               (static_cast<uint32_t>(color_g) << 16) |
+               (static_cast<uint32_t>(color_b) << 8) |
+               static_cast<uint32_t>(color_a);
+    }
+
     bool is_empty() const { return category == CAT_EMPTY; }
-
-    // Check if pixel is solid (static or powder)
     bool is_solid() const { return category == CAT_STATIC || category == CAT_POWDER; }
-
-    // Check if pixel is mobile (powder, liquid, or gas)
     bool is_mobile() const {
         return category == CAT_POWDER || category == CAT_LIQUID || category == CAT_GAS;
     }
 };
 
-// Ensure the struct is exactly 4 bytes (no padding)
-static_assert(sizeof(PixelData) == 4, "PixelData must be exactly 4 bytes");
+static_assert(sizeof(PixelData) == 8, "PixelData must be exactly 8 bytes");
 
-} // namespace engine::simulation
+}

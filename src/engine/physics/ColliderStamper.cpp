@@ -74,12 +74,38 @@ void ColliderStamper::stamp_colliders(PhysicsWorld& world,
 }
 
 void ColliderStamper::clear_colliders(simulation::PixelGrid& grid) {
+    size_t pixel_size = grid.pixel_size();
+
     // Restore in reverse order
     for (int i = static_cast<int>(m_stamps.size()) - 1; i >= 0; i--) {
         auto& stamp = m_stamps[i];
+
+        // Read current grid state for this region
+        std::vector<uint8_t> current(stamp.original_pixels.size());
+        grid.readback_region(stamp.region_x, stamp.region_y,
+                             stamp.region_w, stamp.region_h,
+                             current.data(), static_cast<int>(current.size()));
+
+        // Only restore pixels that were actually stamped (inside the shape)
+        // Pixels outside the shape may have been modified (e.g., extracted as particles)
+        // and should NOT be restored to their pre-stamp state
+        for (int y = 0; y < stamp.region_h; y++) {
+            for (int x = 0; x < stamp.region_w; x++) {
+                size_t pixel_idx = static_cast<size_t>(y) * stamp.region_w + x;
+                if (stamp.was_stamped[pixel_idx]) {
+                    // This pixel was inside the shape - restore original
+                    size_t byte_offset = pixel_idx * pixel_size;
+                    for (size_t b = 0; b < pixel_size; b++) {
+                        current[byte_offset + b] = stamp.original_pixels[byte_offset + b];
+                    }
+                }
+                // Pixels not stamped: keep current grid state (may have been extracted)
+            }
+        }
+
         grid.upload_both(stamp.region_x, stamp.region_y,
                          stamp.region_w, stamp.region_h,
-                         stamp.original_pixels.data());
+                         current.data());
     }
     m_stamps.clear();
 }
@@ -261,7 +287,9 @@ void ColliderStamper::stamp_region(b2BodyId body_id, int min_gx, int min_gy, int
     stamp.vel_y = vel_py;
     stamp.center_x = center_gx;
     stamp.center_y = center_gy;
-    stamp.original_pixels.resize(region_w * region_h * 4);
+    size_t pixel_size = grid.pixel_size();
+    stamp.original_pixels.resize(region_w * region_h * pixel_size);
+    stamp.was_stamped.resize(region_w * region_h, false);  // Track which pixels were actually stamped
     grid.readback_region(min_gx, min_gy, region_w, region_h,
                          stamp.original_pixels.data(),
                          static_cast<int>(stamp.original_pixels.size()));
@@ -282,7 +310,7 @@ void ColliderStamper::stamp_region(b2BodyId body_id, int min_gx, int min_gy, int
 
             int local_x = gx - min_gx;
             int local_y = gy - min_gy;
-            size_t ri = (static_cast<size_t>(local_y) * region_w + local_x) * 4;
+            size_t ri = (static_cast<size_t>(local_y) * region_w + local_x) * pixel_size;
 
             uint8_t original_mat = stamp.original_pixels[ri + 0];
             uint8_t original_cat = stamp.original_pixels[ri + 1];
@@ -342,15 +370,39 @@ void ColliderStamper::stamp_region(b2BodyId body_id, int min_gx, int min_gy, int
                 req.material = original_mat;
                 req.lifetime = m_particle_lifetime;
 
+                // Extract color from original pixel (bytes 4-7 for 8-byte pixels)
+                if (pixel_size >= 8) {
+                    uint8_t r = stamp.original_pixels[ri + 4];
+                    uint8_t g = stamp.original_pixels[ri + 5];
+                    uint8_t b = stamp.original_pixels[ri + 6];
+                    uint8_t a = stamp.original_pixels[ri + 7];
+                    req.color = (static_cast<uint32_t>(r)) |
+                                (static_cast<uint32_t>(g) << 8) |
+                                (static_cast<uint32_t>(b) << 16) |
+                                (static_cast<uint32_t>(a) << 24);
+                } else {
+                    req.color = 0xFFFFFFFF;
+                }
+
                 particle_buffer->spawn(req);
                 displaced_count++;
 
-                // Clear from original so it doesn't get restored
+                // Clear from original so it doesn't get restored (sim data + color)
                 stamp.original_pixels[ri + 0] = 0;
                 stamp.original_pixels[ri + 1] = 0;
                 stamp.original_pixels[ri + 2] = 0;
                 stamp.original_pixels[ri + 3] = 0;
+                if (pixel_size >= 8) {
+                    stamp.original_pixels[ri + 4] = 0;
+                    stamp.original_pixels[ri + 5] = 0;
+                    stamp.original_pixels[ri + 6] = 0;
+                    stamp.original_pixels[ri + 7] = 0;
+                }
             }
+
+            // Mark this pixel as actually stamped (inside the shape)
+            size_t pixel_idx = static_cast<size_t>(local_y) * region_w + local_x;
+            stamp.was_stamped[pixel_idx] = true;
 
             // Stamp as static with FLAG_RIGIDBODY
             // Use material ID 255 as a "collider" placeholder (won't render)

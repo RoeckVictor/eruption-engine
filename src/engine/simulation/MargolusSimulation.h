@@ -5,6 +5,7 @@
 #include "engine/simulation/MaterialDefs.h"
 #include <functional>
 #include <vector>
+#include <cstdint>
 
 namespace engine::graphics { class RenderContext; }
 
@@ -27,23 +28,25 @@ class MargolusSimulation {
 public:
     using UniformSetupCallback = std::function<void(graphics::Shader&)>;
 
-    /// Initialize with a material table, grid dimensions, and a compute shader.
-    /// Engine-managed uniforms (grid dimensions) are set automatically.
-    /// Game-specific uniforms are set via the optional setup_uniforms callback.
-    /// @param slots            Array of MaterialSlot (one per material ID).
-    /// @param mat_count        Number of entries in the slots array.
+    /// Initialize with pre-compiled GPU tables.
+    /// @param material_table    Compiled material table (256 * 2 uint32s).
+    /// @param interaction_table Compiled interaction table (N * 6 uint32s).
+    /// @param color_palette     Color palette (256 uint32s, 0xRRGGBBAA per material).
+    /// @param category_table    Compiled category table (16 * 10 uint32s).
     /// @param grid_width       Width of the pixel grid in pixels.
     /// @param grid_height      Height of the pixel grid in pixels.
     /// @param shader_path      Path to the simulation compute shader (.comp).
     /// @param setup_uniforms   Optional callback to set game-specific uniforms.
-    /// @param max_material_slots Maximum number of material slots (must match shader SSBO layout).
-    /// @param chunk_size_x     Chunk width for dirty tracking (should match terrain collider chunks).
+    /// @param chunk_size_x     Chunk width for dirty tracking.
     /// @param chunk_size_y     Chunk height for dirty tracking.
-    bool init(const MaterialSlot* slots, int mat_count,
+    bool init(const std::vector<uint32_t>& material_table,
+              const std::vector<uint32_t>& interaction_table,
+              const std::vector<uint32_t>& color_palette,
+              const std::vector<uint32_t>& category_table,
               int grid_width, int grid_height, const char* shader_path,
               const UniformSetupCallback& setup_uniforms = nullptr,
-              int max_material_slots = 256,
               int chunk_size_x = 32, int chunk_size_y = 32);
+
     void shutdown();
 
     /// Run one full simulation step (4 Margolus phases).
@@ -60,9 +63,23 @@ public:
     int num_chunks_x() const { return m_num_chunks_x; }
     int num_chunks_y() const { return m_num_chunks_y; }
 
+    /// Update material, interaction, and category tables at runtime.
+    /// Call this after recompiling the MaterialLibrary or CategoryLibrary.
+    /// @param material_table    Compiled material table (256 * 2 uint32s).
+    /// @param interaction_table Compiled interaction table (N * 6 uint32s).
+    /// @param color_palette     Color palette (256 uint32s, 0xRRGGBBAA per material).
+    /// @param category_table    Compiled category table (16 * 10 uint32s).
+    void update_tables(const std::vector<uint32_t>& material_table,
+                       const std::vector<uint32_t>& interaction_table,
+                       const std::vector<uint32_t>& color_palette,
+                       const std::vector<uint32_t>& category_table);
+
 private:
     graphics::ShaderStorageBuffer m_material_ssbo;
     graphics::ShaderStorageBuffer m_dirty_chunks_ssbo;
+    graphics::ShaderStorageBuffer m_interaction_ssbo;  // Interaction table (binding 4)
+    graphics::ShaderStorageBuffer m_palette_ssbo;      // Color palette (binding 5)
+    graphics::ShaderStorageBuffer m_category_ssbo;     // Category table (binding 6)
     graphics::Shader m_sim_shader;
 
     int m_grid_width = 0;
@@ -71,6 +88,7 @@ private:
     int m_chunk_size_y = 32;
     int m_num_chunks_x = 0;
     int m_num_chunks_y = 0;
+    bool m_has_interactions = false;  // True if using v2 format with interactions
 };
 
 } // namespace engine::simulation

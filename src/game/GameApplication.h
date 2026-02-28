@@ -6,6 +6,7 @@
 #include "engine/systems/PixelGridLoaderSystem.h"
 #include "engine/systems/ImageRenderSystem.h"
 #include "engine/systems/TextRenderSystem.h"
+#include "engine/simulation/CategoryLibrary.h"
 #include "engine/render/Camera2D.h"
 
 #include <entt/entt.hpp>
@@ -34,15 +35,14 @@ private:
     std::unique_ptr<editor::RuntimeContext> m_runtime;
     std::unique_ptr<editor::ScriptManager> m_script_manager;
 
-    // Engine systems (owned here, registered into scene as non-owning refs)
     engine::PixelGridLoaderSystem m_loader_system;
     engine::PixelGridRenderSystem m_render_system;
     engine::ImageRenderSystem m_image_render_system;
     engine::TextRenderSystem m_text_render_system;
 
-    // Stable camera for EngineContext (synced from camera entity each frame)
     engine::render::Camera2D m_camera;
 
-    // EngineContext (created after physics + camera are ready)
+    engine::simulation::CategoryLibrary m_category_library;
+
     std::unique_ptr<engine::EngineContext> m_engine_ctx;
 };

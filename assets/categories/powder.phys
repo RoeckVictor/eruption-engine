@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": 2,
+  "name": "Powder",
+  "internal_name": "powder",
+  "mobile": true,
+  "movement_rules": [
+    {
+      "direction": "down",
+      "priority": 0,
+      "swap_with": ["empty", "liquid", "gas"],
+      "density_check": true
+    },
+    {
+      "direction": "down_left",
+      "priority": 1,
+      "swap_with": ["empty", "liquid", "gas"],
+      "density_check": true
+    },
+    {
+      "direction": "down_right",
+      "priority": 1,
+      "swap_with": ["empty", "liquid", "gas"],
+      "density_check": true
+    }
+  ],
+  "randomize_equal_priority": true,
+  "dissipation": {
+    "enabled": false
+  }
+}

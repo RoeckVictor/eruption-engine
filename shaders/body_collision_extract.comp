@@ -13,11 +13,11 @@ layout(std430, binding = 1) buffer PixelBufferB {
 
 // Extraction buffer: stores extracted pixel data for CPU readback
 // Format: [count, capacity, entries...]
-// Each entry is 2 uints: (x | y << 16), material_id
+// Each entry is 3 uints: (x | y << 16), material_id, color
 layout(std430, binding = 5) coherent buffer ExtractionBuffer {
     uint extract_count;     // Atomic counter for extracted pixels
     uint extract_capacity;  // Max entries (set by CPU)
-    uint extract_data[];    // Packed entries: 2 uints per pixel
+    uint extract_data[];    // Packed entries: 3 uints per pixel
 };
 
 uniform int u_grid_width;
@@ -51,16 +51,35 @@ uvec4 loadPixel(ivec2 pos) {
     return unpackPixel(readPackedPixel(pos));
 }
 
-// Store pixel to both SSBOs (clears the extracted pixel)
-void storePixelBoth(ivec2 pos, uvec4 pixel) {
+// Store pixel to both SSBOs (clears the extracted pixel, including color for 8-byte pixels)
+void storePixelBoth(ivec2 pos, uvec4 sim, uint color) {
     uint idx = uint(pos.y) * uint(u_grid_width) + uint(pos.x);
-    uint byte_offset = idx * u_pixel_size;
-    uint word_offset = byte_offset / 4u;
 
-    uint packed = packPixel(pixel);
+    if (u_pixel_size >= 8u) {
+        // 8-byte pixel: clear both sim data (word 0) and color (word 1)
+        uint word_offset = idx * 2u;
+        uint packed = packPixel(sim);
+        pixels_a[word_offset] = packed;
+        pixels_a[word_offset + 1u] = color;
+        pixels_b[word_offset] = packed;
+        pixels_b[word_offset + 1u] = color;
+    } else {
+        // 4-byte pixel: clear only sim data
+        uint byte_offset = idx * u_pixel_size;
+        uint word_offset = byte_offset / 4u;
+        uint packed = packPixel(sim);
+        pixels_a[word_offset] = packed;
+        pixels_b[word_offset] = packed;
+    }
+}
 
-    pixels_a[word_offset] = packed;
-    pixels_b[word_offset] = packed;
+// Load color from pixel (word 1 for 8-byte pixels)
+uint loadColor(ivec2 pos) {
+    if (u_pixel_size >= 8u) {
+        uint idx = uint(pos.y) * uint(u_grid_width) + uint(pos.x);
+        return pixels_a[idx * 2u + 1u];
+    }
+    return 0xFFFFFFFFu;  // Default white for 4-byte pixels
 }
 
 void main() {
@@ -79,6 +98,9 @@ void main() {
     uint cat = pixel.g;
     if (!isMobile(cat)) return;
 
+    // Load color before clearing
+    uint color = loadColor(pos);
+
     // Atomically allocate a slot in the extraction buffer
     uint slot = atomicAdd(extract_count, 1u);
 
@@ -88,13 +110,14 @@ void main() {
         uint packed_pos = uint(pos.x) | (uint(pos.y) << 16);
         uint material = pixel.r;
 
-        // Write to extraction buffer (2 uints per entry)
-        uint entry_offset = slot * 2u;
+        // Write to extraction buffer (3 uints per entry: pos, material, color)
+        uint entry_offset = slot * 3u;
         extract_data[entry_offset + 0u] = packed_pos;
         extract_data[entry_offset + 1u] = material;
+        extract_data[entry_offset + 2u] = color;
     }
 
-    // Clear the pixel from the grid (replace with air)
+    // Clear the pixel from the grid (replace with air, transparent color)
     uvec4 air = uvec4(0u, CAT_EMPTY, 128u, 0u);
-    storePixelBoth(pos, air);
+    storePixelBoth(pos, air, 0u);
 }

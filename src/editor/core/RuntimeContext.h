@@ -29,6 +29,7 @@ class PrefabManager;
 
 namespace simulation {
 class IPixelGridLoader;
+class CategoryLibrary;
 }
 }
 
@@ -101,6 +102,9 @@ public:
     void set_pixel_grid_loader(engine::simulation::IPixelGridLoader* loader) { m_pixel_grid_loader = loader; }
     engine::simulation::IPixelGridLoader* pixel_grid_loader() { return m_pixel_grid_loader; }
 
+    void set_category_library(engine::simulation::CategoryLibrary* lib) { m_category_library = lib; }
+    engine::simulation::CategoryLibrary* category_library() { return m_category_library; }
+
     void queue_dynamic_collider_split_check(entt::entity entity);
 
     void set_viewport(float x, float y, float width, float height) {
@@ -135,6 +139,7 @@ private:
     ScriptManager* m_script_manager = nullptr;
     engine::Engine* m_engine = nullptr;
     engine::simulation::IPixelGridLoader* m_pixel_grid_loader = nullptr;
+    engine::simulation::CategoryLibrary* m_category_library = nullptr;
 
     std::string m_scene_snapshot;
 

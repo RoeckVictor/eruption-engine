@@ -8,6 +8,7 @@ layout(std430, binding = 0) readonly buffer PixelBuffer {
 };
 
 // Color palette SSBO (read) - 256 entries, each a packed uint32 (0xRRGGBBAA)
+// Only used for legacy 4-byte pixel mode
 layout(std430, binding = 1) readonly buffer PaletteBuffer {
     uint palette[];
 };
@@ -18,7 +19,7 @@ layout(rgba8, binding = 0) writeonly uniform image2D u_color_texture;
 uniform int u_grid_width;
 uniform int u_grid_height;
 uniform uint u_pixel_size;
-uniform uint u_palette_size;  // Number of entries in the palette (max 256)
+uniform uint u_palette_size;
 
 #include "include/pixel_access.glsl"
 
@@ -26,20 +27,57 @@ void main() {
     ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
     if (pos.x >= u_grid_width || pos.y >= u_grid_height) return;
 
-    uint packed = readPackedPixel(pos);
+    vec4 final_color;
 
-    // Extract material ID (byte 0), clamped to valid palette range
-    uint material = packed & 0xFFu;
-    material = min(material, u_palette_size - 1u);
+    if (u_pixel_size >= 8u) {
+        // 8-byte pixel mode: read color directly from pixel data (word 1)
+        uint idx = uint(pos.y) * uint(u_grid_width) + uint(pos.x);
+        uint sim_word = pixel_data[idx * 2u];
+        uint color_word = pixel_data[idx * 2u + 1u];
 
-    // Look up color from palette
-    uint color_packed = palette[material];
+        // Check if pixel is empty (material ID 0)
+        uint material = sim_word & 0xFFu;
+        if (material == 0u) {
+            imageStore(u_color_texture, pos, vec4(0.0));
+            return;
+        }
 
-    // Unpack RGBA from uint32 (0xRRGGBBAA format)
-    float r = float((color_packed >> 24) & 0xFFu) / 255.0;
-    float g = float((color_packed >> 16) & 0xFFu) / 255.0;
-    float b = float((color_packed >> 8)  & 0xFFu) / 255.0;
-    float a = float((color_packed >> 0)  & 0xFFu) / 255.0;
+        // Extract RGBA from word 1 (r|g|b|a packed as bytes 4-7)
+        float r = float((color_word >>  0) & 0xFFu) / 255.0;
+        float g = float((color_word >>  8) & 0xFFu) / 255.0;
+        float b = float((color_word >> 16) & 0xFFu) / 255.0;
+        float a = float((color_word >> 24) & 0xFFu) / 255.0;
 
-    imageStore(u_color_texture, pos, vec4(r, g, b, a));
+        // Fallback to palette if per-pixel color is fully transparent
+        // (happens when air transforms into another material via interactions)
+        if (color_word == 0u && material < u_palette_size) {
+            uint color_packed = palette[material];
+            r = float((color_packed >> 24) & 0xFFu) / 255.0;
+            g = float((color_packed >> 16) & 0xFFu) / 255.0;
+            b = float((color_packed >> 8)  & 0xFFu) / 255.0;
+            a = float((color_packed >> 0)  & 0xFFu) / 255.0;
+        }
+
+        final_color = vec4(r, g, b, a);
+    } else {
+        // Legacy 4-byte pixel mode: palette lookup
+        uint packed = readPackedPixel(pos);
+
+        // Extract material ID (byte 0), clamped to valid palette range
+        uint material = packed & 0xFFu;
+        material = min(material, u_palette_size - 1u);
+
+        // Look up color from palette
+        uint color_packed = palette[material];
+
+        // Unpack RGBA from uint32 (0xRRGGBBAA format)
+        float r = float((color_packed >> 24) & 0xFFu) / 255.0;
+        float g = float((color_packed >> 16) & 0xFFu) / 255.0;
+        float b = float((color_packed >> 8)  & 0xFFu) / 255.0;
+        float a = float((color_packed >> 0)  & 0xFFu) / 255.0;
+
+        final_color = vec4(r, g, b, a);
+    }
+
+    imageStore(u_color_texture, pos, final_color);
 }

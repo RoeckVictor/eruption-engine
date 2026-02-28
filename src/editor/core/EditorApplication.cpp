@@ -16,6 +16,7 @@
 #include "editor/panels/PrefabEditorPanel.h"
 #include "editor/panels/ScreenPanel.h"
 #include "editor/panels/ProfilerPanel.h"
+#include "editor/panels/MaterialEditorPanel.h"
 #include "editor/commands/EntityCommands.h"
 #include "editor/serialization/SceneSerializer.h"
 #include "engine/render/Camera2D.h"
@@ -61,10 +62,25 @@ bool EditorApplication::on_init(engine::Engine& engine) {
 
     init_component_type_registry();
 
-    // Load default material library
+    // Get executable directory for resolving asset paths
+    std::string exe_dir = engine::platform::executable_directory();
+
+    // Load categories first (materials need them to resolve category names)
+    std::string categories_path = exe_dir + "/assets/categories";
+    m_category_library.ensure_empty_category();
+    m_category_library.load_from_directory(categories_path, true);
+
+    // Set category library on runtime context for simulation playback
+    m_runtime.set_category_library(&m_category_library);
+
+    // Load default material library from directory (individual .material files)
     auto& mat_registry = engine::simulation::MaterialLibraryRegistry::instance();
-    if (!mat_registry.load_library("default", "assets/materials/default.json")) {
-        engine::Logger::instance().error("EditorApp", "Failed to load default material library");
+    auto* mat_lib = mat_registry.get_or_create_library("default");
+    mat_lib->set_category_library(&m_category_library);
+
+    std::string materials_path = exe_dir + "/assets/materials";
+    if (!mat_lib->load_from_directory(materials_path)) {
+        engine::Logger::instance().error("EditorApp", "Failed to load default material library from: %s", materials_path.c_str());
     }
 
     engine.scenes().push(std::make_unique<EditorScene>());
@@ -87,6 +103,22 @@ bool EditorApplication::on_init(engine::Engine& engine) {
     m_panel_manager.add_panel<BuildSettingsPanel>();
     m_panel_manager.add_panel<ProjectSettingsPanel>(*m_project_manager);
     m_panel_manager.add_panel<PrefabEditorPanel>(m_context);
+
+    // Add material editor panel and wire up material/category libraries
+    auto* material_editor = m_panel_manager.add_panel<MaterialEditorPanel>(m_context);
+    material_editor->set_library(mat_lib);
+    material_editor->set_category_library(&m_category_library);
+    material_editor->set_visible(false);
+
+    // Wire up file browser to use material editor for creating materials and categories
+    if (auto* file_browser = m_panel_manager.get_panel<FileBrowserPanel>()) {
+        file_browser->set_material_create_callback([material_editor]() {
+            material_editor->open_new_material_dialog();
+        });
+        file_browser->set_category_create_callback([material_editor]() {
+            material_editor->open_new_category_dialog();
+        });
+    }
 
     // Add profiler panel and wire up GPU profiler
     auto* profiler_panel = m_panel_manager.add_panel<ProfilerPanel>(engine, m_context);
@@ -244,13 +276,21 @@ void EditorApplication::init_imgui(engine::Engine& engine) {
 
     // Merge Font Awesome icon font into the default font atlas
     {
-        ImFontConfig config;
-        config.MergeMode = true;
-        config.PixelSnapH = true;
-        config.GlyphMinAdvanceX = 13.0f;
-        static const ImWchar icon_ranges[] = { ICON_MIN_FA, ICON_MAX_FA, 0 };
         io.Fonts->AddFontDefault();
-        io.Fonts->AddFontFromFileTTF("assets/fonts/fa-solid-900.ttf", 13.0f, &config, icon_ranges);
+
+        // Try to load Font Awesome icons (gracefully skip if not found)
+        std::string exe_dir = engine::platform::executable_directory();
+        std::string icon_font_path = exe_dir + "/assets/fonts/fa-solid-900.ttf";
+        if (std::filesystem::exists(icon_font_path)) {
+            ImFontConfig config;
+            config.MergeMode = true;
+            config.PixelSnapH = true;
+            config.GlyphMinAdvanceX = 13.0f;
+            static const ImWchar icon_ranges[] = { ICON_MIN_FA, ICON_MAX_FA, 0 };
+            io.Fonts->AddFontFromFileTTF(icon_font_path.c_str(), 13.0f, &config, icon_ranges);
+        } else {
+            engine::Logger::instance().warning("Editor", "Font Awesome icons not found at: %s", icon_font_path.c_str());
+        }
     }
 
     // Initialize platform/renderer backends
@@ -382,6 +422,10 @@ void EditorApplication::on_project_loaded() {
     // Set project path on context for panels to access
     m_context.scene_state().set_project_path(m_project_manager->project_path());
 
+    // Load project categories and materials automatically
+    // This ensures they're available even if the Material Editor isn't opened
+    load_project_assets();
+
     // Initialize script manager for this project
     // Engine paths need to be absolute for CMake to find includes
     std::filesystem::path exe_dir = std::filesystem::current_path();
@@ -477,6 +521,56 @@ void EditorApplication::on_project_loaded() {
 
 void EditorApplication::rebuild_scripts() {
     m_script_manager.rebuild();
+}
+
+void EditorApplication::load_project_assets() {
+    if (!has_project()) return;
+
+    namespace fs = std::filesystem;
+    fs::path assets_root = fs::path(m_project_manager->project_path()) / "Assets";
+
+    if (!fs::exists(assets_root)) return;
+
+    // Load project categories (custom .phys files)
+    int category_count = 0;
+    for (const auto& entry : fs::recursive_directory_iterator(assets_root)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".phys") {
+            if (m_category_library.load_category(entry.path().string(), false)) {
+                category_count++;
+            }
+        }
+    }
+    if (category_count > 0) {
+        engine::Logger::instance().info("Editor", "Loaded %d project categories", category_count);
+    }
+
+    // Reload material library with project materials
+    auto& mat_registry = engine::simulation::MaterialLibraryRegistry::instance();
+    auto* mat_lib = mat_registry.get_or_create_library("default");
+    if (mat_lib) {
+        // Update category library reference so materials can resolve custom categories
+        mat_lib->set_category_library(&m_category_library);
+
+        // Clear and reload all materials (engine + project)
+        mat_lib->clear();
+
+        // Load engine materials first
+        std::string exe_dir = engine::platform::executable_directory();
+        mat_lib->load_from_directory(exe_dir + "/assets/materials");
+
+        // Load project materials
+        int material_count = 0;
+        for (const auto& entry : fs::recursive_directory_iterator(assets_root)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".material") {
+                if (mat_lib->load_material_file(entry.path().string())) {
+                    material_count++;
+                }
+            }
+        }
+        if (material_count > 0) {
+            engine::Logger::instance().info("Editor", "Loaded %d project materials", material_count);
+        }
+    }
 }
 
 void EditorApplication::new_scene() {
@@ -586,6 +680,14 @@ void EditorApplication::on_file_opened(const std::string& path) {
     } else if (ext == ".prefab") {
         if (auto* prefab_editor = m_panel_manager.get_panel<PrefabEditorPanel>()) {
             prefab_editor->open_prefab(path);
+        }
+    } else if (ext == ".material") {
+        if (auto* material_editor = m_panel_manager.get_panel<MaterialEditorPanel>()) {
+            material_editor->select_material_by_path(path);
+        }
+    } else if (ext == ".phys") {
+        if (auto* material_editor = m_panel_manager.get_panel<MaterialEditorPanel>()) {
+            material_editor->select_category_by_path(path);
         }
     }
 }

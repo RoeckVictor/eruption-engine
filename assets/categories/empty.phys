@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": 0,
+  "name": "Empty",
+  "internal_name": "empty",
+  "mobile": false,
+  "movement_rules": [],
+  "randomize_equal_priority": false,
+  "dissipation": {
+    "enabled": false
+  }
+}

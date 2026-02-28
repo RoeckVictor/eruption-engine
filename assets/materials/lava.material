@@ -1,0 +1,51 @@
+{
+  "schema_version": 2,
+  "id": 5,
+  "name": "Lava",
+  "internal_name": "lava",
+
+  "physical": {
+    "density": 220,
+    "category": "liquid"
+  },
+
+  "thermal": {
+    "default_temp": 255,
+    "conductivity": 0.3
+  },
+
+  "rendering": {
+    "default_color": "#FF4500FF",
+    "color_variance": { "hue": 10, "saturation": 5, "lightness": 20 }
+  },
+
+  "flags": ["hazard"],
+  "interactions": [
+    {
+      "id": "lava_cool_to_rock",
+      "type": "temperature",
+      "priority": 50,
+      "probability": 0.5,
+      "sim_step_threshold": 60,
+      "conditions": {
+        "temp_below": 100
+      },
+      "effects": [
+        { "type": "transform", "into": "rock", "color_behavior": "replace" }
+      ]
+    },
+    {
+      "id": "lava_water_contact",
+      "type": "contact",
+      "priority": 100,
+      "probability": 0.25,
+      "sim_step_threshold": 0,
+      "conditions": {
+        "contact_with": ["water", "ice"]
+      },
+      "effects": [
+        { "type": "change_temp", "delta": -40 }
+      ]
+    }
+  ]
+}
