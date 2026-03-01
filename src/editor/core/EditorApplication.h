@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/core/Application.h"
+#include "engine/platform/IImGuiBackend.h"
 #include "editor/panels/PanelManager.h"
 #include "editor/panels/EditorToolbar.h"
 #include "editor/core/EditorContext.h"
@@ -9,6 +10,7 @@
 #include "engine/simulation/CategoryLibrary.h"
 #include <string>
 #include <functional>
+#include <memory>
 
 namespace engine {
 class Engine;
@@ -92,6 +94,8 @@ private:
 
     bool m_should_exit = false;
     bool m_imgui_initialized = false;
+
+    std::unique_ptr<engine::platform::IImGuiBackend> m_imgui_backend;
 
     std::function<void()> m_pending_action;
     bool m_show_unsaved_dialog = false;

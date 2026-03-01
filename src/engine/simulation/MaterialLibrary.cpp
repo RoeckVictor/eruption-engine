@@ -110,7 +110,7 @@ bool MaterialLibrary::load_material_file(const std::string& path) {
             // Parse color
             if (j.contains("color")) {
                 std::string color_str = j["color"].get<std::string>();
-                if (color_str[0] == '#' && color_str.size() == 9) {
+                if (!color_str.empty() && color_str[0] == '#' && color_str.size() == 9) {
                     def.color = static_cast<uint32_t>(std::stoul(color_str.substr(1), nullptr, 16));
                 }
             }
@@ -174,9 +174,9 @@ bool MaterialLibrary::parse_material_v2(const nlohmann::json& j, MaterialDefinit
         const auto& rend = j["rendering"];
         if (rend.contains("default_color")) {
             std::string color_str = rend["default_color"].get<std::string>();
-            if (color_str[0] == '#' && color_str.size() == 9) {
+            if (!color_str.empty() && color_str[0] == '#' && color_str.size() == 9) {
                 def.color = static_cast<uint32_t>(std::stoul(color_str.substr(1), nullptr, 16));
-            } else if (color_str[0] == '#' && color_str.size() == 7) {
+            } else if (!color_str.empty() && color_str[0] == '#' && color_str.size() == 7) {
                 // #RRGGBB format (no alpha) - default to FF
                 def.color = static_cast<uint32_t>(std::stoul(color_str.substr(1), nullptr, 16)) << 8 | 0xFF;
             }
@@ -258,9 +258,9 @@ void MaterialLibrary::parse_interactions(const nlohmann::json& arr, MaterialDefi
                 // Color delta for ADD/SUBTRACT modes (hex string "#RRGGBBAA")
                 if (eff_json.contains("color_delta")) {
                     std::string color_str = eff_json["color_delta"].get<std::string>();
-                    if (color_str[0] == '#' && color_str.size() == 9) {
+                    if (!color_str.empty() && color_str[0] == '#' && color_str.size() == 9) {
                         effect.color_delta = static_cast<uint32_t>(std::stoul(color_str.substr(1), nullptr, 16));
-                    } else if (color_str[0] == '#' && color_str.size() == 7) {
+                    } else if (!color_str.empty() && color_str[0] == '#' && color_str.size() == 7) {
                         effect.color_delta = (static_cast<uint32_t>(std::stoul(color_str.substr(1), nullptr, 16)) << 8) | 0xFF;
                     }
                 }
@@ -415,7 +415,7 @@ bool MaterialLibrary::parse_json(const std::string& json_str) {
             // Color (parse hex string like "#RRGGBBAA")
             if (mat_json.contains("color")) {
                 std::string color_str = mat_json["color"].get<std::string>();
-                if (color_str[0] == '#' && color_str.size() == 9) {
+                if (!color_str.empty() && color_str[0] == '#' && color_str.size() == 9) {
                     def.color = static_cast<uint32_t>(std::stoul(color_str.substr(1), nullptr, 16));
                 } else {
                     Logger::instance().warning("MaterialLibrary", "Invalid color format for material %d: %s",

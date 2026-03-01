@@ -54,7 +54,8 @@ bool PixelGrid::init(int width, int height, size_t pixel_size) {
 
     // Initialize both SSBOs with empty pixels (material=0, category=0, temp=128, flags=0)
     m_work_buf.resize(ssbo_size);
-    for (size_t i = 0; i < static_cast<size_t>(width * height); i++) {
+    size_t total_pixels = static_cast<size_t>(width) * static_cast<size_t>(height);
+    for (size_t i = 0; i < total_pixels; i++) {
         size_t base = i * pixel_size;
         m_work_buf[base + 0] = 0;   // material (air)
         m_work_buf[base + 1] = 0;   // category (CAT_EMPTY)
@@ -99,7 +100,9 @@ void PixelGrid::update_render_texture() {
 }
 
 void PixelGrid::upload_both(int x, int y, int w, int h, const void* data) {
-    if (x < 0 || y < 0 || x + w > m_width || y + h > m_height) return;
+    // Bounds validation with overflow-safe checks
+    if (x < 0 || y < 0 || w <= 0 || h <= 0) return;
+    if (x > m_width - w || y > m_height - h) return;
 
     const uint8_t* src = static_cast<const uint8_t*>(data);
 

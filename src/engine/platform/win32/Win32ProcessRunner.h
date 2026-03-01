@@ -28,8 +28,6 @@ public:
     void reveal_in_file_manager(const std::string& file_path) override;
 
 private:
-    static std::wstring utf8_to_wide(const std::string& str);
-    static std::string wide_to_utf8(const std::wstring& wide);
     static std::wstring build_command_line(const std::string& exe_path, const std::vector<std::string>& args);
 };
 

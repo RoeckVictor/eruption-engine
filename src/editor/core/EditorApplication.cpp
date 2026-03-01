@@ -36,9 +36,6 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <filesystem>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
-#include <GLFW/glfw3.h>
 
 namespace editor {
 
@@ -63,12 +60,12 @@ bool EditorApplication::on_init(engine::Engine& engine) {
     init_component_type_registry();
 
     // Get executable directory for resolving asset paths
-    std::string exe_dir = engine::platform::executable_directory();
+    std::filesystem::path exe_dir = engine::platform::executable_directory();
 
     // Load categories first (materials need them to resolve category names)
-    std::string categories_path = exe_dir + "/assets/categories";
+    std::filesystem::path categories_path = exe_dir / "assets" / "categories";
     m_category_library.ensure_empty_category();
-    m_category_library.load_from_directory(categories_path, true);
+    m_category_library.load_from_directory(categories_path.string(), true);
 
     // Set category library on runtime context for simulation playback
     m_runtime.set_category_library(&m_category_library);
@@ -78,9 +75,9 @@ bool EditorApplication::on_init(engine::Engine& engine) {
     auto* mat_lib = mat_registry.get_or_create_library("default");
     mat_lib->set_category_library(&m_category_library);
 
-    std::string materials_path = exe_dir + "/assets/materials";
-    if (!mat_lib->load_from_directory(materials_path)) {
-        engine::Logger::instance().error("EditorApp", "Failed to load default material library from: %s", materials_path.c_str());
+    std::filesystem::path materials_path = exe_dir / "assets" / "materials";
+    if (!mat_lib->load_from_directory(materials_path.string())) {
+        engine::Logger::instance().error("EditorApp", "Failed to load default material library from: %s", materials_path.string().c_str());
     }
 
     engine.scenes().push(std::make_unique<EditorScene>());
@@ -279,54 +276,54 @@ void EditorApplication::init_imgui(engine::Engine& engine) {
         io.Fonts->AddFontDefault();
 
         // Try to load Font Awesome icons (gracefully skip if not found)
-        std::string exe_dir = engine::platform::executable_directory();
-        std::string icon_font_path = exe_dir + "/assets/fonts/fa-solid-900.ttf";
+        std::filesystem::path exe_dir = engine::platform::executable_directory();
+        std::filesystem::path icon_font_path = exe_dir / "assets" / "fonts" / "fa-solid-900.ttf";
         if (std::filesystem::exists(icon_font_path)) {
             ImFontConfig config;
             config.MergeMode = true;
             config.PixelSnapH = true;
             config.GlyphMinAdvanceX = 13.0f;
             static const ImWchar icon_ranges[] = { ICON_MIN_FA, ICON_MAX_FA, 0 };
-            io.Fonts->AddFontFromFileTTF(icon_font_path.c_str(), 13.0f, &config, icon_ranges);
+            io.Fonts->AddFontFromFileTTF(icon_font_path.string().c_str(), 13.0f, &config, icon_ranges);
         } else {
-            engine::Logger::instance().warning("Editor", "Font Awesome icons not found at: %s", icon_font_path.c_str());
+            engine::Logger::instance().warning("Editor", "Font Awesome icons not found at: %s", icon_font_path.string().c_str());
         }
     }
 
-    // Initialize platform/renderer backends
-    GLFWwindow* window = engine.window().glfw_handle();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 450");
+    // Initialize platform/renderer backends using abstraction
+    m_imgui_backend = engine::platform::create_imgui_backend();
+    if (!m_imgui_backend || !m_imgui_backend->init(engine.window())) {
+        engine::Logger::instance().error("Editor", "Failed to initialize ImGui backend");
+        return;
+    }
 
     m_imgui_initialized = true;
 }
 
 void EditorApplication::shutdown_imgui() {
     if (m_imgui_initialized) {
-        ImGui_ImplOpenGL3_Shutdown();
-        ImGui_ImplGlfw_Shutdown();
+        if (m_imgui_backend) {
+            m_imgui_backend->shutdown();
+            m_imgui_backend.reset();
+        }
         ImGui::DestroyContext();
         m_imgui_initialized = false;
     }
 }
 
 void EditorApplication::begin_frame() {
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
+    if (m_imgui_backend) {
+        m_imgui_backend->new_frame();
+    }
     ImGui::NewFrame();
 }
 
 void EditorApplication::end_frame() {
     ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-    // Multi-viewport support: update and render platform windows
-    ImGuiIO& io = ImGui::GetIO();
-    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-        GLFWwindow* backup_context = glfwGetCurrentContext();
-        ImGui::UpdatePlatformWindows();
-        ImGui::RenderPlatformWindowsDefault();
-        glfwMakeContextCurrent(backup_context);
+    if (m_imgui_backend) {
+        m_imgui_backend->render_draw_data();
+        m_imgui_backend->update_platform_windows();
     }
 }
 
@@ -555,8 +552,8 @@ void EditorApplication::load_project_assets() {
         mat_lib->clear();
 
         // Load engine materials first
-        std::string exe_dir = engine::platform::executable_directory();
-        mat_lib->load_from_directory(exe_dir + "/assets/materials");
+        std::filesystem::path exe_dir = engine::platform::executable_directory();
+        mat_lib->load_from_directory((exe_dir / "assets" / "materials").string());
 
         // Load project materials
         int material_count = 0;
@@ -694,11 +691,8 @@ void EditorApplication::on_file_opened(const std::string& path) {
 
 void EditorApplication::launch_pixart(const std::string& file_path) {
     std::filesystem::path exe_dir = std::filesystem::current_path();
-#ifdef _WIN32
-    std::filesystem::path pixart_path = exe_dir / "pixart.exe";
-#else
-    std::filesystem::path pixart_path = exe_dir / "pixart";
-#endif
+    std::string pixart_name = std::string("pixart") + engine::platform::executable_extension();
+    std::filesystem::path pixart_path = exe_dir / pixart_name;
 
     if (!std::filesystem::exists(pixart_path)) {
         engine::Logger::instance().error("Editor", "pixart not found at: %s", pixart_path.string().c_str());

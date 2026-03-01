@@ -1,33 +1,14 @@
 #include "Win32ProcessRunner.h"
+#include "Win32StringUtils.h"
 
 #ifdef _WIN32
 
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
 #include <shellapi.h>
 
 namespace engine::platform {
 
-std::wstring Win32ProcessRunner::utf8_to_wide(const std::string& str) {
-    if (str.empty()) return {};
-    int len = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, nullptr, 0);
-    if (len <= 0) return {};
-    std::wstring wide(len, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, wide.data(), len);
-    wide.resize(len - 1);
-    return wide;
-}
-
-std::string Win32ProcessRunner::wide_to_utf8(const std::wstring& wide) {
-    if (wide.empty()) return {};
-    int len = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    if (len <= 0) return {};
-    std::string str(len, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, str.data(), len, nullptr, nullptr);
-    str.resize(len - 1);
-    return str;
-}
+using win32::utf8_to_wide;
+using win32::wide_to_utf8;
 
 std::wstring Win32ProcessRunner::build_command_line(
     const std::string& exe_path,
