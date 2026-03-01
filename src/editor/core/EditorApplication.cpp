@@ -17,6 +17,7 @@
 #include "editor/panels/ScreenPanel.h"
 #include "editor/panels/ProfilerPanel.h"
 #include "editor/panels/MaterialEditorPanel.h"
+#include "editor/panels/PixArtPanel.h"
 #include "editor/commands/EntityCommands.h"
 #include "editor/serialization/SceneSerializer.h"
 #include "engine/render/Camera2D.h"
@@ -122,6 +123,10 @@ bool EditorApplication::on_init(engine::Engine& engine) {
     profiler_panel->set_gpu_profiler(engine.gpu_profiler());
     profiler_panel->set_visible(false);
 
+    // Add PixArt panel for pixel grid editing
+    auto* pixart_panel = m_panel_manager.add_panel<PixArtPanel>(m_context);
+    pixart_panel->set_visible(false);
+
     // Wire up menu bar callbacks
     m_panel_manager.menu_callbacks.new_scene = [this]() {
         confirm_discard_or_save([this]() { new_scene(); });
@@ -176,12 +181,19 @@ bool EditorApplication::on_init(engine::Engine& engine) {
 }
 
 void EditorApplication::on_shutdown(engine::Engine& /*engine*/) {
+    m_context.shutdown_asset_registry();
     m_script_manager.shutdown();
     m_panel_manager.shutdown();
     shutdown_imgui();
 }
 
 void EditorApplication::on_update(engine::Engine& engine, float dt) {
+    // Check if window just regained focus - rescan assets for external changes
+    if (engine.window().focus_just_gained() && has_project()) {
+        m_context.rescan_assets_for_external_changes();
+        m_context.refresh_file_browser();
+    }
+
     handle_shortcuts(engine);
 
     m_script_manager.update();
@@ -422,6 +434,9 @@ void EditorApplication::on_project_loaded() {
     // Load project categories and materials automatically
     // This ensures they're available even if the Material Editor isn't opened
     load_project_assets();
+
+    // Initialize asset registry to track asset GUIDs
+    m_context.init_asset_registry(m_project_manager->project_path());
 
     // Initialize script manager for this project
     // Engine paths need to be absolute for CMake to find includes
@@ -673,7 +688,10 @@ void EditorApplication::on_file_opened(const std::string& path) {
             load_scene(path);
         });
     } else if (ext == ".pxg") {
-        launch_pixart(path);
+        if (auto* pixart = m_panel_manager.get_panel<PixArtPanel>()) {
+            pixart->open_file(path);
+            pixart->set_visible(true);
+        }
     } else if (ext == ".prefab") {
         if (auto* prefab_editor = m_panel_manager.get_panel<PrefabEditorPanel>()) {
             prefab_editor->open_prefab(path);
@@ -689,22 +707,6 @@ void EditorApplication::on_file_opened(const std::string& path) {
     }
 }
 
-void EditorApplication::launch_pixart(const std::string& file_path) {
-    std::filesystem::path exe_dir = std::filesystem::current_path();
-    std::string pixart_name = std::string("pixart") + engine::platform::executable_extension();
-    std::filesystem::path pixart_path = exe_dir / pixart_name;
-
-    if (!std::filesystem::exists(pixart_path)) {
-        engine::Logger::instance().error("Editor", "pixart not found at: %s", pixart_path.string().c_str());
-        return;
-    }
-
-    if (engine::platform::launch_detached(pixart_path.string(), { file_path })) {
-        engine::Logger::instance().info("Editor", "Launched PixArt for: %s", file_path.c_str());
-    } else {
-        engine::Logger::instance().error("Editor", "Failed to launch pixart");
-    }
-}
 
 void EditorApplication::delete_selection() {
     auto selection = m_context.selection().selection();

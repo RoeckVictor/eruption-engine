@@ -119,22 +119,6 @@ target_include_directories(imgui PUBLIC
 target_link_libraries(imgui PUBLIC glfw glad)
 
 # =============================================================================
-# PixArt Tool
-# =============================================================================
-file(GLOB PIXART_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/pixart/*.cpp"
-)
-
-add_platform_executable(pixart ${PIXART_SOURCES})
-
-target_link_libraries(pixart PRIVATE
-    eruption_engine
-    imgui
-)
-
-configure_platform_target(pixart)
-
-# =============================================================================
 # Editor Executable
 # =============================================================================
 file(GLOB_RECURSE EDITOR_SOURCES CONFIGURE_DEPENDS

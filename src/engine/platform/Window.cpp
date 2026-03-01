@@ -6,13 +6,9 @@
 
 namespace engine::platform {
 
-// ---- Helper: recover the typed GLFW handle ----
-
 static GLFWwindow* native(void* handle) {
     return static_cast<GLFWwindow*>(handle);
 }
-
-// ---- Key/mouse mapping (platform-specific, hidden from public API) ----
 
 static int to_glfw_key(KeyCode key) {
     switch (key) {
@@ -128,8 +124,6 @@ static int to_glfw_mouse(MouseButton button) {
     }
 }
 
-// ---- File-local GLFW callbacks ----
-
 static void glfw_error_callback(int error, const char* description) {
     ENGINE_ERR("GLFW Error %d: %s", error, description);
 }
@@ -144,7 +138,10 @@ static void glfw_scroll_callback(GLFWwindow* window, double /*xoffset*/, double 
     if (win) win->on_scroll(static_cast<float>(yoffset));
 }
 
-// ---- Internal event handlers ----
+static void glfw_focus_callback(GLFWwindow* window, int focused) {
+    auto* win = static_cast<Window*>(glfwGetWindowUserPointer(window));
+    if (win) win->on_focus(focused == GLFW_TRUE);
+}
 
 void Window::on_framebuffer_resize(int width, int height) {
     m_width = width;
@@ -155,7 +152,17 @@ void Window::on_scroll(float y_offset) {
     m_scroll_accum += y_offset;
 }
 
-// ---- Platform lifecycle (call once, not per-window) ----
+void Window::on_focus(bool focused) {
+    if (focused) {
+        m_focus_gained = true;
+    }
+}
+
+bool Window::focus_just_gained() {
+    bool result = m_focus_gained;
+    m_focus_gained = false;
+    return result;
+}
 
 bool Window::init_platform() {
     glfwSetErrorCallback(glfw_error_callback);
@@ -169,8 +176,6 @@ bool Window::init_platform() {
 void Window::shutdown_platform() {
     glfwTerminate();
 }
-
-// ---- Window lifecycle ----
 
 bool Window::init(const char* title, int width, int height, GraphicsAPI api) {
     m_width = width;
@@ -205,9 +210,10 @@ bool Window::init(const char* title, int width, int height, GraphicsAPI api) {
     glfwSetWindowUserPointer(handle, this);
     glfwSetFramebufferSizeCallback(handle, glfw_framebuffer_callback);
     glfwSetScrollCallback(handle, glfw_scroll_callback);
+    glfwSetWindowFocusCallback(handle, glfw_focus_callback);
 
     if (api == GraphicsAPI::OpenGL) {
-        set_vsync(true); // vsync on by default for OpenGL
+        set_vsync(true);
     }
 
     return true;
@@ -246,8 +252,6 @@ float Window::consume_scroll() {
     return val;
 }
 
-// ---- Key/mouse polling (used by Input via friend access) ----
-
 bool Window::is_key_down(KeyCode key) const {
     int glfw_key = to_glfw_key(key);
     return glfw_key != GLFW_KEY_UNKNOWN
@@ -276,4 +280,4 @@ void* Window::get_gl_proc_address(const char* name) {
     return reinterpret_cast<void*>(glfwGetProcAddress(name));
 }
 
-} // namespace engine::platform
+}

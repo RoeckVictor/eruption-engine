@@ -7,6 +7,7 @@
 #include "editor/core/ClipboardContext.h"
 #include "editor/core/ViewportContext.h"
 #include "editor/core/SceneStateContext.h"
+#include "engine/asset/AssetRegistry.h"
 #include "RuntimeContext.h"
 #include <entt/entt.hpp>
 #include <vector>
@@ -103,7 +104,17 @@ public:
 
     EditorPixelGridLoader& pixel_grid_loader() { return m_pixel_grid_loader; }
 
+    engine::asset::AssetRegistry& asset_registry() { return m_asset_registry; }
+    const engine::asset::AssetRegistry& asset_registry() const { return m_asset_registry; }
+
+    void init_asset_registry(const std::string& project_path);
+    void shutdown_asset_registry();
+    void rescan_assets_for_external_changes();
+    void update_asset_references(const std::string& old_path, const std::string& new_path);
+
 private:
+    void update_registry_paths(entt::registry& reg, const std::string& old_path, const std::string& new_path);
+    void update_file_paths(const std::filesystem::path& file_path, const std::string& old_path, const std::string& new_path);
     void sync_prefab_to_project_scenes(const std::string& prefab_path,
                                         entt::registry& prefab_registry,
                                         entt::entity prefab_root);
@@ -127,6 +138,7 @@ private:
     SceneSettings m_scene_settings;
 
     EditorPixelGridLoader m_pixel_grid_loader;
+    engine::asset::AssetRegistry m_asset_registry;
 };
 
 }

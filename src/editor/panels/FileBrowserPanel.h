@@ -55,6 +55,7 @@ private:
     void perform_delete(const std::string& path);
     void perform_rename(const std::string& old_path, const std::string& new_name);
     void perform_paste(const std::string& dest_dir);
+    void perform_move(const std::string& src_path, const std::string& dest_dir);
     void handle_keyboard_shortcuts();
 
     std::string m_root_path;

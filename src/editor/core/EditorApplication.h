@@ -73,8 +73,6 @@ private:
 
     void on_file_opened(const std::string& path);
 
-    void launch_pixart(const std::string& file_path);
-
     void delete_selection();
 
     void load_project_assets();

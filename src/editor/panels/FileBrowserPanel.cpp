@@ -176,6 +176,20 @@ void FileBrowserPanel::render_folder_tree() {
         }
     };
 
+    // Helper lambda for folder drop target
+    auto render_folder_drop_target = [&](const std::string& folder_path) {
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_PATH")) {
+                std::string src_path(static_cast<const char*>(payload->Data));
+                // Don't allow dropping a folder onto itself
+                if (src_path != folder_path) {
+                    perform_move(src_path, folder_path);
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+    };
+
     // Render folder tree recursively
     std::function<void(const fs::path&)> render_directory = [&](const fs::path& dir) {
         try {
@@ -199,6 +213,7 @@ void FileBrowserPanel::render_folder_tree() {
                 }
 
                 render_folder_context_menu(entry.path().string());
+                render_folder_drop_target(entry.path().string());
 
                 if (is_open) {
                     render_directory(entry.path());
@@ -225,6 +240,7 @@ void FileBrowserPanel::render_folder_tree() {
             navigate_to(m_root_path);
         }
         render_folder_context_menu(m_root_path);
+        render_folder_drop_target(m_root_path);
         render_directory(m_root_path);
         ImGui::TreePop();
     }
@@ -364,11 +380,24 @@ void FileBrowserPanel::render_file_list() {
             ImGui::EndPopup();
         }
 
-        // Drag source for asset
-        if (!entry.is_directory && ImGui::BeginDragDropSource()) {
+        // Drag source for files and directories
+        // Use ASSET_PATH as the universal payload type for both internal and external drag-drop
+        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
             ImGui::SetDragDropPayload("ASSET_PATH", entry.path.c_str(), entry.path.size() + 1);
-            ImGui::Text("%s", entry.name.c_str());
+            ImGui::Text("%s %s", entry.is_directory ? ICON_FA_FOLDER : ICON_FA_FILE, entry.name.c_str());
             ImGui::EndDragDropSource();
+        }
+
+        // Drop target for directories (accept files/folders being dropped onto them)
+        if (entry.is_directory && ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_PATH")) {
+                std::string src_path(static_cast<const char*>(payload->Data));
+                // Don't allow dropping a folder onto itself
+                if (src_path != entry.path) {
+                    perform_move(src_path, entry.path);
+                }
+            }
+            ImGui::EndDragDropTarget();
         }
 
         ImGui::PopID();
@@ -775,6 +804,9 @@ void FileBrowserPanel::refresh() {
             if (name[0] == '.' && !m_show_hidden) continue;
             if (name == "Library") continue;
 
+            // Hide .meta sidecar files (asset registry metadata)
+            if (name.size() > 5 && name.substr(name.size() - 5) == ".meta") continue;
+
             FileEntry fe;
             fe.name = name;
             fe.path = entry.path().string();
@@ -818,6 +850,17 @@ void FileBrowserPanel::perform_delete(const std::string& path) {
             fs::remove_all(path);
         } else {
             fs::remove(path);
+
+            // Also remove the .meta sidecar file if it exists
+            std::string meta_path = path + ".meta";
+            if (fs::exists(meta_path)) {
+                fs::remove(meta_path);
+            }
+        }
+
+        // Notify asset registry about the deletion
+        if (m_editor_context) {
+            m_editor_context->asset_registry().notify_deleted(path);
         }
 
         // Clear selection if we deleted the selected item
@@ -847,6 +890,21 @@ void FileBrowserPanel::perform_rename(const std::string& old_path, const std::st
         }
 
         fs::rename(old_path, new_path);
+
+        // Also rename the .meta sidecar file if it exists
+        if (!fs::is_directory(old_path)) {
+            std::string old_meta = old_path + ".meta";
+            std::string new_meta = new_path.string() + ".meta";
+            if (fs::exists(old_meta)) {
+                fs::rename(old_meta, new_meta);
+            }
+
+            // Notify asset registry and update all references
+            if (m_editor_context) {
+                m_editor_context->asset_registry().notify_moved(old_path, new_path.string());
+                m_editor_context->update_asset_references(old_path, new_path.string());
+            }
+        }
 
         // Update selection if renamed item was selected
         if (m_selected_file == old_path) {
@@ -893,22 +951,113 @@ void FileBrowserPanel::perform_paste(const std::string& dest_dir) {
             }
         }
 
+        std::string src_path_str = m_clipboard_path;
+
         if (m_clipboard_is_cut) {
             // Move
             fs::rename(src, dest);
+
+            // Also move the .meta sidecar file if it exists
+            if (!fs::is_directory(src)) {
+                std::string src_meta = src_path_str + ".meta";
+                std::string dest_meta = dest.string() + ".meta";
+                if (fs::exists(src_meta)) {
+                    fs::rename(src_meta, dest_meta);
+                }
+
+                // Notify asset registry and update all references
+                if (m_editor_context) {
+                    m_editor_context->asset_registry().notify_moved(src_path_str, dest.string());
+                    m_editor_context->update_asset_references(src_path_str, dest.string());
+                }
+            }
+
             m_clipboard_path.clear();
         } else {
-            // Copy
+            // Copy - note: copied files get new GUIDs (the .meta is NOT copied)
             if (fs::is_directory(src)) {
                 fs::copy(src, dest, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
             } else {
                 fs::copy_file(src, dest, fs::copy_options::overwrite_existing);
+                // Register the new file - it will get a fresh GUID
+                if (m_editor_context) {
+                    m_editor_context->asset_registry().register_asset(dest.string());
+                }
             }
         }
 
         refresh();
     } catch (const std::exception& e) {
         engine::Logger::instance().error("FileBrowser", "Failed to paste: %s", e.what());
+    }
+}
+
+void FileBrowserPanel::perform_move(const std::string& src_path, const std::string& dest_dir) {
+    if (src_path.empty() || !fs::exists(src_path)) {
+        return;
+    }
+
+    try {
+        fs::path src(src_path);
+        fs::path dest = fs::path(dest_dir) / src.filename();
+
+        // Don't move to same location
+        if (src.parent_path() == fs::path(dest_dir)) {
+            return;
+        }
+
+        // Don't move into self
+        if (src == dest) {
+            return;
+        }
+
+        // Don't allow moving a folder into itself or a subdirectory of itself
+        if (fs::is_directory(src)) {
+            std::string dest_norm = engine::platform::normalize_path_for_comparison(dest_dir);
+            std::string src_norm = engine::platform::normalize_path_for_comparison(src.string());
+            if (dest_norm.find(src_norm) == 0) {
+                engine::Logger::instance().warning("FileBrowser", "Cannot move folder into itself");
+                return;
+            }
+        }
+
+        // Handle name collision
+        if (fs::exists(dest)) {
+            engine::Logger::instance().warning("FileBrowser", "Cannot move: '%s' already exists in destination",
+                                                src.filename().string().c_str());
+            return;
+        }
+
+        fs::rename(src, dest);
+
+        // Also move the .meta sidecar file if it exists
+        if (!fs::is_directory(src)) {
+            std::string src_meta = src_path + ".meta";
+            std::string dest_meta = dest.string() + ".meta";
+            if (fs::exists(src_meta)) {
+                fs::rename(src_meta, dest_meta);
+            }
+
+            // Notify asset registry and update all references
+            if (m_editor_context) {
+                m_editor_context->asset_registry().notify_moved(src_path, dest.string());
+                m_editor_context->update_asset_references(src_path, dest.string());
+            }
+        }
+
+        // Update selection if we moved the selected item
+        if (m_selected_file == src_path) {
+            m_selected_file = dest.string();
+        }
+
+        // Update clipboard if we moved the clipboard item
+        if (m_clipboard_path == src_path) {
+            m_clipboard_path = dest.string();
+        }
+
+        refresh();
+    } catch (const std::exception& e) {
+        engine::Logger::instance().error("FileBrowser", "Failed to move: %s", e.what());
     }
 }
 

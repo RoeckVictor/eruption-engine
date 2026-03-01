@@ -2,34 +2,25 @@
 
 #include "editor/core/Constants.h"
 
-namespace pixart {
+namespace editor::pixart {
 
-/// Encapsulates canvas view state: zoom, pan, and coordinate transformations.
-/// Separates view logic from rendering and input handling.
+// Encapsulates canvas view state: zoom, pan, and coordinate transformations
+// Separates view logic from rendering and input handling
 class CanvasView {
 public:
-    // View parameters
     float zoom = editor::constants::DEFAULT_ZOOM;
     float pan_x = 0.0f;
     float pan_y = 0.0f;
 
-    // Zoom constraints
     float min_zoom = editor::constants::MIN_ZOOM;
     float max_zoom = editor::constants::MAX_ZOOM;
 
-    /// Reset view to default state.
     void reset() {
         zoom = editor::constants::DEFAULT_ZOOM;
         pan_x = 0.0f;
         pan_y = 0.0f;
     }
 
-    /// Apply zoom centered on a screen point.
-    /// @param factor Zoom multiplier (>1 = zoom in, <1 = zoom out)
-    /// @param screen_x Screen X coordinate to zoom towards
-    /// @param screen_y Screen Y coordinate to zoom towards
-    /// @param canvas_center_x Canvas center X in screen coordinates
-    /// @param canvas_center_y Canvas center Y in screen coordinates
     void zoom_towards(float factor, float screen_x, float screen_y,
                       float canvas_center_x, float canvas_center_y) {
         float old_zoom = zoom;
@@ -44,18 +35,6 @@ public:
         pan_y -= rel_y * (zoom / old_zoom - 1.0f);
     }
 
-    /// Convert screen coordinates to pixel coordinates.
-    /// @param screen_x Screen X position
-    /// @param screen_y Screen Y position
-    /// @param canvas_x0 Canvas region top-left X
-    /// @param canvas_y0 Canvas region top-left Y
-    /// @param canvas_w Canvas region width
-    /// @param canvas_h Canvas region height
-    /// @param grid_w Grid width in pixels
-    /// @param grid_h Grid height in pixels
-    /// @param out_px Output pixel X coordinate
-    /// @param out_py Output pixel Y coordinate
-    /// @return True if the screen point is within the grid bounds
     bool screen_to_pixel(float screen_x, float screen_y,
                          float canvas_x0, float canvas_y0,
                          float canvas_w, float canvas_h,
@@ -78,17 +57,6 @@ public:
         return out_px >= 0 && out_px < grid_w && out_py >= 0 && out_py < grid_h;
     }
 
-    /// Get the screen-space bounds of the grid.
-    /// @param canvas_x0 Canvas region top-left X
-    /// @param canvas_y0 Canvas region top-left Y
-    /// @param canvas_w Canvas region width
-    /// @param canvas_h Canvas region height
-    /// @param grid_w Grid width in pixels
-    /// @param grid_h Grid height in pixels
-    /// @param out_x0 Output grid left edge in screen coords
-    /// @param out_y0 Output grid top edge in screen coords
-    /// @param out_w Output grid width in screen coords
-    /// @param out_h Output grid height in screen coords
     void get_grid_screen_bounds(float canvas_x0, float canvas_y0,
                                 float canvas_w, float canvas_h,
                                 int grid_w, int grid_h,
@@ -103,7 +71,6 @@ public:
     }
 };
 
-/// Helper for tracking pan drag state.
 struct PanState {
     bool active = false;
     float start_x = 0.0f;
@@ -131,4 +98,4 @@ struct PanState {
     }
 };
 
-} // namespace pixart
+}

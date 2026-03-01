@@ -7,8 +7,13 @@
 #include "engine/core/Logger.h"
 #include "engine/core/Transform.h"
 #include "engine/platform/PlatformUtils.h"
+#include "engine/simulation/PixelGridComponent.h"
+#include "engine/render/Image.h"
+#include "engine/render/Text.h"
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <nlohmann/json.hpp>
 
 namespace editor {
 
@@ -244,6 +249,182 @@ void EditorContext::sync_prefab_to_project_scenes(const std::string& prefab_path
 void EditorContext::update_material_tables() {
     if (m_runtime && m_runtime->sim_playback()) {
         m_runtime->sim_playback()->update_material_tables();
+    }
+}
+
+void EditorContext::init_asset_registry(const std::string& project_path) {
+    // Build the Assets folder path
+    std::filesystem::path assets_path = std::filesystem::path(project_path) / "Assets";
+
+    if (std::filesystem::exists(assets_path)) {
+        // Set up callback to update references when external moves are detected
+        m_asset_registry.set_moved_callback([this](const std::string& old_path, const std::string& new_path) {
+            update_asset_references(old_path, new_path);
+        });
+
+        m_asset_registry.init(assets_path.string());
+
+        // Load cached state and detect any moves that happened while editor was closed
+        m_asset_registry.load_cache_and_detect_moves();
+
+        engine::Logger::instance().info("EditorContext", "Asset registry initialized at: %s",
+                                         assets_path.string().c_str());
+    } else {
+        engine::Logger::instance().warning("EditorContext", "Assets folder not found: %s",
+                                         assets_path.string().c_str());
+    }
+}
+
+void EditorContext::rescan_assets_for_external_changes() {
+    m_asset_registry.rescan();
+}
+
+void EditorContext::shutdown_asset_registry() {
+    // Save cache before shutdown so we can detect moves on next startup
+    m_asset_registry.save_cache();
+    m_asset_registry.shutdown();
+}
+
+void EditorContext::update_asset_references(const std::string& old_path, const std::string& new_path) {
+    namespace fs = std::filesystem;
+
+    int refs_updated = 0;
+
+    // Update references in the current scene registry
+    if (m_registry) {
+        int before = refs_updated;
+        update_registry_paths(*m_registry, old_path, new_path);
+        if (refs_updated > before) {
+            m_scene_state.mark_dirty();
+        }
+    }
+
+    // Update references in all scene and prefab files in the project
+    const auto& project_path = m_scene_state.project_path();
+    if (project_path.empty()) {
+        return;
+    }
+
+    const auto& current_scene = m_scene_state.scene_path();
+    int files_updated = 0;
+
+    try {
+        for (const auto& entry : fs::recursive_directory_iterator(project_path)) {
+            if (!entry.is_regular_file()) continue;
+
+            std::string ext = entry.path().extension().string();
+            if (ext != ".scene" && ext != ".prefab") continue;
+
+            // Skip the currently open scene - it's updated in memory
+            if (paths_equal(entry.path().string(), current_scene)) continue;
+
+            update_file_paths(entry.path(), old_path, new_path);
+            ++files_updated;
+        }
+    } catch (const std::exception& e) {
+        engine::Logger::instance().error("EditorContext", "Error updating asset references: %s", e.what());
+    }
+
+    engine::Logger::instance().info("EditorContext", "Updated asset references: '%s' -> '%s'",
+                                     old_path.c_str(), new_path.c_str());
+}
+
+void EditorContext::update_registry_paths(entt::registry& reg, const std::string& old_path, const std::string& new_path) {
+    // Update PixelGridComponent paths
+    auto pxg_view = reg.view<engine::simulation::PixelGridComponent>();
+    for (auto entity : pxg_view) {
+        auto& comp = pxg_view.get<engine::simulation::PixelGridComponent>(entity);
+        if (paths_equal(comp.pixel_grid_path, old_path)) {
+            comp.pixel_grid_path = new_path;
+            comp.loaded = false;  // Mark for reload
+        }
+    }
+
+    // Update Image sprite_path
+    auto img_view = reg.view<engine::render::Image>();
+    for (auto entity : img_view) {
+        auto& comp = img_view.get<engine::render::Image>(entity);
+        if (paths_equal(comp.sprite_path, old_path)) {
+            comp.sprite_path = new_path;
+        }
+    }
+
+    // Update Text font_path
+    auto text_view = reg.view<engine::render::Text>();
+    for (auto entity : text_view) {
+        auto& comp = text_view.get<engine::render::Text>(entity);
+        if (paths_equal(comp.font_path, old_path)) {
+            comp.font_path = new_path;
+        }
+    }
+
+    // Update EntityInfo prefab_path
+    auto info_view = reg.view<EntityInfo>();
+    for (auto entity : info_view) {
+        auto& info = info_view.get<EntityInfo>(entity);
+        if (info.is_prefab_instance && paths_equal(info.prefab_path, old_path)) {
+            info.prefab_path = new_path;
+        }
+    }
+}
+
+void EditorContext::update_file_paths(const std::filesystem::path& file_path, const std::string& old_path, const std::string& new_path) {
+    try {
+        // Read the file
+        std::ifstream in_file(file_path);
+        if (!in_file.is_open()) return;
+
+        std::string content((std::istreambuf_iterator<char>(in_file)),
+                            std::istreambuf_iterator<char>());
+        in_file.close();
+
+        // Parse JSON
+        nlohmann::json json = nlohmann::json::parse(content, nullptr, false);
+        if (json.is_discarded()) return;
+
+        // Track if we made changes
+        bool modified = false;
+
+        // Helper to normalize paths for comparison
+        auto normalize = [](const std::string& p) {
+            return engine::platform::normalize_path_for_comparison(p);
+        };
+
+        std::string old_norm = normalize(old_path);
+
+        // Recursively update all string values that match old_path
+        std::function<void(nlohmann::json&)> update_paths = [&](nlohmann::json& node) {
+            if (node.is_string()) {
+                std::string val = node.get<std::string>();
+                if (normalize(val) == old_norm) {
+                    node = new_path;
+                    modified = true;
+                }
+            } else if (node.is_object()) {
+                for (auto& [key, val] : node.items()) {
+                    update_paths(val);
+                }
+            } else if (node.is_array()) {
+                for (auto& elem : node) {
+                    update_paths(elem);
+                }
+            }
+        };
+
+        update_paths(json);
+
+        // Write back if modified
+        if (modified) {
+            std::ofstream out_file(file_path);
+            if (out_file.is_open()) {
+                out_file << json.dump(2);
+                engine::Logger::instance().info("EditorContext", "Updated references in: %s",
+                                                 file_path.string().c_str());
+            }
+        }
+    } catch (const std::exception& e) {
+        engine::Logger::instance().error("EditorContext", "Failed to update file '%s': %s",
+                                          file_path.string().c_str(), e.what());
     }
 }
 
