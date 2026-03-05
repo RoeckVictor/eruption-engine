@@ -311,7 +311,7 @@ HitResult EntityHitDetector::hit_test(
             auto& transform = view.get<engine::Transform>(entity);
             auto& box = view.get<engine::physics::BoxCollider>(entity);
 
-            if (box.enabled && point_in_box_collider(world_x, world_y, transform, box)) {
+            if (box.material.enabled && point_in_box_collider(world_x, world_y, transform, box)) {
                 try_add_entity(entity);
             }
         }
@@ -330,7 +330,7 @@ HitResult EntityHitDetector::hit_test(
             auto& transform = view.get<engine::Transform>(entity);
             auto& circle = view.get<engine::physics::CircleCollider>(entity);
 
-            if (circle.enabled && point_in_circle_collider(world_x, world_y, transform, circle)) {
+            if (circle.material.enabled && point_in_circle_collider(world_x, world_y, transform, circle)) {
                 try_add_entity(entity);
             }
         }
@@ -349,7 +349,7 @@ HitResult EntityHitDetector::hit_test(
             auto& transform = view.get<engine::Transform>(entity);
             auto& capsule = view.get<engine::physics::CapsuleCollider>(entity);
 
-            if (capsule.enabled && point_in_capsule_collider(world_x, world_y, transform, capsule)) {
+            if (capsule.material.enabled && point_in_capsule_collider(world_x, world_y, transform, capsule)) {
                 try_add_entity(entity);
             }
         }

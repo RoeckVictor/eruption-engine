@@ -3,6 +3,7 @@
 #include "engine/asset/AssetLoader.h"
 #include "engine/asset/VFS.h"
 #include "engine/animation/AnimationClip.h"
+#include "engine/animation/PropertyValueJson.h"
 #include "engine/core/Log.h"
 #include <nlohmann/json.hpp>
 #include <memory>
@@ -109,38 +110,7 @@ private:
         }
 
         if (j.contains("value")) {
-            const auto& v = j["value"];
-            switch (type) {
-                case animation::PropertyValueType::Bool:
-                    kf.value = v.get<bool>();
-                    break;
-                case animation::PropertyValueType::Int:
-                    kf.value = v.get<int>();
-                    break;
-                case animation::PropertyValueType::Float:
-                    kf.value = v.get<float>();
-                    break;
-                case animation::PropertyValueType::Vec2:
-                    if (v.is_array() && v.size() >= 2) {
-                        kf.value = animation::Vec2{v[0].get<float>(), v[1].get<float>()};
-                    }
-                    break;
-                case animation::PropertyValueType::Vec3:
-                    if (v.is_array() && v.size() >= 3) {
-                        kf.value = animation::Vec3{v[0].get<float>(), v[1].get<float>(), v[2].get<float>()};
-                    }
-                    break;
-                case animation::PropertyValueType::Vec4:
-                case animation::PropertyValueType::Color:
-                    if (v.is_array() && v.size() >= 4) {
-                        kf.value = animation::Vec4{v[0].get<float>(), v[1].get<float>(),
-                                                    v[2].get<float>(), v[3].get<float>()};
-                    }
-                    break;
-                case animation::PropertyValueType::String:
-                    kf.value = v.get<std::string>();
-                    break;
-            }
+            kf.value = animation::parse_property_value(j["value"], type);
         }
     }
 };
@@ -167,20 +137,8 @@ inline void to_json(nlohmann::json& j, const AnimationClip& clip) {
             kf_json["time"] = kf.time;
             kf_json["interpolation"] = interpolation_type_to_string(kf.interpolation);
 
-            // Serialize value based on type
-            std::visit([&](const auto& val) {
-                using T = std::decay_t<decltype(val)>;
-                if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, int> ||
-                             std::is_same_v<T, float> || std::is_same_v<T, std::string>) {
-                    kf_json["value"] = val;
-                } else if constexpr (std::is_same_v<T, Vec2>) {
-                    kf_json["value"] = {val.x, val.y};
-                } else if constexpr (std::is_same_v<T, Vec3>) {
-                    kf_json["value"] = {val.x, val.y, val.z};
-                } else if constexpr (std::is_same_v<T, Vec4>) {
-                    kf_json["value"] = {val.x, val.y, val.z, val.w};
-                }
-            }, kf.value);
+            // Serialize value using shared utility
+            kf_json["value"] = property_value_to_json(kf.value);
 
             track_json["keyframes"].push_back(kf_json);
         }

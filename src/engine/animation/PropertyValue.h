@@ -1,60 +1,42 @@
 #pragma once
 
+#include "engine/math/VecN.h"
 #include <variant>
 #include <string>
 
 namespace engine::animation {
 
 // Vector types for animation (stored as float arrays to match reflection system)
-struct Vec2 {
+// Uses CRTP base class for operators to eliminate code duplication
+
+struct Vec2 : engine::math::VecOps<Vec2, 2> {
     float x = 0.0f, y = 0.0f;
 
     Vec2() = default;
     Vec2(float x_, float y_) : x(x_), y(y_) {}
 
-    float& operator[](size_t i) { return (&x)[i]; }
-    float operator[](size_t i) const { return (&x)[i]; }
-
-    Vec2 operator+(const Vec2& o) const { return {x + o.x, y + o.y}; }
-    Vec2 operator-(const Vec2& o) const { return {x - o.x, y - o.y}; }
-    Vec2 operator*(float s) const { return {x * s, y * s}; }
-
-    bool operator==(const Vec2& o) const { return x == o.x && y == o.y; }
-    bool operator!=(const Vec2& o) const { return !(*this == o); }
+    float* data_ptr() { return &x; }
+    const float* data_ptr() const { return &x; }
 };
 
-struct Vec3 {
+struct Vec3 : engine::math::VecOps<Vec3, 3> {
     float x = 0.0f, y = 0.0f, z = 0.0f;
 
     Vec3() = default;
     Vec3(float x_, float y_, float z_) : x(x_), y(y_), z(z_) {}
 
-    float& operator[](size_t i) { return (&x)[i]; }
-    float operator[](size_t i) const { return (&x)[i]; }
-
-    Vec3 operator+(const Vec3& o) const { return {x + o.x, y + o.y, z + o.z}; }
-    Vec3 operator-(const Vec3& o) const { return {x - o.x, y - o.y, z - o.z}; }
-    Vec3 operator*(float s) const { return {x * s, y * s, z * s}; }
-
-    bool operator==(const Vec3& o) const { return x == o.x && y == o.y && z == o.z; }
-    bool operator!=(const Vec3& o) const { return !(*this == o); }
+    float* data_ptr() { return &x; }
+    const float* data_ptr() const { return &x; }
 };
 
-struct Vec4 {
+struct Vec4 : engine::math::VecOps<Vec4, 4> {
     float x = 0.0f, y = 0.0f, z = 0.0f, w = 0.0f;
 
     Vec4() = default;
     Vec4(float x_, float y_, float z_, float w_) : x(x_), y(y_), z(z_), w(w_) {}
 
-    float& operator[](size_t i) { return (&x)[i]; }
-    float operator[](size_t i) const { return (&x)[i]; }
-
-    Vec4 operator+(const Vec4& o) const { return {x + o.x, y + o.y, z + o.z, w + o.w}; }
-    Vec4 operator-(const Vec4& o) const { return {x - o.x, y - o.y, z - o.z, w - o.w}; }
-    Vec4 operator*(float s) const { return {x * s, y * s, z * s, w * s}; }
-
-    bool operator==(const Vec4& o) const { return x == o.x && y == o.y && z == o.z && w == o.w; }
-    bool operator!=(const Vec4& o) const { return !(*this == o); }
+    float* data_ptr() { return &x; }
+    const float* data_ptr() const { return &x; }
 };
 
 enum class PropertyValueType {

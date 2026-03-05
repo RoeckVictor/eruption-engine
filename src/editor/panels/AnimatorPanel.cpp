@@ -2,12 +2,12 @@
 #include "editor/core/EditorContext.h"
 #include "editor/icons/IconsFontAwesome6.h"
 #include "editor/inspectors/AssetPicker.h"
+#include "editor/EditorFileDialogs.h"
 #include "engine/animation/StateTransition.h"
 #include "engine/asset/loaders/AnimatorControllerLoader.h"
 #include "engine/core/Engine.h"
 #include "engine/core/Logger.h"
 #include "engine/core/MathConstants.h"
-#include "engine/platform/PlatformUtils.h"
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <algorithm>
@@ -1090,18 +1090,8 @@ void AnimatorPanel::new_controller() {
 
 bool AnimatorPanel::save_controller() {
     if (m_current_path.empty()) {
-        // Show save dialog, default to project's Assets folder
-        std::string initial_dir;
-        const auto& project_path = m_context.scene_state().project_path();
-        if (!project_path.empty()) {
-            initial_dir = (std::filesystem::path(project_path) / "Assets").string();
-        }
-
-        auto path = engine::platform::save_file_dialog(
-            "Save Animator Controller",
-            {{"Animator Controller (*.animstate)", "*.animstate"}},
-            ".animstate",
-            initial_dir);
+        auto initial_dir = get_assets_directory(m_context.scene_state().project_path());
+        auto path = save_animator_controller(initial_dir);
         if (path.empty()) return false;
         return save_controller_as(path);
     }
@@ -1121,27 +1111,15 @@ bool AnimatorPanel::save_controller_as(const std::string& path) {
 }
 
 void AnimatorPanel::show_open_dialog() {
-    auto path = engine::platform::open_file_dialog(
-        "Open Animator Controller",
-        {{"Animator Controller (*.animstate)", "*.animstate"}});
+    auto path = open_animator_controller();
     if (!path.empty()) {
         open_controller(path);
     }
 }
 
 void AnimatorPanel::show_save_as_dialog() {
-    // Show save dialog, default to project's Assets folder
-    std::string initial_dir;
-    const auto& project_path = m_context.scene_state().project_path();
-    if (!project_path.empty()) {
-        initial_dir = (std::filesystem::path(project_path) / "Assets").string();
-    }
-
-    auto path = engine::platform::save_file_dialog(
-        "Save Animator Controller As",
-        {{"Animator Controller (*.animstate)", "*.animstate"}},
-        ".animstate",
-        initial_dir);
+    auto initial_dir = get_assets_directory(m_context.scene_state().project_path());
+    auto path = save_animator_controller_as(initial_dir);
     if (!path.empty()) {
         save_controller_as(path);
     }

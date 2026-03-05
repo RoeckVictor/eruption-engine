@@ -36,6 +36,7 @@
 #include "engine/platform/Input.h"
 
 #include "engine/platform/PlatformUtils.h"
+#include "editor/EditorFileDialogs.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -595,19 +596,13 @@ void EditorApplication::save_scene() {
 void EditorApplication::save_scene_as() {
     std::string initial_dir;
     if (has_project()) {
-        std::filesystem::path assets_dir = std::filesystem::path(m_project_manager->project_path()) / "Assets";
-        if (std::filesystem::exists(assets_dir)) {
-            initial_dir = assets_dir.string();
-        } else {
+        initial_dir = get_assets_directory(m_project_manager->project_path());
+        if (initial_dir.empty() || !std::filesystem::exists(initial_dir)) {
             initial_dir = m_project_manager->project_path();
         }
     }
 
-    std::string path = engine::platform::save_file_dialog(
-        "Save Scene As",
-        {{"Scene Files (*.scene)", "*.scene"}, {"All Files", "*.*"}},
-        "scene",
-        initial_dir);
+    auto path = editor::save_scene_as(initial_dir);
 
     if (!path.empty()) {
         SceneSerializer serializer(m_scene_registry);

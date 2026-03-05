@@ -51,9 +51,9 @@ void render_colliders(const DebugOverlayConfig& config) {
             if (!should_draw(config.visibility->colliders, entity)) continue;
             auto& t = view.get<engine::Transform>(entity);
             auto& box = view.get<engine::physics::BoxCollider>(entity);
-            if (!box.enabled) continue;
+            if (!box.material.enabled) continue;
 
-            ImU32 col = box.is_trigger ? TRIGGER_COLOR : COLLIDER_COLOR;
+            ImU32 col = box.material.is_trigger ? TRIGGER_COLOR : COLLIDER_COLOR;
 
             float abs_sx = std::abs(t.world_scale_x);
             float abs_sy = std::abs(t.world_scale_y);
@@ -96,9 +96,9 @@ void render_colliders(const DebugOverlayConfig& config) {
             if (!should_draw(config.visibility->colliders, entity)) continue;
             auto& t = view.get<engine::Transform>(entity);
             auto& circle = view.get<engine::physics::CircleCollider>(entity);
-            if (!circle.enabled) continue;
+            if (!circle.material.enabled) continue;
 
-            ImU32 col = circle.is_trigger ? TRIGGER_COLOR : COLLIDER_COLOR;
+            ImU32 col = circle.material.is_trigger ? TRIGGER_COLOR : COLLIDER_COLOR;
             float avg_scale = (std::abs(t.world_scale_x) + std::abs(t.world_scale_y)) * 0.5f;
 
             float ox = circle.offset_x * t.world_scale_x;
@@ -123,9 +123,9 @@ void render_colliders(const DebugOverlayConfig& config) {
             if (!should_draw(config.visibility->colliders, entity)) continue;
             auto& t = view.get<engine::Transform>(entity);
             auto& cap = view.get<engine::physics::CapsuleCollider>(entity);
-            if (!cap.enabled) continue;
+            if (!cap.material.enabled) continue;
 
-            ImU32 col = cap.is_trigger ? TRIGGER_COLOR : COLLIDER_COLOR;
+            ImU32 col = cap.material.is_trigger ? TRIGGER_COLOR : COLLIDER_COLOR;
             float avg_scale = (std::abs(t.world_scale_x) + std::abs(t.world_scale_y)) * 0.5f;
             float half_len = cap.length * 0.5f * avg_scale;
             float rad = cap.radius * avg_scale;
@@ -184,7 +184,7 @@ void render_colliders(const DebugOverlayConfig& config) {
             if (!should_draw(config.visibility->colliders, entity)) continue;
             auto& t = view.get<engine::Transform>(entity);
             auto& dc = view.get<engine::physics::DynamicCollider>(entity);
-            if (!dc.enabled) continue;
+            if (!dc.material.enabled) continue;
 
             const DebugContours* debug = config.pixel_grid_loader->get_debug_contours(entity);
             if (!debug) {
@@ -193,7 +193,7 @@ void render_colliders(const DebugOverlayConfig& config) {
             }
             if (!debug || debug->contours.empty()) continue;
 
-            ImU32 col = dc.is_trigger ? TRIGGER_COLOR : COLLIDER_COLOR;
+            ImU32 col = dc.material.is_trigger ? TRIGGER_COLOR : COLLIDER_COLOR;
 
             float abs_sx = std::abs(t.world_scale_x);
             float abs_sy = std::abs(t.world_scale_y);

@@ -1,10 +1,10 @@
 #include "ProfilerPanel.h"
 #include "editor/core/EditorContext.h"
 #include "editor/icons/IconsFontAwesome6.h"
+#include "editor/EditorFileDialogs.h"
 #include "engine/core/Engine.h"
 #include "engine/profiler/Profiler.h"
 #include "engine/profiler/GPUProfiler.h"
-#include "engine/platform/PlatformUtils.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -628,16 +628,7 @@ ImU32 ProfilerPanel::get_scope_color(const std::string& name, uint32_t depth) co
 
 void ProfilerPanel::export_capture() {
     auto& profiler = engine::profiler::Profiler::instance();
-
-    std::vector<engine::platform::FileFilter> filters = {
-        {"JSON Files", "*.json"}
-    };
-
-    std::string path = engine::platform::save_file_dialog(
-        "Export Profiler Capture",
-        filters,
-        ".json");
-
+    auto path = export_profiler_capture();
     if (!path.empty()) {
         profiler.export_to_json(path.c_str());
     }
@@ -645,15 +636,7 @@ void ProfilerPanel::export_capture() {
 
 void ProfilerPanel::import_capture() {
     auto& profiler = engine::profiler::Profiler::instance();
-
-    std::vector<engine::platform::FileFilter> filters = {
-        {"JSON Files", "*.json"}
-    };
-
-    std::string path = engine::platform::open_file_dialog(
-        "Import Profiler Capture",
-        filters);
-
+    auto path = import_profiler_capture();
     if (!path.empty()) {
         if (profiler.import_from_json(path.c_str())) {
             reset_view();

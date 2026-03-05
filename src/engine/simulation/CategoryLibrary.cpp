@@ -326,7 +326,7 @@ void CategoryLibrary::pack_category(const CategoryDefinition& cat, uint32_t* out
     if (cat.randomize_equal_priority) header |= 2u;
     if (cat.dissipation.enabled) header |= 4u;
 
-    uint32_t rule_count = std::min(static_cast<size_t>(MAX_MOVEMENT_RULES), cat.movement_rules.size());
+    uint32_t rule_count = static_cast<uint32_t>(std::min(static_cast<size_t>(MAX_MOVEMENT_RULES), cat.movement_rules.size()));
     header |= (rule_count & 0xFu) << 3;
 
     // Dissipation rate (0.0-1.0 -> 0-255)

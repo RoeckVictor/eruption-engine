@@ -14,6 +14,18 @@
 
 namespace engine::platform {
 
+// Safe wrapper for environment variable access on Windows
+static std::string safe_getenv(const char* var_name) {
+    char* value = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&value, &len, var_name) == 0 && value != nullptr) {
+        std::string result(value);
+        free(value);
+        return result;
+    }
+    return {};
+}
+
 std::string Win32PlatformInfo::executable_directory() const {
     wchar_t path[MAX_PATH] = {};
     DWORD len = GetModuleFileNameW(nullptr, path, MAX_PATH);
@@ -24,8 +36,8 @@ std::string Win32PlatformInfo::executable_directory() const {
 }
 
 std::string Win32PlatformInfo::user_config_directory() const {
-    const char* appdata = std::getenv("APPDATA");
-    if (appdata) {
+    std::string appdata = safe_getenv("APPDATA");
+    if (!appdata.empty()) {
         return appdata;
     }
     return executable_directory();
@@ -33,8 +45,8 @@ std::string Win32PlatformInfo::user_config_directory() const {
 
 std::string Win32PlatformInfo::user_documents_directory() const {
     namespace fs = std::filesystem;
-    const char* userprofile = std::getenv("USERPROFILE");
-    if (userprofile) {
+    std::string userprofile = safe_getenv("USERPROFILE");
+    if (!userprofile.empty()) {
         return (fs::path(userprofile) / "Documents").string();
     }
     return executable_directory();

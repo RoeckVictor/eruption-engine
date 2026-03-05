@@ -502,7 +502,7 @@ static bool host_spawn_pixels_at_world(runtime::ScriptHostAPI* api, float world_
 
                 // If entity has DynamicCollider, mark for regeneration and split check
                 if (auto* collider = registry->try_get<engine::physics::DynamicCollider>(entity)) {
-                    if (collider->enabled) {
+                    if (collider->material.enabled) {
                         collider->generated = false;
                         rt->queue_dynamic_collider_split_check(entity);
                     }
@@ -1128,13 +1128,9 @@ void RuntimeContext::process_dynamic_collider_splits() {
                 new_grid.pixel_grid_path = "";
 
                 auto& new_collider = m_editor_registry->emplace<engine::physics::DynamicCollider>(new_entity);
-                new_collider.enabled = orig_collider.enabled;
-                new_collider.is_trigger = orig_collider.is_trigger;
+                new_collider.material = orig_collider.material;
                 new_collider.simplification = orig_collider.simplification;
                 new_collider.min_contour_area = orig_collider.min_contour_area;
-                new_collider.density = orig_collider.density;
-                new_collider.friction = orig_collider.friction;
-                new_collider.restitution = orig_collider.restitution;
                 new_collider.generated = false;
 
                 if (orig_rb && total_fragment_pixels > 0) {

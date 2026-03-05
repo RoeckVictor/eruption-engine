@@ -144,7 +144,7 @@ void PhysicsPlayback::attach_collider_shapes(entt::entity entity, engine::physic
     // BoxCollider
     if (m_registry.all_of<engine::physics::BoxCollider>(entity)) {
         auto& box = m_registry.get<engine::physics::BoxCollider>(entity);
-        if (box.enabled) {
+        if (box.material.enabled) {
             float hw = m_world.pixels_to_meters(box.width * 0.5f * std::abs(scale_x));
             float hh = m_world.pixels_to_meters(box.height * 0.5f * std::abs(scale_y));
             float ox = m_world.pixels_to_meters(box.offset_x * scale_x);
@@ -164,24 +164,24 @@ void PhysicsPlayback::attach_collider_shapes(entt::entity entity, engine::physic
             }
 
             box.shape_id = m_world.add_polygon_shape(
-                rb.body_id, verts, 4, box.density, box.friction, box.restitution);
+                rb.body_id, verts, 4, box.material.density, box.material.friction, box.material.restitution);
         }
     }
 
     // CircleCollider
     if (m_registry.all_of<engine::physics::CircleCollider>(entity)) {
         auto& circle = m_registry.get<engine::physics::CircleCollider>(entity);
-        if (circle.enabled) {
+        if (circle.material.enabled) {
             b2Circle c;
             c.center.x = m_world.pixels_to_meters(circle.offset_x * scale_x);
             c.center.y = m_world.pixels_to_meters(circle.offset_y * scale_y);
             c.radius = m_world.pixels_to_meters(circle.radius * avg_scale);
 
             b2ShapeDef shape_def = b2DefaultShapeDef();
-            shape_def.density = circle.density;
-            shape_def.material.friction = circle.friction;
-            shape_def.material.restitution = circle.restitution;
-            shape_def.isSensor = circle.is_trigger;
+            shape_def.density = circle.material.density;
+            shape_def.material.friction = circle.material.friction;
+            shape_def.material.restitution = circle.material.restitution;
+            shape_def.isSensor = circle.material.is_trigger;
 
             circle.shape_id = b2CreateCircleShape(rb.body_id, &shape_def, &c);
         }
@@ -190,7 +190,7 @@ void PhysicsPlayback::attach_collider_shapes(entt::entity entity, engine::physic
     // CapsuleCollider - use native Box2D capsule for better ghost collision prevention
     if (m_registry.all_of<engine::physics::CapsuleCollider>(entity)) {
         auto& cap = m_registry.get<engine::physics::CapsuleCollider>(entity);
-        if (cap.enabled) {
+        if (cap.material.enabled) {
             float half_len = m_world.pixels_to_meters(cap.length * 0.5f * avg_scale);
             float rad = m_world.pixels_to_meters(cap.radius * avg_scale);
             float ox = m_world.pixels_to_meters(cap.offset_x * scale_x);
@@ -202,10 +202,10 @@ void PhysicsPlayback::attach_collider_shapes(entt::entity entity, engine::physic
             float ay = std::cos(cap_rot);
 
             b2ShapeDef shape_def = b2DefaultShapeDef();
-            shape_def.density = cap.density;
-            shape_def.material.friction = cap.friction;
-            shape_def.material.restitution = cap.restitution;
-            shape_def.isSensor = cap.is_trigger;
+            shape_def.density = cap.material.density;
+            shape_def.material.friction = cap.material.friction;
+            shape_def.material.restitution = cap.material.restitution;
+            shape_def.isSensor = cap.material.is_trigger;
 
             // Create native Box2D capsule
             b2Capsule capsule;
@@ -224,7 +224,7 @@ void PhysicsPlayback::attach_collider_shapes(entt::entity entity, engine::physic
     // Just mark as needing generation
     if (m_registry.all_of<engine::physics::DynamicCollider>(entity)) {
         auto& dynamic = m_registry.get<engine::physics::DynamicCollider>(entity);
-        if (dynamic.enabled) {
+        if (dynamic.material.enabled) {
             // Will be processed in update_dynamic_colliders()
             dynamic.generated = false;
         }
@@ -240,7 +240,7 @@ void PhysicsPlayback::update_dynamic_colliders() {
         auto& collider = view.get<engine::physics::DynamicCollider>(entity);
         auto& grid_comp = view.get<engine::simulation::PixelGridComponent>(entity);
 
-        if (!b2Body_IsValid(rb.body_id) || !collider.enabled || !grid_comp.loaded) {
+        if (!b2Body_IsValid(rb.body_id) || !collider.material.enabled || !grid_comp.loaded) {
             continue;
         }
 
@@ -263,7 +263,7 @@ void PhysicsPlayback::update_dynamic_colliders() {
 
 void PhysicsPlayback::attach_dynamic_collider(entt::entity entity, engine::physics::Rigidbody& rb) {
     auto* collider = m_registry.try_get<engine::physics::DynamicCollider>(entity);
-    if (!collider || !collider->enabled) return;
+    if (!collider || !collider->material.enabled) return;
 
     // Triangulate if needed
     if (!collider->generated) {
@@ -292,10 +292,10 @@ void PhysicsPlayback::attach_dynamic_collider(entt::entity entity, engine::physi
 
     // Create shape definition
     b2ShapeDef shape_def = b2DefaultShapeDef();
-    shape_def.density = collider->density;
-    shape_def.material.friction = collider->friction;
-    shape_def.material.restitution = collider->restitution;
-    shape_def.isSensor = collider->is_trigger;
+    shape_def.density = collider->material.density;
+    shape_def.material.friction = collider->material.friction;
+    shape_def.material.restitution = collider->material.restitution;
+    shape_def.isSensor = collider->material.is_trigger;
 
     // Set up coordinate transform parameters
     engine::physics::GridToLocalParams params;

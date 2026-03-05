@@ -85,43 +85,43 @@ AnimatorParameter* AnimatorController::add_parameter(const AnimatorParameter& pa
     return &parameters.back();
 }
 
-AnimatorParameter* AnimatorController::add_bool(const std::string& name, bool default_value) {
-    return add_parameter(AnimatorParameter::make_bool(name, default_value));
+AnimatorParameter* AnimatorController::add_bool(const std::string& param_name, bool default_value) {
+    return add_parameter(AnimatorParameter::make_bool(param_name, default_value));
 }
 
-AnimatorParameter* AnimatorController::add_int(const std::string& name, int default_value) {
-    return add_parameter(AnimatorParameter::make_int(name, default_value));
+AnimatorParameter* AnimatorController::add_int(const std::string& param_name, int default_value) {
+    return add_parameter(AnimatorParameter::make_int(param_name, default_value));
 }
 
-AnimatorParameter* AnimatorController::add_float(const std::string& name, float default_value) {
-    return add_parameter(AnimatorParameter::make_float(name, default_value));
+AnimatorParameter* AnimatorController::add_float(const std::string& param_name, float default_value) {
+    return add_parameter(AnimatorParameter::make_float(param_name, default_value));
 }
 
-AnimatorParameter* AnimatorController::add_trigger(const std::string& name) {
-    return add_parameter(AnimatorParameter::make_trigger(name));
+AnimatorParameter* AnimatorController::add_trigger(const std::string& param_name) {
+    return add_parameter(AnimatorParameter::make_trigger(param_name));
 }
 
-const AnimatorParameter* AnimatorController::get_parameter(const std::string& name) const {
+const AnimatorParameter* AnimatorController::get_parameter(const std::string& param_name) const {
     for (const auto& param : parameters) {
-        if (param.name == name) {
+        if (param.name == param_name) {
             return &param;
         }
     }
     return nullptr;
 }
 
-AnimatorParameter* AnimatorController::get_parameter(const std::string& name) {
+AnimatorParameter* AnimatorController::get_parameter(const std::string& param_name) {
     for (auto& param : parameters) {
-        if (param.name == name) {
+        if (param.name == param_name) {
             return &param;
         }
     }
     return nullptr;
 }
 
-bool AnimatorController::remove_parameter(const std::string& name) {
+bool AnimatorController::remove_parameter(const std::string& param_name) {
     auto it = std::find_if(parameters.begin(), parameters.end(),
-        [&](const AnimatorParameter& p) { return p.name == name; });
+        [&](const AnimatorParameter& p) { return p.name == param_name; });
 
     if (it != parameters.end()) {
         parameters.erase(it);
@@ -130,7 +130,7 @@ bool AnimatorController::remove_parameter(const std::string& name) {
         for (auto& transition : transitions) {
             transition.conditions.erase(
                 std::remove_if(transition.conditions.begin(), transition.conditions.end(),
-                    [&](const TransitionCondition& c) { return c.parameter_name == name; }),
+                    [&](const TransitionCondition& c) { return c.parameter_name == param_name; }),
                 transition.conditions.end()
             );
         }
@@ -140,8 +140,8 @@ bool AnimatorController::remove_parameter(const std::string& name) {
     return false;
 }
 
-bool AnimatorController::has_parameter(const std::string& name) const {
-    return get_parameter(name) != nullptr;
+bool AnimatorController::has_parameter(const std::string& param_name) const {
+    return get_parameter(param_name) != nullptr;
 }
 
 // Transition management

@@ -16,7 +16,6 @@ void AnimationSystem::update(Engine& engine, float dt) {
     PROFILE_SCOPE("AnimationSystem::update");
 
     auto& assets = engine.assets();
-    auto& resolver = PropertyResolver::instance();
 
     auto view = m_registry->view<Animator>();
     for (auto [entity, animator] : view.each()) {

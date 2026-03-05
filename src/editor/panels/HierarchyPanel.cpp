@@ -3,7 +3,7 @@
 #include "editor/core/EditorComponents.h"
 #include "editor/serialization/SceneSerializer.h"
 #include "editor/icons/IconsFontAwesome6.h"
-#include "engine/platform/PlatformUtils.h"
+#include "editor/EditorFileDialogs.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -196,8 +196,7 @@ void HierarchyPanel::render_world_hierarchy() {
         }
         ImGui::Separator();
         if (ImGui::MenuItem("From Prefab...")) {
-            std::string path = engine::platform::open_file_dialog(
-                "Select Prefab", {{"Prefab Files (*.prefab)", "*.prefab"}});
+            auto path = select_prefab();
             if (!path.empty()) {
                 SceneSerializer serializer(*registry);
                 entt::entity e = serializer.load_prefab(path);

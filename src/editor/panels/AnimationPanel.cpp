@@ -1,12 +1,12 @@
 #include "AnimationPanel.h"
 #include "editor/core/EditorContext.h"
 #include "editor/icons/IconsFontAwesome6.h"
+#include "editor/EditorFileDialogs.h"
 #include "engine/animation/PropertyResolver.h"
 #include "engine/animation/Interpolation.h"
 #include "engine/asset/loaders/AnimationClipLoader.h"
 #include "engine/core/Engine.h"
 #include "engine/core/Logger.h"
-#include "engine/platform/PlatformUtils.h"
 #include <imgui.h>
 #include <algorithm>
 #include <cmath>
@@ -97,9 +97,7 @@ void AnimationPanel::render_toolbar() {
     ImGui::SameLine();
 
     if (ImGui::Button(ICON_FA_FOLDER_OPEN " Open")) {
-        auto path = engine::platform::open_file_dialog(
-            "Open Animation Clip",
-            {{"Animation Clip (*.anim)", "*.anim"}});
+        auto path = open_animation_clip();
         if (!path.empty()) {
             open_clip(path);
         }
@@ -112,17 +110,8 @@ void AnimationPanel::render_toolbar() {
     ImGui::SameLine();
 
     if (ImGui::Button(ICON_FA_FILE_EXPORT " Save As")) {
-        std::string initial_dir;
-        const auto& project_path = m_context.scene_state().project_path();
-        if (!project_path.empty()) {
-            initial_dir = (std::filesystem::path(project_path) / "Assets").string();
-        }
-
-        auto path = engine::platform::save_file_dialog(
-            "Save Animation Clip As",
-            {{"Animation Clip (*.anim)", "*.anim"}},
-            ".anim",
-            initial_dir);
+        auto initial_dir = get_assets_directory(m_context.scene_state().project_path());
+        auto path = save_animation_clip_as(initial_dir);
         if (!path.empty()) {
             save_clip_as(path);
         }
@@ -1047,18 +1036,8 @@ void AnimationPanel::new_clip() {
 
 bool AnimationPanel::save_clip() {
     if (m_current_path.empty()) {
-        // Show save dialog, default to project's Assets folder
-        std::string initial_dir;
-        const auto& project_path = m_context.scene_state().project_path();
-        if (!project_path.empty()) {
-            initial_dir = (std::filesystem::path(project_path) / "Assets").string();
-        }
-
-        auto path = engine::platform::save_file_dialog(
-            "Save Animation Clip",
-            {{"Animation Clip (*.anim)", "*.anim"}},
-            ".anim",
-            initial_dir);
+        auto initial_dir = get_assets_directory(m_context.scene_state().project_path());
+        auto path = save_animation_clip(initial_dir);
         if (path.empty()) return false;
         return save_clip_as(path);
     }

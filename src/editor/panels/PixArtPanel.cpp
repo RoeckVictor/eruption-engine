@@ -2,8 +2,8 @@
 #include "editor/core/EditorContext.h"
 #include "editor/core/Constants.h"
 #include "editor/icons/IconsFontAwesome6.h"
+#include "editor/EditorFileDialogs.h"
 #include "engine/simulation/MaterialLibrary.h"
-#include "engine/platform/PlatformUtils.h"
 #include "engine/core/Logger.h"
 
 #include <imgui.h>
@@ -65,7 +65,7 @@ void PixArtPanel::on_gui() {
                 m_show_new_dialog = true;
             }
             if (ImGui::MenuItem("Open...", "Ctrl+O")) {
-                auto path = engine::platform::open_file_dialog("Open Pixel Grid", {{"Pixel Grid (*.pxg)", "*.pxg"}});
+                auto path = open_pixel_grid();
                 if (!path.empty()) {
                     open_file(path);
                 }
@@ -221,7 +221,7 @@ void PixArtPanel::render_top_bar() {
 
     ImGui::SameLine();
     if (ImGui::Button(ICON_FA_FOLDER_OPEN " Open")) {
-        auto path = engine::platform::open_file_dialog("Open Pixel Grid", {{"Pixel Grid (*.pxg)", "*.pxg"}});
+        auto path = open_pixel_grid();
         if (!path.empty()) {
             open_file(path);
         }
@@ -1009,7 +1009,7 @@ void PixArtPanel::handle_shortcuts() {
         m_show_new_dialog = true;
     }
     if (ctrl && ImGui::IsKeyPressed(ImGuiKey_O)) {
-        auto path = engine::platform::open_file_dialog("Open Pixel Grid", {{"Pixel Grid (*.pxg)", "*.pxg"}});
+        auto path = open_pixel_grid();
         if (!path.empty()) {
             open_file(path);
         }
@@ -1538,18 +1538,8 @@ bool PixArtPanel::save_document_as() {
     auto* tab = current_tab();
     if (!tab) return false;
 
-    // Default to project's Assets folder
-    std::string initial_dir;
-    const auto& project_path = m_context.scene_state().project_path();
-    if (!project_path.empty()) {
-        initial_dir = (std::filesystem::path(project_path) / "Assets").string();
-    }
-
-    auto path = engine::platform::save_file_dialog(
-        "Save Pixel Grid",
-        {{"Pixel Grid (*.pxg)", "*.pxg"}},
-        ".pxg",
-        initial_dir);
+    auto initial_dir = get_assets_directory(m_context.scene_state().project_path());
+    auto path = save_pixel_grid(initial_dir);
     if (path.empty()) return false;
 
     tab->path = path;
@@ -1916,8 +1906,7 @@ void PixArtPanel::import_pxg_as_layer() {
     auto* tab = current_tab();
     if (!tab) return;
 
-    auto path = engine::platform::open_file_dialog("Import Pixel Grid as Layer",
-                                                   {{"Pixel Grid (*.pxg)", "*.pxg"}});
+    auto path = import_pixel_grid_layer();
     if (path.empty()) return;
 
     // Load the pxg file into a temporary document
@@ -1959,8 +1948,7 @@ void PixArtPanel::import_image_as_layer() {
     auto* tab = current_tab();
     if (!tab) return;
 
-    auto path = engine::platform::open_file_dialog("Import Image as Layer",
-                                                   {{"Image Files (*.png;*.jpg;*.jpeg)", "*.png;*.jpg;*.jpeg"}});
+    auto path = import_image_layer();
     if (path.empty()) return;
 
     // Load image using stb_image

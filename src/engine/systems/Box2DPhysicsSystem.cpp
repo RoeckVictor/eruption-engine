@@ -91,7 +91,7 @@ void Box2DPhysicsSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
             auto& transform = box_view.get<Transform>(entity);
 
             // Skip if body not created yet or collider disabled
-            if (!b2Body_IsValid(rb.body_id) || !collider.enabled) {
+            if (!b2Body_IsValid(rb.body_id) || !collider.material.enabled) {
                 continue;
             }
 
@@ -111,7 +111,7 @@ void Box2DPhysicsSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
             auto& collider = circle_view.get<physics::CircleCollider>(entity);
             auto& transform = circle_view.get<Transform>(entity);
 
-            if (!b2Body_IsValid(rb.body_id) || !collider.enabled) {
+            if (!b2Body_IsValid(rb.body_id) || !collider.material.enabled) {
                 continue;
             }
 
@@ -129,7 +129,7 @@ void Box2DPhysicsSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
             auto& collider = capsule_view.get<physics::CapsuleCollider>(entity);
             auto& transform = capsule_view.get<Transform>(entity);
 
-            if (!b2Body_IsValid(rb.body_id) || !collider.enabled) {
+            if (!b2Body_IsValid(rb.body_id) || !collider.material.enabled) {
                 continue;
             }
 
@@ -148,7 +148,7 @@ void Box2DPhysicsSystem::fixed_update(Engine& /*engine*/, float /*dt*/) {
             auto& collider = dynamic_view.get<physics::DynamicCollider>(entity);
             auto& grid_comp = dynamic_view.get<simulation::PixelGridComponent>(entity);
 
-            if (!b2Body_IsValid(rb.body_id) || !collider.enabled || !grid_comp.loaded) {
+            if (!b2Body_IsValid(rb.body_id) || !collider.material.enabled || !grid_comp.loaded) {
                 continue;
             }
 
@@ -314,10 +314,10 @@ void Box2DPhysicsSystem::create_box_collider(b2BodyId body, physics::BoxCollider
 
     // Create shape definition
     b2ShapeDef shape_def = b2DefaultShapeDef();
-    shape_def.density = collider.density;
-    shape_def.material.friction = collider.friction;
-    shape_def.material.restitution = collider.restitution;
-    shape_def.isSensor = collider.is_trigger;
+    shape_def.density = collider.material.density;
+    shape_def.material.friction = collider.material.friction;
+    shape_def.material.restitution = collider.material.restitution;
+    shape_def.isSensor = collider.material.is_trigger;
 
     // Create shape and attach to body
     b2ShapeId shape_id = b2CreatePolygonShape(body, &shape_def, &box);
@@ -348,10 +348,10 @@ void Box2DPhysicsSystem::create_circle_collider(b2BodyId body, physics::CircleCo
 
     // Create shape definition
     b2ShapeDef shape_def = b2DefaultShapeDef();
-    shape_def.density = collider.density;
-    shape_def.material.friction = collider.friction;
-    shape_def.material.restitution = collider.restitution;
-    shape_def.isSensor = collider.is_trigger;
+    shape_def.density = collider.material.density;
+    shape_def.material.friction = collider.material.friction;
+    shape_def.material.restitution = collider.material.restitution;
+    shape_def.isSensor = collider.material.is_trigger;
 
     // Create shape and attach to body
     b2ShapeId shape_id = b2CreateCircleShape(body, &shape_def, &circle);
@@ -380,10 +380,10 @@ void Box2DPhysicsSystem::create_capsule_collider(b2BodyId body, physics::Capsule
 
     // Create shape definition
     b2ShapeDef shape_def = b2DefaultShapeDef();
-    shape_def.density = collider.density;
-    shape_def.material.friction = collider.friction;
-    shape_def.material.restitution = collider.restitution;
-    shape_def.isSensor = collider.is_trigger;
+    shape_def.density = collider.material.density;
+    shape_def.material.friction = collider.material.friction;
+    shape_def.material.restitution = collider.material.restitution;
+    shape_def.isSensor = collider.material.is_trigger;
 
     // Use Box2D's native capsule shape (single convex shape, better for ghost collision prevention)
     float half_length = length_meters * 0.5f;
@@ -457,10 +457,10 @@ void Box2DPhysicsSystem::create_dynamic_collider(entt::entity entity, b2BodyId b
 
     // Create shape definition
     b2ShapeDef shape_def = b2DefaultShapeDef();
-    shape_def.density = collider.density;
-    shape_def.material.friction = collider.friction;
-    shape_def.material.restitution = collider.restitution;
-    shape_def.isSensor = collider.is_trigger;
+    shape_def.density = collider.material.density;
+    shape_def.material.friction = collider.material.friction;
+    shape_def.material.restitution = collider.material.restitution;
+    shape_def.isSensor = collider.material.is_trigger;
 
     // Reserve space for shapes (one per triangle)
     collider.shape_ids.reserve(mesh.triangles.size());
