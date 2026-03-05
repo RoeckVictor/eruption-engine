@@ -5,6 +5,7 @@
 #include "engine/core/ScreenRectSystem.h"
 #include "engine/scene/Scene.h"
 #include "engine/reflection/ReflectionInit.h"
+#include "engine/animation/AnimationInit.h"
 #include "engine/platform/KeyCode.h"
 #include "engine/platform/PlatformUtils.h"
 
@@ -46,6 +47,7 @@ bool GameApplication::on_init(engine::Engine& engine) {
     log.info("Game", "Initializing game: %s", m_product_name.c_str());
 
     engine::reflection::init_engine_reflections();
+    engine::animation::init_animation_property_resolver();
     editor::init_component_type_registry();
 
     // Get executable directory for resolving asset paths

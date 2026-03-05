@@ -35,7 +35,6 @@ private:
     void render_grid();
     void render_entities();
     void render_overlay();
-    void render_debug_overlays(ImDrawList* draw_list, const CoordinateTransform& wts);
     void handle_input();
 
     EditorContext& m_context;

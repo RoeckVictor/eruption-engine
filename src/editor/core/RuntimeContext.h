@@ -17,6 +17,10 @@
 namespace engine {
 class Engine;
 
+namespace animation {
+class AnimationSystem;
+}
+
 namespace physics {
 class PhysicsWorld;
 struct Rigidbody;
@@ -127,6 +131,7 @@ private:
 
     std::unique_ptr<PhysicsPlayback> m_physics_playback;
     std::unique_ptr<SimulationPlayback> m_sim_playback;
+    std::unique_ptr<engine::animation::AnimationSystem> m_animation_system;
 
     void init_scripts();
     void shutdown_scripts();

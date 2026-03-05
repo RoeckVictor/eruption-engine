@@ -1538,10 +1538,18 @@ bool PixArtPanel::save_document_as() {
     auto* tab = current_tab();
     if (!tab) return false;
 
+    // Default to project's Assets folder
+    std::string initial_dir;
+    const auto& project_path = m_context.scene_state().project_path();
+    if (!project_path.empty()) {
+        initial_dir = (std::filesystem::path(project_path) / "Assets").string();
+    }
+
     auto path = engine::platform::save_file_dialog(
         "Save Pixel Grid",
         {{"Pixel Grid (*.pxg)", "*.pxg"}},
-        ".pxg");
+        ".pxg",
+        initial_dir);
     if (path.empty()) return false;
 
     tab->path = path;

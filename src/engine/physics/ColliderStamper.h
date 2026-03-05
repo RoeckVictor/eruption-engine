@@ -62,6 +62,11 @@ private:
                        float grid_origin_x, float grid_origin_y,
                        particles::ParticleBuffer* particle_buffer);
 
+    void stamp_capsule(b2BodyId body_id, const b2Capsule& capsule, float body_angle,
+                       PhysicsWorld& world, simulation::PixelGrid& grid,
+                       float grid_origin_x, float grid_origin_y,
+                       particles::ParticleBuffer* particle_buffer);
+
     void stamp_region(b2BodyId body_id, int min_gx, int min_gy, int max_gx, int max_gy,
                       float center_gx, float center_gy,
                       float grid_origin_x, float grid_origin_y, int grid_height,

@@ -187,7 +187,7 @@ void PhysicsPlayback::attach_collider_shapes(entt::entity entity, engine::physic
         }
     }
 
-    // CapsuleCollider
+    // CapsuleCollider - use native Box2D capsule for better ghost collision prevention
     if (m_registry.all_of<engine::physics::CapsuleCollider>(entity)) {
         auto& cap = m_registry.get<engine::physics::CapsuleCollider>(entity);
         if (cap.enabled) {
@@ -197,24 +197,9 @@ void PhysicsPlayback::attach_collider_shapes(entt::entity entity, engine::physic
             float oy = m_world.pixels_to_meters(cap.offset_y * scale_y);
             float cap_rot = cap.rotation * engine::DEG_TO_RAD;
 
+            // Calculate capsule axis direction
             float ax = -std::sin(cap_rot);
             float ay = std::cos(cap_rot);
-
-            float bw = rad;
-            float bh = half_len;
-            float cos_c = std::cos(cap_rot);
-            float sin_c = std::sin(cap_rot);
-
-            float box_corners[4][2] = {
-                {-bw, -bh}, {bw, -bh}, {bw, bh}, {-bw, bh}
-            };
-            b2Vec2 box_verts[4];
-            for (int i = 0; i < 4; i++) {
-                box_verts[i].x = box_corners[i][0] * cos_c - box_corners[i][1] * sin_c + ox;
-                box_verts[i].y = box_corners[i][0] * sin_c + box_corners[i][1] * cos_c + oy;
-            }
-            cap.shape_ids.push_back(m_world.add_polygon_shape(
-                rb.body_id, box_verts, 4, cap.density, cap.friction, cap.restitution));
 
             b2ShapeDef shape_def = b2DefaultShapeDef();
             shape_def.density = cap.density;
@@ -222,17 +207,16 @@ void PhysicsPlayback::attach_collider_shapes(entt::entity entity, engine::physic
             shape_def.material.restitution = cap.restitution;
             shape_def.isSensor = cap.is_trigger;
 
-            b2Circle top_circle;
-            top_circle.center.x = ox + ax * half_len;
-            top_circle.center.y = oy + ay * half_len;
-            top_circle.radius = rad;
-            cap.shape_ids.push_back(b2CreateCircleShape(rb.body_id, &shape_def, &top_circle));
+            // Create native Box2D capsule
+            b2Capsule capsule;
+            capsule.center1 = {ox + ax * half_len, oy + ay * half_len};
+            capsule.center2 = {ox - ax * half_len, oy - ay * half_len};
+            capsule.radius = rad;
 
-            b2Circle bottom_circle;
-            bottom_circle.center.x = ox - ax * half_len;
-            bottom_circle.center.y = oy - ay * half_len;
-            bottom_circle.radius = rad;
-            cap.shape_ids.push_back(b2CreateCircleShape(rb.body_id, &shape_def, &bottom_circle));
+            b2ShapeId shape_id = b2CreateCapsuleShape(rb.body_id, &shape_def, &capsule);
+            if (b2Shape_IsValid(shape_id)) {
+                cap.shape_ids.push_back(shape_id);
+            }
         }
     }
 

@@ -460,10 +460,14 @@ void InspectorPanel::render_component_inspector(entt::entity entity, const engin
             changed = Camera2DInspector::draw(*static_cast<engine::render::Camera2D*>(component_ptr));
         }
         else if (type_info.name() == "engine::animation::Animator") {
-            changed = AnimatorInspector::draw(*static_cast<engine::animation::Animator*>(component_ptr));
+            auto rec_ctx = create_recording_context(entity);
+            changed = AnimatorInspector::draw(*static_cast<engine::animation::Animator*>(component_ptr),
+                                               m_context.scene_state().project_path(), rec_ctx);
         }
         else if (type_info.name() == "engine::simulation::PixelGridComponent") {
-            changed = PixelGridComponentInspector::draw(*static_cast<engine::simulation::PixelGridComponent*>(component_ptr), m_context.scene_state().project_path());
+            auto rec_ctx = create_recording_context(entity);
+            changed = PixelGridComponentInspector::draw(*static_cast<engine::simulation::PixelGridComponent*>(component_ptr),
+                                                         m_context.scene_state().project_path(), rec_ctx);
         }
         else if (type_info.name() == "engine::render::Image") {
             changed = ImageInspector::draw(*static_cast<engine::render::Image*>(component_ptr), m_context.scene_state().project_path());
@@ -472,8 +476,17 @@ void InspectorPanel::render_component_inspector(entt::entity entity, const engin
             changed = TextInspector::draw(*static_cast<engine::render::Text*>(component_ptr), m_context.scene_state().project_path());
         }
         else {
-            // Fall back to AutoInspector for components without custom inspectors
+            // Extract short name from full type name (e.g., "engine::Transform" -> "Transform")
+            const auto& full_name = type_info.name();
+            size_t last_colon = full_name.rfind("::");
+            std::string short_name = (last_colon != std::string::npos)
+                ? full_name.substr(last_colon + 2)
+                : full_name;
+
+            auto rec_ctx = create_recording_context(entity, short_name);
+            AutoInspector::set_recording_context(&rec_ctx);
             changed = AutoInspector::draw(type_info, component_ptr);
+            AutoInspector::set_recording_context(nullptr);
         }
 
         if (changed) {
@@ -842,6 +855,27 @@ std::string InspectorPanel::get_component_category(const std::string& type_name)
         return "UI";
     }
     return "Other";
+}
+
+RecordingContext InspectorPanel::create_recording_context(entt::entity entity, const std::string& component_name) {
+    RecordingContext rec_ctx;
+    rec_ctx.entity = entity;
+    rec_ctx.component_name = component_name;
+    rec_ctx.is_recording = m_context.is_animation_recording(entity);
+
+    if (rec_ctx.is_recording) {
+        rec_ctx.record_callback = [this](entt::entity e, const std::string& path,
+                                          const engine::animation::PropertyValue& value,
+                                          engine::animation::PropertyValueType type) {
+            return m_context.record_animation_property(e, path, value, type);
+        };
+    }
+
+    rec_ctx.is_animated_callback = [this](entt::entity e, const std::string& path) {
+        return m_context.is_property_animated(e, path);
+    };
+
+    return rec_ctx;
 }
 
 }

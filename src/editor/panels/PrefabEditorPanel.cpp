@@ -1,11 +1,13 @@
 #include "PrefabEditorPanel.h"
 #include "editor/core/EditorContext.h"
 #include "editor/core/EditorComponents.h"
+#include "editor/core/EditorPixelGridLoader.h"
 #include "editor/serialization/SceneSerializer.h"
 #include "editor/icons/IconsFontAwesome6.h"
 #include "editor/ui/UnsavedDialog.h"
 #include "editor/render/SceneRenderUtils.h"
 #include "editor/render/EntityHitDetector.h"
+#include "editor/render/DebugOverlayRenderer.h"
 #include "engine/core/MathConstants.h"
 #include "engine/core/Transform.h"
 #include "engine/core/TransformSystem.h"
@@ -14,6 +16,7 @@
 #include "engine/simulation/MaterialLibrary.h"
 #include "engine/render/PixelGridRenderer.h"
 #include "engine/render/Camera2D.h"
+#include "engine/physics/Colliders.h"
 #include "engine/asset/PixelGridFile.h"
 #include "engine/asset/PxgDataParser.h"
 
@@ -271,6 +274,25 @@ void PrefabEditorPanel::render_viewport() {
     }
 
     m_grid_textures.cleanup(&m_prefab_registry);
+
+    // Draw debug overlays (colliders, origins, names, etc.)
+    {
+        DebugOverlayConfig overlay_config;
+        overlay_config.registry = &m_prefab_registry;
+        overlay_config.visibility = &m_main_context.gizmo_visibility();
+        overlay_config.transform = &wts;
+        overlay_config.draw_list = draw_list;
+        overlay_config.should_draw = [this](GizmoVisibility v, entt::entity e) -> bool {
+            if (v == GizmoVisibility::None) return false;
+            if (v == GizmoVisibility::All) return true;
+            return std::find(m_selection.begin(), m_selection.end(), e) != m_selection.end();
+        };
+        overlay_config.pixel_grid_loader = &m_main_context.pixel_grid_loader();
+        // PrefabEditorPanel doesn't support play mode, so no runtime or terrain colliders
+        overlay_config.runtime = nullptr;
+        overlay_config.is_playing = false;
+        DebugOverlayRenderer::render(overlay_config);
+    }
 
     // Draw camera info
     char info[128];

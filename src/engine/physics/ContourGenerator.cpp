@@ -11,7 +11,7 @@ namespace engine::physics {
 // The 16 cases define which edge segments to emit.
 // Segment direction: solid is on the left side of the segment direction.
 std::vector<ContourGenerator::Segment> ContourGenerator::marching_squares(
-    const bool* grid, int w, int h)
+    const bool* grid, int w, int h, const NeighborEdges* neighbors)
 {
     std::vector<Segment> segments;
     segments.reserve(w * h / 4); // rough estimate
@@ -19,10 +19,40 @@ std::vector<ContourGenerator::Segment> ContourGenerator::marching_squares(
     // Iterate over (w+1) x (h+1) cells (extend grid by 1 in each direction
     // so we get boundary segments at the edges of the grid).
     // To sample a corner at (cx, cy), we check grid[cy * w + cx] if in bounds,
-    // otherwise treat as empty.
+    // otherwise check neighbor edges if available, otherwise treat as empty.
     auto sample = [&](int x, int y) -> bool {
-        if (x < 0 || x >= w || y < 0 || y >= h) return false;
-        return grid[y * w + x];
+        // In-bounds: use the grid directly
+        if (x >= 0 && x < w && y >= 0 && y < h) {
+            return grid[y * w + x];
+        }
+
+        // Out-of-bounds: check neighbor edges if available
+        if (!neighbors) return false;
+
+        // Left edge (x == -1, y in [0, h))
+        if (x == -1 && y >= 0 && y < h && neighbors->left) {
+            return neighbors->left[y];
+        }
+        // Right edge (x == w, y in [0, h))
+        if (x == w && y >= 0 && y < h && neighbors->right) {
+            return neighbors->right[y];
+        }
+        // Top edge (y == -1, x in [0, w))
+        if (y == -1 && x >= 0 && x < w && neighbors->top) {
+            return neighbors->top[x];
+        }
+        // Bottom edge (y == h, x in [0, w))
+        if (y == h && x >= 0 && x < w && neighbors->bottom) {
+            return neighbors->bottom[x];
+        }
+
+        // Corners (diagonal neighbors)
+        if (x == -1 && y == -1) return neighbors->top_left;
+        if (x == w && y == -1) return neighbors->top_right;
+        if (x == -1 && y == h) return neighbors->bottom_left;
+        if (x == w && y == h) return neighbors->bottom_right;
+
+        return false;
     };
 
     for (int cy = -1; cy < h; cy++) {
@@ -239,10 +269,11 @@ float ContourGenerator::signed_area(const std::vector<Vec2f>& poly) {
 // --- Full pipeline ---
 
 std::vector<Contour> ContourGenerator::generate(
-    const bool* solid_grid, int width, int height, float epsilon)
+    const bool* solid_grid, int width, int height, float epsilon,
+    const NeighborEdges* neighbors)
 {
-    // Step 1: Marching squares
-    auto segments = marching_squares(solid_grid, width, height);
+    // Step 1: Marching squares (with optional neighbor info for chunk boundaries)
+    auto segments = marching_squares(solid_grid, width, height, neighbors);
     if (segments.empty()) return {};
 
     // Step 2: Join segments into closed polygons

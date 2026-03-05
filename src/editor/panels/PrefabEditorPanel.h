@@ -8,6 +8,7 @@
 #include "editor/render/ViewportCamera.h"
 #include "editor/render/EntityHitDetector.h"
 #include "editor/core/PixelGridTextureCache.h"
+#include "editor/core/CoordinateUtils.h"
 #include <entt/entt.hpp>
 #include <imgui.h>
 #include <string>

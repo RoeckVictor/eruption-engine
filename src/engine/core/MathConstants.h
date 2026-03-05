@@ -7,5 +7,6 @@ namespace engine {
 inline constexpr float PI = std::numbers::pi_v<float>;
 inline constexpr float DEG_TO_RAD = PI / 180.0f;
 inline constexpr float RAD_TO_DEG = 180.0f / PI;
+inline constexpr float EPSILON = 0.0001f;
 
-} // namespace engine
+}

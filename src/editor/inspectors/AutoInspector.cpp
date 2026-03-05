@@ -7,6 +7,51 @@ using namespace engine::reflection;
 
 namespace editor {
 
+// Static recording context
+const RecordingContext* AutoInspector::s_recording_context = nullptr;
+
+// Helper to check if a property is animated and push red background if so
+static bool push_animated_background(const RecordingContext* ctx, const std::string& prop_name) {
+    if (!ctx || !ctx->is_animated_callback) {
+        return false;
+    }
+
+    std::string property_path = ctx->component_name + "." + prop_name;
+    if (ctx->is_animated_callback(ctx->entity, property_path)) {
+        // Push red-tinted background color for animated properties
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.6f, 0.2f, 0.2f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.7f, 0.25f, 0.25f, 1.0f));
+        return true;
+    }
+    return false;
+}
+
+// Helper to pop the animated background if it was pushed
+static void pop_animated_background(bool was_pushed) {
+    if (was_pushed) {
+        ImGui::PopStyleColor(3);
+    }
+}
+
+void AutoInspector::set_recording_context(const RecordingContext* ctx) {
+    s_recording_context = ctx;
+}
+
+bool AutoInspector::try_record(const std::string& prop_name,
+                               const engine::animation::PropertyValue& value,
+                               engine::animation::PropertyValueType type) {
+    if (!s_recording_context || !s_recording_context->record_callback) {
+        return false;
+    }
+
+    // Build property path: "Component.Property"
+    std::string property_path = s_recording_context->component_name + "." + prop_name;
+
+    return s_recording_context->record_callback(
+        s_recording_context->entity, property_path, value, type);
+}
+
 bool AutoInspector::draw(const TypeInfo& type_info, void* instance, CommandHistory* /*history*/) {
     bool modified = false;
 
@@ -92,12 +137,22 @@ bool AutoInspector::draw_property(const PropertyInfo& prop, void* instance) {
 
 bool AutoInspector::draw_bool(const PropertyInfo& prop, void* instance) {
     bool* value = prop.get_ptr<bool>(instance);
+
     ImGui::PushID(prop.name.c_str());
 
     ImGui::Text("%s", prop.display_name.c_str());
     ImGui::SameLine(120);
     ImGui::SetNextItemWidth(-1);
+
+    bool animated = push_animated_background(s_recording_context, prop.name);
     bool modified = ImGui::Checkbox("##value", value);
+    pop_animated_background(animated);
+
+    // If recording and modified, record the change (value stays changed for preview)
+    if (modified && s_recording_context) {
+        try_record(prop.name, *value, engine::animation::PropertyValueType::Bool);
+        modified = false;   // Don't mark scene as dirty (this is preview only)
+    }
 
     ImGui::PopID();
     return modified;
@@ -105,12 +160,14 @@ bool AutoInspector::draw_bool(const PropertyInfo& prop, void* instance) {
 
 bool AutoInspector::draw_int(const PropertyInfo& prop, void* instance) {
     int* value = prop.get_ptr<int>(instance);
+
     ImGui::PushID(prop.name.c_str());
 
     ImGui::Text("%s", prop.display_name.c_str());
     ImGui::SameLine(120);
     ImGui::SetNextItemWidth(-1);
 
+    bool animated = push_animated_background(s_recording_context, prop.name);
     bool modified = false;
     if (has_flag(prop.flags, PropertyFlags::Slider)) {
         modified = ImGui::DragInt("##value", value, prop.step,
@@ -119,6 +176,13 @@ bool AutoInspector::draw_int(const PropertyInfo& prop, void* instance) {
     } else {
         modified = ImGui::DragInt("##value", value, prop.step);
     }
+    pop_animated_background(animated);
+
+    // If recording and modified, record the change (value stays changed for preview)
+    if (modified && s_recording_context) {
+        try_record(prop.name, *value, engine::animation::PropertyValueType::Int);
+        modified = false;
+    }
 
     ImGui::PopID();
     return modified;
@@ -126,12 +190,14 @@ bool AutoInspector::draw_int(const PropertyInfo& prop, void* instance) {
 
 bool AutoInspector::draw_float(const PropertyInfo& prop, void* instance) {
     float* value = prop.get_ptr<float>(instance);
+
     ImGui::PushID(prop.name.c_str());
 
     ImGui::Text("%s", prop.display_name.c_str());
     ImGui::SameLine(120);
     ImGui::SetNextItemWidth(-1);
 
+    bool animated = push_animated_background(s_recording_context, prop.name);
     bool modified = false;
 
     if (has_flag(prop.flags, PropertyFlags::Angle)) {
@@ -150,6 +216,13 @@ bool AutoInspector::draw_float(const PropertyInfo& prop, void* instance) {
     } else {
         modified = ImGui::DragFloat("##value", value, prop.step);
     }
+    pop_animated_background(animated);
+
+    // If recording and modified, record the change (value stays changed for preview)
+    if (modified && s_recording_context) {
+        try_record(prop.name, *value, engine::animation::PropertyValueType::Float);
+        modified = false;
+    }
 
     ImGui::PopID();
     return modified;
@@ -157,17 +230,26 @@ bool AutoInspector::draw_float(const PropertyInfo& prop, void* instance) {
 
 bool AutoInspector::draw_double(const PropertyInfo& prop, void* instance) {
     double* value = prop.get_ptr<double>(instance);
+
     ImGui::PushID(prop.name.c_str());
 
     ImGui::Text("%s", prop.display_name.c_str());
     ImGui::SameLine(120);
     ImGui::SetNextItemWidth(-1);
 
+    bool animated = push_animated_background(s_recording_context, prop.name);
     // ImGui doesn't have native double support, so we convert
     float temp = static_cast<float>(*value);
     bool modified = ImGui::DragFloat("##value", &temp, prop.step);
     if (modified) {
         *value = static_cast<double>(temp);
+    }
+    pop_animated_background(animated);
+
+    // If recording and modified, record the change (value stays changed for preview)
+    if (modified && s_recording_context) {
+        try_record(prop.name, static_cast<float>(*value), engine::animation::PropertyValueType::Float);
+        modified = false;
     }
 
     ImGui::PopID();
@@ -176,15 +258,24 @@ bool AutoInspector::draw_double(const PropertyInfo& prop, void* instance) {
 
 bool AutoInspector::draw_string(const PropertyInfo& prop, void* instance) {
     std::string* value = prop.get_ptr<std::string>(instance);
+
     ImGui::PushID(prop.name.c_str());
 
     PropertyLabel(prop.display_name.c_str());
 
+    bool animated = push_animated_background(s_recording_context, prop.name);
     bool modified = false;
     if (has_flag(prop.flags, PropertyFlags::Multiline)) {
         modified = InputTextMultiline("##value", value);
     } else {
         modified = InputText("##value", value);
+    }
+    pop_animated_background(animated);
+
+    // If recording and modified, record the change (value stays changed for preview)
+    if (modified && s_recording_context) {
+        try_record(prop.name, *value, engine::animation::PropertyValueType::String);
+        modified = false;
     }
 
     ImGui::PopID();
@@ -193,13 +284,23 @@ bool AutoInspector::draw_string(const PropertyInfo& prop, void* instance) {
 
 bool AutoInspector::draw_vec2(const PropertyInfo& prop, void* instance) {
     float* value = prop.get_ptr<float>(instance);
+
     ImGui::PushID(prop.name.c_str());
 
     ImGui::Text("%s", prop.display_name.c_str());
     ImGui::SameLine(120);
     ImGui::SetNextItemWidth(-1);
 
+    bool animated = push_animated_background(s_recording_context, prop.name);
     bool modified = ImGui::DragFloat2("##value", value, prop.step);
+    pop_animated_background(animated);
+
+    // If recording and modified, record the change (value stays changed for preview)
+    if (modified && s_recording_context) {
+        engine::animation::Vec2 vec_val{value[0], value[1]};
+        try_record(prop.name, vec_val, engine::animation::PropertyValueType::Vec2);
+        modified = false;
+    }
 
     ImGui::PopID();
     return modified;
@@ -207,13 +308,23 @@ bool AutoInspector::draw_vec2(const PropertyInfo& prop, void* instance) {
 
 bool AutoInspector::draw_vec3(const PropertyInfo& prop, void* instance) {
     float* value = prop.get_ptr<float>(instance);
+
     ImGui::PushID(prop.name.c_str());
 
     ImGui::Text("%s", prop.display_name.c_str());
     ImGui::SameLine(120);
     ImGui::SetNextItemWidth(-1);
 
+    bool animated = push_animated_background(s_recording_context, prop.name);
     bool modified = ImGui::DragFloat3("##value", value, prop.step);
+    pop_animated_background(animated);
+
+    // If recording and modified, record the change (value stays changed for preview)
+    if (modified && s_recording_context) {
+        engine::animation::Vec3 vec_val{value[0], value[1], value[2]};
+        try_record(prop.name, vec_val, engine::animation::PropertyValueType::Vec3);
+        modified = false;
+    }
 
     ImGui::PopID();
     return modified;
@@ -221,15 +332,25 @@ bool AutoInspector::draw_vec3(const PropertyInfo& prop, void* instance) {
 
 bool AutoInspector::draw_color(const PropertyInfo& prop, void* instance) {
     float* value = prop.get_ptr<float>(instance);
+
     ImGui::PushID(prop.name.c_str());
 
     ImGui::Text("%s", prop.display_name.c_str());
     ImGui::SameLine(120);
     ImGui::SetNextItemWidth(-1);
 
+    bool animated = push_animated_background(s_recording_context, prop.name);
     // Assume RGBA (4 floats)
     bool modified = ImGui::ColorEdit4("##value", value,
         ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreview);
+    pop_animated_background(animated);
+
+    // If recording and modified, record the change (value stays changed for preview)
+    if (modified && s_recording_context) {
+        engine::animation::Vec4 vec_val{value[0], value[1], value[2], value[3]};
+        try_record(prop.name, vec_val, engine::animation::PropertyValueType::Color);
+        modified = false;
+    }
 
     ImGui::PopID();
     return modified;
@@ -253,6 +374,7 @@ bool AutoInspector::draw_enum(const PropertyInfo& prop, void* instance) {
         ? prop.enum_names[*value].c_str()
         : "Unknown";
 
+    bool animated = push_animated_background(s_recording_context, prop.name);
     bool modified = false;
     if (ImGui::BeginCombo("##value", current)) {
         for (int i = 0; i < static_cast<int>(prop.enum_names.size()); ++i) {
@@ -267,6 +389,7 @@ bool AutoInspector::draw_enum(const PropertyInfo& prop, void* instance) {
         }
         ImGui::EndCombo();
     }
+    pop_animated_background(animated);
 
     ImGui::PopID();
     return modified;

@@ -385,54 +385,33 @@ void Box2DPhysicsSystem::create_capsule_collider(b2BodyId body, physics::Capsule
     shape_def.material.restitution = collider.restitution;
     shape_def.isSensor = collider.is_trigger;
 
-    // Reserve space for 3 shapes (box + 2 circles)
-    collider.shape_ids.reserve(3);
+    // Use Box2D's native capsule shape (single convex shape, better for ghost collision prevention)
+    float half_length = length_meters * 0.5f;
 
-    // Determine capsule orientation based on rotation angle.
-    // Normalize to [0, 180) range, then check if closer to 0 (vertical) or 90 (horizontal).
+    // Determine capsule orientation based on rotation angle
     float norm_angle = std::fmod(std::fabs(collider.rotation), 180.0f);
     bool is_vertical = (norm_angle < 45.0f || norm_angle > 135.0f);
 
+    b2Capsule capsule;
+    capsule.radius = radius_meters;
+
     if (is_vertical) {
-        float half_length = length_meters * 0.5f;
-
-        b2Polygon box = b2MakeOffsetBox(radius_meters, half_length, offset, rot);
-        b2ShapeId box_shape = b2CreatePolygonShape(body, &shape_def, &box);
-        collider.shape_ids.push_back(box_shape);
-
-        b2Circle top_circle;
-        top_circle.radius = radius_meters;
-        top_circle.center = {offset.x, offset.y - half_length};
-        b2ShapeId top_shape = b2CreateCircleShape(body, &shape_def, &top_circle);
-        collider.shape_ids.push_back(top_shape);
-
-        b2Circle bottom_circle;
-        bottom_circle.radius = radius_meters;
-        bottom_circle.center = {offset.x, offset.y + half_length};
-        b2ShapeId bottom_shape = b2CreateCircleShape(body, &shape_def, &bottom_circle);
-        collider.shape_ids.push_back(bottom_shape);
+        // Vertical capsule: endpoints above and below center
+        capsule.center1 = {offset.x, offset.y - half_length};
+        capsule.center2 = {offset.x, offset.y + half_length};
     } else {
-        float half_length = length_meters * 0.5f;
-
-        b2Polygon box = b2MakeOffsetBox(half_length, radius_meters, offset, rot);
-        b2ShapeId box_shape = b2CreatePolygonShape(body, &shape_def, &box);
-        collider.shape_ids.push_back(box_shape);
-
-        b2Circle left_circle;
-        left_circle.radius = radius_meters;
-        left_circle.center = {offset.x - half_length, offset.y};
-        b2ShapeId left_shape = b2CreateCircleShape(body, &shape_def, &left_circle);
-        collider.shape_ids.push_back(left_shape);
-
-        b2Circle right_circle;
-        right_circle.radius = radius_meters;
-        right_circle.center = {offset.x + half_length, offset.y};
-        b2ShapeId right_shape = b2CreateCircleShape(body, &shape_def, &right_circle);
-        collider.shape_ids.push_back(right_shape);
+        // Horizontal capsule: endpoints left and right of center
+        capsule.center1 = {offset.x - half_length, offset.y};
+        capsule.center2 = {offset.x + half_length, offset.y};
     }
 
-    Logger::instance().info("Box2DPhysics", "Created CapsuleCollider shape (length=%.2f, radius=%.2f, shapes=%zu)",
-                             collider.length, collider.radius, collider.shape_ids.size());
+    b2ShapeId shape_id = b2CreateCapsuleShape(body, &shape_def, &capsule);
+    if (b2Shape_IsValid(shape_id)) {
+        collider.shape_ids.push_back(shape_id);
+    }
+
+    Logger::instance().info("Box2DPhysics", "Created native CapsuleCollider (length=%.2f, radius=%.2f)",
+                             collider.length, collider.radius);
 }
 
 void Box2DPhysicsSystem::destroy_dynamic_collider_shapes(physics::DynamicCollider& collider) {

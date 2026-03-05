@@ -123,13 +123,20 @@ static void host_add_impulse(runtime::ScriptHostAPI* api, entt::registry* reg, e
     rt->physics_world()->apply_impulse(rb.body_id, ix, iy);
 }
 
-static bool host_is_grounded(runtime::ScriptHostAPI* api, entt::registry* reg, entt::entity entity, float tolerance) {
+static bool host_raycast(runtime::ScriptHostAPI* api, float origin_x, float origin_y, float dir_x, float dir_y,
+                         float max_distance, float* hit_x, float* hit_y, float* hit_normal_x, float* hit_normal_y) {
     auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
-    if (!reg || !reg->valid(entity) || !rt || !rt->physics_world()) return false;
-    if (!reg->all_of<engine::physics::Rigidbody>(entity)) return false;
-    auto& rb = reg->get<engine::physics::Rigidbody>(entity);
-    if (!b2Body_IsValid(rb.body_id)) return false;
-    return rt->physics_world()->is_grounded(rb.body_id, tolerance);
+    if (!rt || !rt->physics_world()) return false;
+
+    auto result = rt->physics_world()->raycast(origin_x, origin_y, dir_x, dir_y, max_distance);
+    if (result.hit) {
+        if (hit_x) *hit_x = result.point_x;
+        if (hit_y) *hit_y = result.point_y;
+        if (hit_normal_x) *hit_normal_x = result.normal_x;
+        if (hit_normal_y) *hit_normal_y = result.normal_y;
+        return true;
+    }
+    return false;
 }
 
 static entt::entity host_find_entity_by_name(runtime::ScriptHostAPI* /*api*/, entt::registry* reg, const char* name) {
@@ -628,7 +635,7 @@ void RuntimeContext::init(entt::registry* editor_registry, ScriptManager* script
     m_host_api.set_velocity = &host_set_velocity;
     m_host_api.add_force = &host_add_force;
     m_host_api.add_impulse = &host_add_impulse;
-    m_host_api.is_grounded = &host_is_grounded;
+    m_host_api.raycast = &host_raycast;
     m_host_api.find_entity_by_name = &host_find_entity_by_name;
     m_host_api.find_entity_by_guid = &host_find_entity_by_guid;
     m_host_api.destroy_entity = &host_destroy_entity;
@@ -714,6 +721,10 @@ void RuntimeContext::play(const SceneSettings& settings) {
 
         m_sim_playback = std::make_unique<SimulationPlayback>(*m_editor_registry);
 
+        // Initialize animation system
+        m_animation_system = std::make_unique<engine::animation::AnimationSystem>();
+        m_animation_system->set_registry(m_editor_registry);
+
         // Set category library (owned by EditorApplication, set via set_category_library)
         // Categories should already be loaded by EditorApplication before play() is called
         if (m_category_library) {
@@ -796,6 +807,7 @@ void RuntimeContext::stop() {
     shutdown_scripts();
     m_previously_enabled_script_entities.clear();
     m_deferred_destroys.clear();
+    m_animation_system.reset();
     m_sim_playback.reset();
     m_physics_playback.reset();
     m_physics_world.reset();
@@ -887,6 +899,12 @@ void RuntimeContext::update(float dt) {
         check_enable_disable_scripts();
         update_scripts();
         late_update_scripts();
+    }
+
+    // Update animation system (after scripts so they can set animator parameters)
+    if (m_animation_system && m_engine) {
+        PROFILE_SCOPE("Runtime::Animation");
+        m_animation_system->update(*m_engine, dt);
     }
 
     if (m_sim_playback) {

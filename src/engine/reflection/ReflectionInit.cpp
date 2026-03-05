@@ -89,10 +89,11 @@ REFLECT_TYPE_BEGIN(engine::render::Text)
 REFLECT_TYPE_END()
 
 // Animator reflection
+// Note: Only serializable properties are reflected here.
+// Runtime state (current_state, parameters, etc.) is managed by AnimationSystem.
 REFLECT_TYPE_BEGIN(engine::animation::Animator)
     REFLECT_PROPERTY(enabled, "Enabled")
-    REFLECT_PROPERTY(current_clip, "Current Clip")
-    REFLECT_PROPERTY(playing, "Playing")
+    REFLECT_PROPERTY(controller_path, "Controller")
 REFLECT_TYPE_END()
 
 // PixelGridComponent reflection

@@ -8,6 +8,7 @@
 #include "editor/core/ViewportContext.h"
 #include "editor/core/SceneStateContext.h"
 #include "engine/asset/AssetRegistry.h"
+#include "engine/animation/PropertyValue.h"
 #include "RuntimeContext.h"
 #include <entt/entt.hpp>
 #include <vector>
@@ -18,6 +19,16 @@
 namespace editor {
 
 class Command;
+
+using AnimationRecordCallback = std::function<bool(
+    entt::entity entity,
+    const std::string& property_path,
+    const engine::animation::PropertyValue& value,
+    engine::animation::PropertyValueType type)>;
+
+using AnimationRecordingCheck = std::function<bool(entt::entity entity)>;
+
+using AnimatedPropertyCheck = std::function<bool(entt::entity entity, const std::string& property_path)>;
 class ScriptManager;
 
 enum class GizmoVisibility { None, SelectedOnly, All };
@@ -107,6 +118,25 @@ public:
     engine::asset::AssetRegistry& asset_registry() { return m_asset_registry; }
     const engine::asset::AssetRegistry& asset_registry() const { return m_asset_registry; }
 
+    // Animation recording system
+    void set_animation_record_callback(AnimationRecordCallback cb) { m_anim_record_callback = std::move(cb); }
+    void set_animation_recording_check(AnimationRecordingCheck cb) { m_anim_recording_check = std::move(cb); }
+    void set_animated_property_check(AnimatedPropertyCheck cb) { m_animated_property_check = std::move(cb); }
+    bool is_animation_recording(entt::entity entity) const {
+        return m_anim_recording_check && m_anim_recording_check(entity);
+    }
+    bool is_property_animated(entt::entity entity, const std::string& property_path) const {
+        return m_animated_property_check && m_animated_property_check(entity, property_path);
+    }
+    bool record_animation_property(entt::entity entity, const std::string& property_path,
+                                   const engine::animation::PropertyValue& value,
+                                   engine::animation::PropertyValueType type) {
+        if (m_anim_record_callback) {
+            return m_anim_record_callback(entity, property_path, value, type);
+        }
+        return false;
+    }
+
     void init_asset_registry(const std::string& project_path);
     void shutdown_asset_registry();
     void rescan_assets_for_external_changes();
@@ -139,6 +169,10 @@ private:
 
     EditorPixelGridLoader m_pixel_grid_loader;
     engine::asset::AssetRegistry m_asset_registry;
+
+    AnimationRecordCallback m_anim_record_callback;
+    AnimationRecordingCheck m_anim_recording_check;
+    AnimatedPropertyCheck m_animated_property_check;
 };
 
 }

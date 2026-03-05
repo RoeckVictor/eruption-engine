@@ -1,5 +1,6 @@
 #pragma once
 
+#include "RecordingContext.h"
 #include <string>
 
 namespace engine::simulation { struct PixelGridComponent; }
@@ -10,6 +11,8 @@ namespace editor {
 class PixelGridComponentInspector {
 public:
     static bool draw(engine::simulation::PixelGridComponent& component, const std::string& project_path);
+    static bool draw(engine::simulation::PixelGridComponent& component, const std::string& project_path,
+                     const RecordingContext& rec_ctx);
 };
 
 }

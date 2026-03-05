@@ -1,7 +1,9 @@
 #include "PlayerController.h"
 #include "engine/platform/KeyCode.h"
+#include "engine/animation/Animator.h"
 #include <imgui.h>
 #include <algorithm>
+#include <cmath>
 #include <string>
 
 REGISTER_COMPONENT_SCRIPT(PlayerController)
@@ -34,7 +36,7 @@ void PlayerController::on_fixed_update() {
         }
     }
 
-    bool grounded = is_grounded();
+    bool grounded = check_grounded();
 
     if (!jump) {
         m_jump_consumed = false;
@@ -45,6 +47,17 @@ void PlayerController::on_fixed_update() {
     }
 
     set_velocity(vel.x, vel.y);
+
+    if (auto* animator = get_component<engine::animation::Animator>()) {
+        animator->set_bool("isGrounded", grounded);
+        animator->set_float("moveSpeed", std::abs(vel.x));
+    }
+}
+
+bool PlayerController::check_grounded() {
+    auto pos = get_position();
+    auto hit = raycast(pos.x, pos.y, 0.0f, -1.0f, ground_check_distance);
+    return hit.hit;
 }
 
 void PlayerController::serialize_properties(nlohmann::json& out) const {
@@ -52,6 +65,7 @@ void PlayerController::serialize_properties(nlohmann::json& out) const {
     out["max_move_speed"] = max_move_speed;
     out["jump_velocity"] = jump_velocity;
     out["friction"] = friction;
+    out["ground_check_distance"] = ground_check_distance;
 }
 
 void PlayerController::deserialize_properties(const nlohmann::json& data) {
@@ -59,6 +73,7 @@ void PlayerController::deserialize_properties(const nlohmann::json& data) {
     if (data.contains("max_move_speed")) max_move_speed = data["max_move_speed"].get<float>();
     if (data.contains("jump_velocity")) jump_velocity = data["jump_velocity"].get<float>();
     if (data.contains("friction")) friction = data["friction"].get<float>();
+    if (data.contains("ground_check_distance")) ground_check_distance = data["ground_check_distance"].get<float>();
 }
 
 void PlayerController::on_inspector_gui(nlohmann::json& props) {
@@ -66,14 +81,17 @@ void PlayerController::on_inspector_gui(nlohmann::json& props) {
     float max_speed = props.value("max_move_speed", 100.0f);
     float jump_vel = props.value("jump_velocity", 180.0f);
     float fric = props.value("friction", 10.0f);
+    float ground_dist = props.value("ground_check_distance", 2.0f);
 
     ImGui::DragFloat("Move Accel", &accel, 10.0f, 0.0f, 5000.0f);
     ImGui::DragFloat("Max Speed", &max_speed, 5.0f, 0.0f, 500.0f);
     ImGui::DragFloat("Jump Velocity", &jump_vel, 5.0f, 0.0f, 500.0f);
     ImGui::DragFloat("Friction", &fric, 0.5f, 0.0f, 50.0f);
+    ImGui::DragFloat("Ground Check Dist", &ground_dist, 0.5f, 0.5f, 20.0f);
 
     props["move_accel"] = accel;
     props["max_move_speed"] = max_speed;
     props["jump_velocity"] = jump_vel;
     props["friction"] = fric;
+    props["ground_check_distance"] = ground_dist;
 }

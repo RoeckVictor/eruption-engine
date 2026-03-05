@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Panel.h"
+#include "editor/inspectors/RecordingContext.h"
 #include <entt/entt.hpp>
 #include <typeindex>
 #include <string>
@@ -39,6 +40,8 @@ private:
 
     void move_component(entt::entity entity, size_t from_index, size_t to_index);
     void ensure_component_order(entt::entity entity);
+
+    RecordingContext create_recording_context(entt::entity entity, const std::string& component_name = "");
 
     EditorContext& m_context;
 };

@@ -4,6 +4,7 @@
 #include "engine/simulation/MaterialDefs.h"
 #include "engine/particles/ParticleBuffer.h"
 #include "engine/core/Log.h"
+#include "engine/core/MathConstants.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -59,8 +60,14 @@ void ColliderStamper::stamp_colliders(PhysicsWorld& world,
                                   grid_origin_x, grid_origin_y, particle_buffer);
                     break;
                 }
+                case b2_capsuleShape: {
+                    b2Capsule capsule = b2Shape_GetCapsule(shape_id);
+                    stamp_capsule(body_id, capsule, body_angle, world, grid,
+                                  grid_origin_x, grid_origin_y, particle_buffer);
+                    break;
+                }
                 default:
-                    // Capsules and segments not yet supported
+                    // Segments not yet supported
                     break;
             }
         }
@@ -253,6 +260,86 @@ void ColliderStamper::stamp_polygon(b2BodyId body_id, const b2Polygon& polygon, 
             }
         }
         return inside;
+    };
+
+    stamp_region(body_id, min_gx, min_gy, max_gx, max_gy, centroid_gx, centroid_gy,
+                 grid_origin_x, grid_origin_y, grid.height(),
+                 inside_test, world, grid, particle_buffer);
+}
+
+void ColliderStamper::stamp_capsule(b2BodyId body_id, const b2Capsule& capsule, float body_angle,
+                                     PhysicsWorld& world, simulation::PixelGrid& grid,
+                                     float grid_origin_x, float grid_origin_y,
+                                     particles::ParticleBuffer* particle_buffer) {
+    // Get body world position in pixels
+    b2Vec2 body_pos = b2Body_GetPosition(body_id);
+    float body_px = world.meters_to_pixels(body_pos.x);
+    float body_py = world.meters_to_pixels(body_pos.y);
+
+    float cos_a = std::cos(body_angle);
+    float sin_a = std::sin(body_angle);
+
+    // Transform capsule endpoints to world pixels, then to grid coordinates
+    float c1_local_px = world.meters_to_pixels(capsule.center1.x);
+    float c1_local_py = world.meters_to_pixels(capsule.center1.y);
+    float c2_local_px = world.meters_to_pixels(capsule.center2.x);
+    float c2_local_py = world.meters_to_pixels(capsule.center2.y);
+
+    float c1_world_x = body_px + c1_local_px * cos_a - c1_local_py * sin_a;
+    float c1_world_y = body_py + c1_local_px * sin_a + c1_local_py * cos_a;
+    float c2_world_x = body_px + c2_local_px * cos_a - c2_local_py * sin_a;
+    float c2_world_y = body_py + c2_local_px * sin_a + c2_local_py * cos_a;
+
+    // Convert to grid coordinates (flip Y)
+    float c1_gx = c1_world_x - grid_origin_x;
+    float c1_gy = (grid.height() - 1) - (c1_world_y - grid_origin_y);
+    float c2_gx = c2_world_x - grid_origin_x;
+    float c2_gy = (grid.height() - 1) - (c2_world_y - grid_origin_y);
+
+    float radius_px = world.meters_to_pixels(capsule.radius);
+
+    // Compute centroid (midpoint of the capsule)
+    float centroid_gx = (c1_gx + c2_gx) * 0.5f;
+    float centroid_gy = (c1_gy + c2_gy) * 0.5f;
+
+    // Compute AABB
+    float min_gx_f = std::min(c1_gx, c2_gx) - radius_px;
+    float min_gy_f = std::min(c1_gy, c2_gy) - radius_px;
+    float max_gx_f = std::max(c1_gx, c2_gx) + radius_px;
+    float max_gy_f = std::max(c1_gy, c2_gy) + radius_px;
+
+    int min_gx = std::max(0, static_cast<int>(std::floor(min_gx_f)));
+    int min_gy = std::max(0, static_cast<int>(std::floor(min_gy_f)));
+    int max_gx = std::min(grid.width() - 1, static_cast<int>(std::ceil(max_gx_f)));
+    int max_gy = std::min(grid.height() - 1, static_cast<int>(std::ceil(max_gy_f)));
+
+    if (max_gx < min_gx || max_gy < min_gy) return;
+
+    // Point-in-capsule test: distance to line segment <= radius
+    float radius_sq = radius_px * radius_px;
+    auto inside_test = [c1_gx, c1_gy, c2_gx, c2_gy, radius_sq](float px, float py) -> bool {
+        // Vector from c1 to c2
+        float dx = c2_gx - c1_gx;
+        float dy = c2_gy - c1_gy;
+        float len_sq = dx * dx + dy * dy;
+
+        // Project point onto line segment
+        float t = 0.0f;
+        if (len_sq > engine::EPSILON) {
+            t = ((px - c1_gx) * dx + (py - c1_gy) * dy) / len_sq;
+            t = std::max(0.0f, std::min(1.0f, t));
+        }
+
+        // Closest point on segment
+        float closest_x = c1_gx + t * dx;
+        float closest_y = c1_gy + t * dy;
+
+        // Distance squared to closest point
+        float dist_x = px - closest_x;
+        float dist_y = py - closest_y;
+        float dist_sq = dist_x * dist_x + dist_y * dist_y;
+
+        return dist_sq <= radius_sq;
     };
 
     stamp_region(body_id, min_gx, min_gy, max_gx, max_gy, centroid_gx, centroid_gy,

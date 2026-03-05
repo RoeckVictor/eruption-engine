@@ -18,6 +18,8 @@
 #include "editor/panels/ProfilerPanel.h"
 #include "editor/panels/MaterialEditorPanel.h"
 #include "editor/panels/PixArtPanel.h"
+#include "editor/panels/AnimatorPanel.h"
+#include "editor/panels/AnimationPanel.h"
 #include "editor/commands/EntityCommands.h"
 #include "editor/serialization/SceneSerializer.h"
 #include "engine/render/Camera2D.h"
@@ -28,6 +30,7 @@
 #include "engine/core/Engine.h"
 #include "engine/core/Logger.h"
 #include "engine/reflection/ReflectionInit.h"
+#include "engine/animation/AnimationInit.h"
 #include "engine/simulation/MaterialLibrary.h"
 #include "engine/platform/Window.h"
 #include "engine/platform/Input.h"
@@ -55,23 +58,20 @@ EditorApplication::~EditorApplication() = default;
 
 bool EditorApplication::on_init(engine::Engine& engine) {
     engine::reflection::init_engine_reflections();
+    engine::animation::init_animation_property_resolver();
 
     m_runtime.set_engine(&engine);
 
     init_component_type_registry();
 
-    // Get executable directory for resolving asset paths
     std::filesystem::path exe_dir = engine::platform::executable_directory();
 
-    // Load categories first (materials need them to resolve category names)
     std::filesystem::path categories_path = exe_dir / "assets" / "categories";
     m_category_library.ensure_empty_category();
     m_category_library.load_from_directory(categories_path.string(), true);
 
-    // Set category library on runtime context for simulation playback
     m_runtime.set_category_library(&m_category_library);
 
-    // Load default material library from directory (individual .material files)
     auto& mat_registry = engine::simulation::MaterialLibraryRegistry::instance();
     auto* mat_lib = mat_registry.get_or_create_library("default");
     mat_lib->set_category_library(&m_category_library);
@@ -87,7 +87,6 @@ bool EditorApplication::on_init(engine::Engine& engine) {
 
     m_panel_manager.init();
 
-    // Add all panels - pass EditorContext to panels that need it
     m_panel_manager.add_panel<ProjectHubPanel>(*m_project_manager, *this);
     m_panel_manager.add_panel<ConsolePanel>();
     m_panel_manager.add_panel<HierarchyPanel>(m_context);
@@ -102,13 +101,11 @@ bool EditorApplication::on_init(engine::Engine& engine) {
     m_panel_manager.add_panel<ProjectSettingsPanel>(*m_project_manager);
     m_panel_manager.add_panel<PrefabEditorPanel>(m_context);
 
-    // Add material editor panel and wire up material/category libraries
     auto* material_editor = m_panel_manager.add_panel<MaterialEditorPanel>(m_context);
     material_editor->set_library(mat_lib);
     material_editor->set_category_library(&m_category_library);
     material_editor->set_visible(false);
 
-    // Wire up file browser to use material editor for creating materials and categories
     if (auto* file_browser = m_panel_manager.get_panel<FileBrowserPanel>()) {
         file_browser->set_material_create_callback([material_editor]() {
             material_editor->open_new_material_dialog();
@@ -118,16 +115,19 @@ bool EditorApplication::on_init(engine::Engine& engine) {
         });
     }
 
-    // Add profiler panel and wire up GPU profiler
     auto* profiler_panel = m_panel_manager.add_panel<ProfilerPanel>(engine, m_context);
     profiler_panel->set_gpu_profiler(engine.gpu_profiler());
     profiler_panel->set_visible(false);
 
-    // Add PixArt panel for pixel grid editing
     auto* pixart_panel = m_panel_manager.add_panel<PixArtPanel>(m_context);
     pixart_panel->set_visible(false);
 
-    // Wire up menu bar callbacks
+    auto* animator_panel = m_panel_manager.add_panel<AnimatorPanel>(m_context);
+    animator_panel->set_visible(false);
+
+    auto* animation_panel = m_panel_manager.add_panel<AnimationPanel>(m_context);
+    animation_panel->set_visible(false);
+
     m_panel_manager.menu_callbacks.new_scene = [this]() {
         confirm_discard_or_save([this]() { new_scene(); });
     };
@@ -154,18 +154,15 @@ bool EditorApplication::on_init(engine::Engine& engine) {
         delete_selection();
     };
     m_panel_manager.menu_callbacks.reset_layout = [this]() {
-        // Reset cameras
         m_context.viewport().camera.reset();
         if (auto* prefab_panel = m_panel_manager.get_panel<PrefabEditorPanel>()) {
             prefab_panel->reset_camera();
         }
-        // Reset panel visibility to defaults (only if project is loaded)
         if (has_project()) {
             m_panel_manager.show_editor_panels();
         }
     };
 
-    // If no project is loaded, show only the project hub
     if (!has_project()) {
         auto* hub = m_panel_manager.get_panel<ProjectHubPanel>();
         if (hub) {
@@ -173,7 +170,6 @@ bool EditorApplication::on_init(engine::Engine& engine) {
             hub->set_closable(false);
         }
 
-        // Hide other panels until project is loaded
         m_panel_manager.hide_editor_panels();
     }
 
@@ -188,7 +184,6 @@ void EditorApplication::on_shutdown(engine::Engine& /*engine*/) {
 }
 
 void EditorApplication::on_update(engine::Engine& engine, float dt) {
-    // Check if window just regained focus - rescan assets for external changes
     if (engine.window().focus_just_gained() && has_project()) {
         m_context.rescan_assets_for_external_changes();
         m_context.refresh_file_browser();
@@ -202,7 +197,6 @@ void EditorApplication::on_update(engine::Engine& engine, float dt) {
         build_settings->update();
     }
 
-    // Always use scene_registry for pixel grid loading (not prefab editing registry)
     m_context.pixel_grid_loader().update(m_context.scene_registry());
 
     update_world_transforms(*m_context.registry());
@@ -271,19 +265,16 @@ void EditorApplication::init_imgui(engine::Engine& engine) {
     style.GrabRounding = 2.0f;
     style.ScrollbarRounding = 2.0f;
 
-    // When viewports are enabled, tweak style so platform windows blend seamlessly
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
         style.WindowRounding = 0.0f;
         style.Colors[ImGuiCol_WindowBg].w = 1.0f;
     }
 
-    // Slightly darker background
     ImVec4* colors = style.Colors;
     colors[ImGuiCol_WindowBg] = ImVec4(0.10f, 0.10f, 0.12f, 1.0f);
     colors[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.10f, 1.0f);
     colors[ImGuiCol_TitleBgActive] = ImVec4(0.12f, 0.12f, 0.14f, 1.0f);
 
-    // Merge Font Awesome icon font into the default font atlas
     {
         io.Fonts->AddFontDefault();
 
@@ -302,7 +293,6 @@ void EditorApplication::init_imgui(engine::Engine& engine) {
         }
     }
 
-    // Initialize platform/renderer backends using abstraction
     m_imgui_backend = engine::platform::create_imgui_backend();
     if (!m_imgui_backend || !m_imgui_backend->init(engine.window())) {
         engine::Logger::instance().error("Editor", "Failed to initialize ImGui backend");
@@ -400,7 +390,6 @@ void EditorApplication::handle_shortcuts(engine::Engine& engine) {
         rebuild_scripts();
     }
 
-    // Gizmo mode shortcuts (only when not typing in a text field)
     if (!ImGui::GetIO().WantTextInput) {
         auto* viewport = m_panel_manager.get_panel<ViewportPanel>();
         if (viewport) {
@@ -428,46 +417,31 @@ void EditorApplication::handle_shortcuts(engine::Engine& engine) {
 void EditorApplication::on_project_loaded() {
     engine::Logger::instance().info("Editor", "Project loaded: %s", m_project_manager->project_info().name.c_str());
 
-    // Set project path on context for panels to access
     m_context.scene_state().set_project_path(m_project_manager->project_path());
 
-    // Load project categories and materials automatically
-    // This ensures they're available even if the Material Editor isn't opened
     load_project_assets();
 
     // Initialize asset registry to track asset GUIDs
     m_context.init_asset_registry(m_project_manager->project_path());
 
-    // Initialize script manager for this project
-    // Engine paths need to be absolute for CMake to find includes
     std::filesystem::path exe_dir = std::filesystem::current_path();
 
-    // The _deps folder (with EnTT etc.) is in the build root
-    // On Windows multi-config (VS/Ninja Multi-Config): exe is in build/Debug/ or build/Release/
-    // On Linux single-config (Makefiles): exe is directly in build/
-    // Check which layout we have by looking for _deps
     std::filesystem::path build_root;
     if (std::filesystem::exists(exe_dir / "_deps")) {
-        // Single-config: exe is directly in build folder
         build_root = exe_dir;
     } else {
-        // Multi-config: exe is in build/Debug or build/Release, go up one level
         build_root = exe_dir.parent_path();
     }
     std::string engine_build_path = build_root.string();
 
     if (m_engine_src_path.empty()) {
-        // Get the path relative to the executable and resolve to absolute
-        // Try both single-config (../src) and multi-config (../../src) layouts
         std::filesystem::path src_path = build_root / "../src";
 
-        // Resolve to absolute canonical path
         std::error_code ec;
         std::filesystem::path canonical = std::filesystem::canonical(src_path, ec);
         if (!ec) {
             m_engine_src_path = canonical.string();
         } else {
-            // Fallback: use unresolved path
             m_engine_src_path = (build_root / "../src").string();
         }
         engine::Logger::instance().info("Editor", "Engine source path: %s", m_engine_src_path.c_str());
@@ -476,11 +450,9 @@ void EditorApplication::on_project_loaded() {
     m_script_manager.init(m_project_manager->project_path(), m_engine_src_path, engine_build_path);
     m_context.set_script_manager(&m_script_manager);
 
-    // Pass project assets path to runtime context for prefab loading
     auto runtime_assets_path = std::filesystem::path(m_project_manager->project_path()) / "Assets";
     m_runtime.set_project_assets_path(runtime_assets_path.string());
 
-    // Show all editor panels
     if (auto* p = m_panel_manager.get_panel<ConsolePanel>()) p->set_visible(true);
     if (auto* p = m_panel_manager.get_panel<HierarchyPanel>()) p->set_visible(true);
     if (auto* p = m_panel_manager.get_panel<InspectorPanel>()) p->set_visible(true);
@@ -494,19 +466,16 @@ void EditorApplication::on_project_loaded() {
         std::filesystem::create_directories(assets_path);
         file_browser->set_root(assets_path.string());
 
-        // Connect file browser selection to asset preview
         if (asset_preview) {
             file_browser->set_file_selected_callback([asset_preview](const std::string& path) {
                 asset_preview->set_asset(path);
             });
         }
 
-        // Connect file browser open to scene loading
         file_browser->set_file_opened_callback([this](const std::string& path) {
             on_file_opened(path);
         });
 
-        // Set up file browser refresh callback on context
         m_context.set_file_browser_refresh_callback([file_browser]() {
             file_browser->refresh();
         });
@@ -560,17 +529,13 @@ void EditorApplication::load_project_assets() {
     auto& mat_registry = engine::simulation::MaterialLibraryRegistry::instance();
     auto* mat_lib = mat_registry.get_or_create_library("default");
     if (mat_lib) {
-        // Update category library reference so materials can resolve custom categories
         mat_lib->set_category_library(&m_category_library);
 
-        // Clear and reload all materials (engine + project)
         mat_lib->clear();
 
-        // Load engine materials first
         std::filesystem::path exe_dir = engine::platform::executable_directory();
         mat_lib->load_from_directory((exe_dir / "assets" / "materials").string());
 
-        // Load project materials
         int material_count = 0;
         for (const auto& entry : fs::recursive_directory_iterator(assets_root)) {
             if (entry.is_regular_file() && entry.path().extension() == ".material") {
@@ -591,11 +556,9 @@ void EditorApplication::new_scene() {
     m_context.scene_state().clear_dirty();
     m_context.scene_state().set_scene_path("");
 
-    // Create a default camera entity with Camera2D component
     auto camera = create_entity(m_scene_registry, "Main Camera");
     m_scene_registry.emplace<engine::render::Camera2D>(camera);
 
-    // Create a sample entity
     auto sample = create_entity(m_scene_registry, "Sample Entity");
     auto& transform = m_scene_registry.get<engine::Transform>(sample);
     transform.x = 100.0f;
@@ -703,6 +666,16 @@ void EditorApplication::on_file_opened(const std::string& path) {
     } else if (ext == ".phys") {
         if (auto* material_editor = m_panel_manager.get_panel<MaterialEditorPanel>()) {
             material_editor->select_category_by_path(path);
+        }
+    } else if (ext == ".anim") {
+        if (auto* animation_panel = m_panel_manager.get_panel<AnimationPanel>()) {
+            animation_panel->open_clip(path);
+            animation_panel->set_visible(true);
+        }
+    } else if (ext == ".animstate") {
+        if (auto* animator_panel = m_panel_manager.get_panel<AnimatorPanel>()) {
+            animator_panel->open_controller(path);
+            animator_panel->set_visible(true);
         }
     }
 }

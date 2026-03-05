@@ -34,8 +34,8 @@ struct Vec2 { float x, y; };
 // host context (Engine, RuntimeContext) without relying on global state
 struct ScriptHostAPI {
     // Host Context (opaque pointers set by RuntimeContext)
-    void* engine_ctx  = nullptr;  // engine::Engine*
-    void* runtime_ctx = nullptr;  // editor::RuntimeContext*
+    void* engine_ctx  = nullptr;
+    void* runtime_ctx = nullptr;
 
     float delta_time = 0.0f;
     float fixed_delta_time = 1.0f / 60.0f;
@@ -58,7 +58,6 @@ struct ScriptHostAPI {
     void (*set_velocity)(ScriptHostAPI*, entt::registry*, entt::entity, float vx, float vy) = nullptr;
     void (*add_force)(ScriptHostAPI*, entt::registry*, entt::entity, float fx, float fy) = nullptr;
     void (*add_impulse)(ScriptHostAPI*, entt::registry*, entt::entity, float ix, float iy) = nullptr;
-    bool (*is_grounded)(ScriptHostAPI*, entt::registry*, entt::entity, float tolerance) = nullptr;
 
     entt::entity (*find_entity_by_name)(ScriptHostAPI*, entt::registry*, const char* name) = nullptr;
     entt::entity (*find_entity_by_guid)(ScriptHostAPI*, entt::registry*, const char* guid) = nullptr;
@@ -104,9 +103,11 @@ struct ScriptHostAPI {
 
     void (*get_screen_size)(ScriptHostAPI*, float* width, float* height) = nullptr;
     void (*get_viewport_offset)(ScriptHostAPI*, float* x, float* y) = nullptr;
+
+    bool (*raycast)(ScriptHostAPI*, float origin_x, float origin_y, float dir_x, float dir_y,
+                    float max_distance, float* hit_x, float* hit_y, float* hit_normal_x, float* hit_normal_y) = nullptr;
 };
 
-// Forward declaration for global logging API (defined after ComponentScript)
 inline ScriptHostAPI*& get_global_host_api();
 
 // Base class for user-defined component scripts
@@ -227,10 +228,21 @@ public:
         if (m_host_api && m_host_api->add_impulse)
             m_host_api->add_impulse(m_host_api, m_registry, m_entity, ix, iy);
     }
-    bool is_grounded(float tolerance = 2.0f) {
-        if (m_host_api && m_host_api->is_grounded)
-            return m_host_api->is_grounded(m_host_api, m_registry, m_entity, tolerance);
-        return false;
+
+    struct RaycastResult {
+        bool hit = false;
+        float point_x = 0.0f, point_y = 0.0f;
+        float normal_x = 0.0f, normal_y = 0.0f;
+    };
+
+    RaycastResult raycast(float origin_x, float origin_y, float dir_x, float dir_y, float max_distance) {
+        RaycastResult result;
+        if (m_host_api && m_host_api->raycast) {
+            result.hit = m_host_api->raycast(m_host_api, origin_x, origin_y, dir_x, dir_y,
+                                              max_distance, &result.point_x, &result.point_y,
+                                              &result.normal_x, &result.normal_y);
+        }
+        return result;
     }
 
     entt::entity find_entity(const char* name) {

@@ -23,7 +23,10 @@ public:
     float max_move_speed = 100.0f;
     float jump_velocity = 180.0f;
     float friction = 10.0f;
+    float ground_check_distance = 2.0f;
 
 private:
     bool m_jump_consumed = false;
+
+    bool check_grounded();
 };
