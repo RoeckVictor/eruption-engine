@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Panel.h"
+#include "editor/core/CoordinateUtils.h"
 #include "editor/render/EditorTextureCache.h"
 #include "editor/render/EditorTextRenderer.h"
 #include "editor/render/PanelSceneRenderer.h"
@@ -31,8 +32,8 @@ public:
     void on_close() override;
     void on_gui() override;
 
-    void reset_camera() { fit_to_canvas(); }
-    void fit_to_canvas();
+    void reset_camera() { m_canvas.fit(static_cast<float>(m_canvas_width), static_cast<float>(m_canvas_height)); }
+    void fit_to_canvas() { m_canvas.fit(static_cast<float>(m_canvas_width), static_cast<float>(m_canvas_height)); }
 
 private:
     void create_framebuffer(int width, int height);
@@ -43,9 +44,6 @@ private:
     void render_toolbar();
     void handle_input(ImVec2 canvas_pos, ImVec2 canvas_size);
 
-    ImVec2 screen_to_canvas(float sx, float sy, ImVec2 canvas_pos, ImVec2 canvas_size) const;
-    void canvas_to_screen(ImVec2 canvas_pos_local, ImVec2 canvas_size, float& out_sx, float& out_sy) const;
-
     EditorContext& m_context;
 
     std::unique_ptr<engine::rhi::RHIFramebuffer> m_framebuffer;
@@ -55,8 +53,6 @@ private:
 
     FramebufferResizeDebouncer m_resize_debouncer;
 
-    float m_ref_width = 1920.0f;
-    float m_ref_height = 1080.0f;
     int m_resolution_index = 0;
 
     static constexpr RefResolution RESOLUTIONS[] = {
@@ -71,9 +67,7 @@ private:
     };
     static constexpr int RESOLUTION_COUNT = sizeof(RESOLUTIONS) / sizeof(RESOLUTIONS[0]);
 
-    float m_zoom = 1.0f;
-    float m_pan_x = 0.0f;
-    float m_pan_y = 0.0f;
+    ScreenCanvasTransform m_canvas;
 
     bool m_is_panning = false;
     float m_pan_start_mouse_x = 0.0f;
@@ -89,10 +83,6 @@ private:
     float m_entity_start_offset_y = 0.0f;
 
     EditorTextureCache m_image_textures;
-
-    void render_image_entity(ImDrawList* draw_list, entt::entity entity, ImVec2 canvas_pos, ImVec2 canvas_size);
-    void render_text_entity(ImDrawList* draw_list, entt::entity entity, ImVec2 canvas_pos, ImVec2 canvas_size);
-
     std::unique_ptr<EditorTextRenderer> m_text_renderer;
     void ensure_text_renderer();
 };

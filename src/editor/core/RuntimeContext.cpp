@@ -14,6 +14,7 @@
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
 #include "engine/animation/AnimationSystem.h"
+#include "engine/ui/UIInteractionSystem.h"
 #include "engine/render/Camera2D.h"
 #include "engine/render/PixelGridRenderer.h"
 #include "engine/simulation/PixelGridComponent.h"
@@ -725,6 +726,11 @@ void RuntimeContext::play(const SceneSettings& settings) {
         m_animation_system = std::make_unique<engine::animation::AnimationSystem>();
         m_animation_system->set_registry(m_editor_registry);
 
+        // Initialize UI interaction system
+        m_ui_interaction_system = std::make_unique<engine::ui::UIInteractionSystem>();
+        m_ui_interaction_system->set_registry(m_editor_registry);
+        m_ui_interaction_system->init(*m_engine);
+
         // Set category library (owned by EditorApplication, set via set_category_library)
         // Categories should already be loaded by EditorApplication before play() is called
         if (m_category_library) {
@@ -807,6 +813,7 @@ void RuntimeContext::stop() {
     shutdown_scripts();
     m_previously_enabled_script_entities.clear();
     m_deferred_destroys.clear();
+    m_ui_interaction_system.reset();
     m_animation_system.reset();
     m_sim_playback.reset();
     m_physics_playback.reset();
@@ -905,6 +912,20 @@ void RuntimeContext::update(float dt) {
     if (m_animation_system && m_engine) {
         PROFILE_SCOPE("Runtime::Animation");
         m_animation_system->update(*m_engine, dt);
+    }
+
+    // Update screen rects with actual viewport dimensions (fixed pixel sizes, anchor-based positioning)
+    if (m_editor_registry && m_viewport_w > 0 && m_viewport_h > 0) {
+        PROFILE_SCOPE("Runtime::ScreenRects");
+        update_screen_rects(*m_editor_registry, m_viewport_w, m_viewport_h);
+    }
+
+    // Update UI interaction system (after screen rects are computed)
+    if (m_ui_interaction_system && m_engine) {
+        PROFILE_SCOPE("Runtime::UIInteraction");
+        m_ui_interaction_system->set_viewport_offset(m_viewport_x, m_viewport_y);
+        m_ui_interaction_system->set_viewport_size(m_viewport_w, m_viewport_h);
+        m_ui_interaction_system->update(*m_engine, dt);
     }
 
     if (m_sim_playback) {

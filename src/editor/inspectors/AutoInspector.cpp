@@ -1,7 +1,9 @@
 #include "AutoInspector.h"
 #include "InspectorUtils.h"
+#include "editor/core/EditorComponents.h"
 #include <imgui.h>
 #include <string>
+#include <vector>
 
 using namespace engine::reflection;
 
@@ -141,6 +143,9 @@ bool AutoInspector::draw_property(const PropertyInfo& prop, void* instance) {
             break;
         case PropertyType::Enum:
             modified = draw_enum(prop, instance);
+            break;
+        case PropertyType::EntityRef:
+            modified = draw_entity_ref(prop, instance);
             break;
         default:
             ImGui::Text("%s: (unknown type)", prop.display_name.c_str());
@@ -314,6 +319,63 @@ bool AutoInspector::draw_enum(const PropertyInfo& prop, void* instance) {
             bool is_selected = (*value == i);
             if (ImGui::Selectable(prop.enum_names[i].c_str(), is_selected)) {
                 *value = i;
+                modified = true;
+            }
+            if (is_selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    return modified;
+}
+
+bool AutoInspector::draw_entity_ref(const PropertyInfo& prop, void* instance) {
+    entt::entity* value = prop.get_ptr<entt::entity>(instance);
+    PropertyGuard guard(prop, s_recording_context);
+
+    // Need registry to list entities
+    if (!s_recording_context || !s_recording_context->registry) {
+        ImGui::TextDisabled("(no registry)");
+        return false;
+    }
+
+    entt::registry* reg = s_recording_context->registry;
+
+    // Build list of entities with names
+    struct EntityEntry {
+        entt::entity entity;
+        std::string name;
+    };
+    std::vector<EntityEntry> entities;
+    entities.push_back({entt::null, "(None)"});
+
+    // Collect all entities with EntityInfo
+    auto view = reg->view<EntityInfo>();
+    for (auto entity : view) {
+        const auto& info = view.get<EntityInfo>(entity);
+        entities.push_back({entity, info.name});
+    }
+
+    // Find current selection name
+    std::string current_name = "(None)";
+    if (*value != entt::null && reg->valid(*value)) {
+        if (reg->all_of<EntityInfo>(*value)) {
+            current_name = reg->get<EntityInfo>(*value).name;
+        } else {
+            current_name = "(Entity " + std::to_string(static_cast<uint32_t>(*value)) + ")";
+        }
+    }
+
+    bool modified = false;
+    if (ImGui::BeginCombo("##value", current_name.c_str())) {
+        for (const auto& entry : entities) {
+            bool is_selected = (*value == entry.entity);
+            // Use entity ID suffix to disambiguate entries with the same name
+            std::string label = entry.name + "##" + std::to_string(static_cast<uint32_t>(entry.entity));
+            if (ImGui::Selectable(label.c_str(), is_selected)) {
+                *value = entry.entity;
                 modified = true;
             }
             if (is_selected) {

@@ -15,6 +15,7 @@
 #include "engine/simulation/SimSurface.h"
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
+#include "engine/ui/UIComponents.h"
 #include <cmath>
 #include <unordered_map>
 #include <random>

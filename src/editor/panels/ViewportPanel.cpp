@@ -4,6 +4,7 @@
 #include "editor/core/EditorPixelGridLoader.h"
 #include "editor/core/RuntimeContext.h"
 #include "editor/core/SimulationPlayback.h"
+#include "editor/serialization/SceneSerializer.h"
 #include "editor/render/SceneRenderUtils.h"
 #include "editor/render/EntityHitDetector.h"
 #include "editor/render/DebugOverlayRenderer.h"
@@ -30,6 +31,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cmath>
+#include <filesystem>
 #include <vector>
 
 namespace editor {
@@ -94,6 +96,55 @@ void ViewportPanel::on_gui() {
     // Get viewport rect for gizmos and overlay
     ImVec2 viewport_pos = ImGui::GetItemRectMin();
     ImVec2 viewport_size = ImGui::GetItemRectSize();
+
+    // Handle prefab drag-drop onto viewport
+    if (ImGui::BeginDragDropTarget()) {
+        auto& camera = m_context.viewport().camera;
+
+        // Peek for feedback
+        if (const ImGuiPayload* peek = ImGui::GetDragDropPayload()) {
+            if (peek->IsDataType("ASSET_PATH")) {
+                std::string path(static_cast<const char*>(peek->Data));
+                std::filesystem::path fs_path(path);
+                if (fs_path.extension() == ".prefab") {
+                    if (SceneSerializer::is_screen_prefab(fs_path)) {
+                        ImGui::SetTooltip("Cannot drop screen prefab in world viewport");
+                    }
+                }
+            }
+        }
+
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_PATH")) {
+            std::string path(static_cast<const char*>(payload->Data));
+            std::filesystem::path fs_path(path);
+            if (fs_path.extension() == ".prefab") {
+                if (!SceneSerializer::is_screen_prefab(fs_path)) {
+                    auto* registry = m_context.registry();
+                    if (registry) {
+                        // Calculate world position from mouse position
+                        ImVec2 mouse = ImGui::GetMousePos();
+                        CoordinateTransform wts(viewport_pos, viewport_size, camera.x, camera.y, camera.zoom);
+                        ImVec2 world_pos = wts.screen_to_world(mouse.x, mouse.y);
+
+                        // Load prefab
+                        SceneSerializer serializer(*registry);
+                        entt::entity e = serializer.load_prefab(fs_path);
+                        if (e != entt::null) {
+                            // Set position
+                            if (registry->all_of<engine::Transform>(e)) {
+                                auto& t = registry->get<engine::Transform>(e);
+                                t.x = world_pos.x;
+                                t.y = world_pos.y;
+                            }
+                            m_context.selection().select(e);
+                            m_context.scene_state().mark_dirty();
+                        }
+                    }
+                }
+            }
+        }
+        ImGui::EndDragDropTarget();
+    }
 
     // Update gizmo state BEFORE handling input
     // This ensures gizmo hover/drag takes priority over click-to-select

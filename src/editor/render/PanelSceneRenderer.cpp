@@ -64,8 +64,46 @@ void PanelSceneRenderer::render_world_text(ImDrawList* draw_list, entt::registry
 
     if (!text.enabled) return;
 
-    ImVec2 center = wts(transform.world_x, transform.world_y);
-    m_text_renderer->render_centered(draw_list, text, center, wts.zoom);
+    // Convert world position to screen position
+    ImVec2 pos = wts(transform.world_x, transform.world_y);
+
+    // Measure text to handle alignment relative to pivot point (entity position)
+    ImVec2 size = m_text_renderer->measure_text(text, wts.zoom);
+
+    // Calculate render position based on horizontal alignment
+    // World-space entities use their position as the alignment anchor
+    float render_x = pos.x;
+    switch (text.h_align) {
+        case engine::render::TextHAlign::Center:
+            render_x = pos.x - size.x * 0.5f;
+            break;
+        case engine::render::TextHAlign::Right:
+            render_x = pos.x - size.x;
+            break;
+        default: // Left - text starts at entity position
+            break;
+    }
+
+    // Calculate render position based on vertical alignment
+    float render_y = pos.y;
+    switch (text.v_align) {
+        case engine::render::TextVAlign::Middle:
+            render_y = pos.y - size.y * 0.5f;
+            break;
+        case engine::render::TextVAlign::Bottom:
+            render_y = pos.y - size.y;
+            break;
+        default: // Top - text starts at entity position
+            break;
+    }
+
+    // Create a modified text with left/top alignment to avoid double-offset
+    // (we've already computed the position based on alignment)
+    engine::render::Text aligned_text = text;
+    aligned_text.h_align = engine::render::TextHAlign::Left;
+    aligned_text.v_align = engine::render::TextVAlign::Top;
+
+    m_text_renderer->render(draw_list, aligned_text, ImVec2(render_x, render_y), wts.zoom);
 }
 
 void PanelSceneRenderer::render_pixel_grid(ImDrawList* draw_list, entt::registry& registry,

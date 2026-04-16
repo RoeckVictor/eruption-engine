@@ -124,6 +124,7 @@ void TextRenderSystem::layout_text(
     float origin_x, float origin_y,
     float rotation,
     bool is_screen_space,
+    float area_width, float area_height,
     std::vector<TextVertex>& out_vertices
 ) {
     auto codepoints = render::decode_utf8(text.content);
@@ -143,15 +144,32 @@ void TextRenderSystem::layout_text(
 
     // Pre-calculate total text bounds for centering (world-space only)
     float total_width = 0.0f;
+    render::TextVisualBounds total_visual_bounds;
     int line_count = 1;
     {
         size_t line_start = 0;
+        bool first_line = true;
         for (size_t i = 0; i <= codepoints.size(); ++i) {
             bool is_end = (i == codepoints.size());
             bool is_newline = !is_end && (codepoints[i] == '\n');
             if (is_newline || is_end) {
                 float w = render::measure_line_width(codepoints, line_start, i, font, atlas_size, render_scale);
                 total_width = std::max(total_width, w);
+
+                // For world-space centering, measure visual bounds of each line
+                if (!is_screen_space) {
+                    auto bounds = render::measure_visual_bounds(codepoints, line_start, i, font, atlas_size, render_scale);
+                    if (first_line) {
+                        total_visual_bounds = bounds;
+                        first_line = false;
+                    } else {
+                        // Track widest visual bounds
+                        if (bounds.width() > total_visual_bounds.width()) {
+                            total_visual_bounds = bounds;
+                        }
+                    }
+                }
+
                 if (is_newline) line_count++;
                 line_start = i + 1;
             }
@@ -164,15 +182,54 @@ void TextRenderSystem::layout_text(
     float cos_r = is_screen_space ? 1.0f : std::cos(rotation * DEG_TO_RAD);
     float sin_r = is_screen_space ? 0.0f : std::sin(rotation * DEG_TO_RAD);
 
-    // Adjust origin Y for baseline positioning
+    // Adjust origin based on alignment and space (screen/world)
     float adjusted_origin_x = origin_x;
     float adjusted_origin_y = origin_y;
     if (is_screen_space) {
-        adjusted_origin_y = origin_y + atlas->ascent * render_scale;
+        // Vertical alignment - calculate Y offset based on v_align and area height
+        // Note: screen-space is Y-down, so we add ascent for baseline
+        switch (text.v_align) {
+            case render::TextVAlign::Middle:
+                adjusted_origin_y = origin_y + (area_height - total_height) * 0.5f + atlas->ascent * render_scale;
+                break;
+            case render::TextVAlign::Bottom:
+                adjusted_origin_y = origin_y + (area_height - total_height) + atlas->ascent * render_scale;
+                break;
+            default: // Top
+                adjusted_origin_y = origin_y + atlas->ascent * render_scale;
+                break;
+        }
+        // Horizontal alignment is handled per-line below
     } else {
-        // Center text on transform position for world-space
-        adjusted_origin_x = origin_x - total_width * 0.5f;
-        adjusted_origin_y = origin_y + total_height * 0.5f;
+        // World-space: respect h_align and v_align settings
+        // Use visual bounds for accurate centering
+        // Horizontal alignment
+        switch (text.h_align) {
+            case render::TextHAlign::Center:
+                // Center using visual bounds: offset so visual center is at origin
+                adjusted_origin_x = origin_x - total_visual_bounds.center();
+                break;
+            case render::TextHAlign::Right:
+                // Right align: visual right edge at origin
+                adjusted_origin_x = origin_x - total_visual_bounds.right;
+                break;
+            default: // Left
+                // Left align: visual left edge at origin
+                adjusted_origin_x = origin_x - total_visual_bounds.left;
+                break;
+        }
+        // Vertical alignment (Y-up: text renders downward from origin)
+        switch (text.v_align) {
+            case render::TextVAlign::Middle:
+                adjusted_origin_y = origin_y + total_height * 0.5f;
+                break;
+            case render::TextVAlign::Bottom:
+                adjusted_origin_y = origin_y + total_height;
+                break;
+            default: // Top
+                adjusted_origin_y = origin_y;
+                break;
+        }
     }
 
     auto to_world = [&](float lx, float ly, float& wx, float& wy) {
@@ -185,6 +242,7 @@ void TextRenderSystem::layout_text(
         size_t start;
         size_t end;
         float width;
+        render::TextVisualBounds visual_bounds;  // For accurate world-space alignment
     };
     std::vector<Line> lines;
 
@@ -206,7 +264,9 @@ void TextRenderSystem::layout_text(
                 }
                 if (break_at > line_start) {
                     float w = render::measure_line_width(codepoints, line_start, break_at, font, atlas_size, render_scale);
-                    lines.push_back({ line_start, break_at, w });
+                    auto vb = is_screen_space ? render::TextVisualBounds{} :
+                              render::measure_visual_bounds(codepoints, line_start, break_at, font, atlas_size, render_scale);
+                    lines.push_back({ line_start, break_at, w, vb });
                     line_start = break_at;
                     if (line_start < codepoints.size() && codepoints[line_start] == ' ') {
                         line_start++;
@@ -218,7 +278,9 @@ void TextRenderSystem::layout_text(
         if (is_newline || is_end) {
             if (i > line_start || is_end) {
                 float w = render::measure_line_width(codepoints, line_start, i, font, atlas_size, render_scale);
-                lines.push_back({ line_start, i, w });
+                auto vb = is_screen_space ? render::TextVisualBounds{} :
+                          render::measure_visual_bounds(codepoints, line_start, i, font, atlas_size, render_scale);
+                lines.push_back({ line_start, i, w, vb });
             }
             line_start = i + 1;
         }
@@ -228,17 +290,36 @@ void TextRenderSystem::layout_text(
     float cursor_y = 0.0f;
 
     for (const auto& line : lines) {
-        // Calculate alignment offset
+        // Calculate horizontal alignment offset for this line
         float align_offset = 0.0f;
-        switch (text.align) {
-            case render::TextAlign::Center:
-                align_offset = -line.width * 0.5f;
-                break;
-            case render::TextAlign::Right:
-                align_offset = -line.width;
-                break;
-            default:
-                break;
+        if (is_screen_space) {
+            // Screen-space: align each line within the ScreenRect area
+            switch (text.h_align) {
+                case render::TextHAlign::Center:
+                    align_offset = (area_width - line.width) * 0.5f;
+                    break;
+                case render::TextHAlign::Right:
+                    align_offset = area_width - line.width;
+                    break;
+                default: // Left
+                    break;
+            }
+        } else {
+            // World-space: align each line using visual bounds (relative to widest visual bounds)
+            switch (text.h_align) {
+                case render::TextHAlign::Center:
+                    // Offset so this line's visual center aligns with the total visual center
+                    align_offset = total_visual_bounds.center() - line.visual_bounds.center();
+                    break;
+                case render::TextHAlign::Right:
+                    // Offset so this line's visual right aligns with total visual right
+                    align_offset = total_visual_bounds.right - line.visual_bounds.right;
+                    break;
+                default: // Left
+                    // Offset so this line's visual left aligns with total visual left
+                    align_offset = total_visual_bounds.left - line.visual_bounds.left;
+                    break;
+            }
         }
 
         float cursor_x = align_offset;
@@ -329,9 +410,13 @@ void TextRenderSystem::render(Engine& engine) {
         bool is_screen_space;
         float origin_x, origin_y;
         float rotation;
+        float area_width, area_height;  // for screen-space alignment
         const render::Text* text;
         render::DynamicFont* font;
         int font_size;
+        // Clip bounds
+        bool has_clip = false;
+        float clip_x = 0, clip_y = 0, clip_w = 0, clip_h = 0;
     };
 
     std::vector<TextItem> items;
@@ -360,6 +445,7 @@ void TextRenderSystem::render(Engine& engine) {
                 false,
                 transform.world_x, transform.world_y,
                 transform.world_rotation,
+                0.0f, 0.0f,  // area dimensions not used for world-space
                 &text,
                 font,
                 font_size
@@ -393,16 +479,38 @@ void TextRenderSystem::render(Engine& engine) {
             float pos_x = rect.computed_x;
             float pos_y = rect.computed_y;
 
-            items.push_back({
-                entity,
-                text.layer,
-                true,
-                pos_x, pos_y,
-                0.0f,
-                &text,
-                font,
-                font_size
-            });
+            // Check for clip bounds
+            bool has_clip = false;
+            float clip_x = 0, clip_y = 0, clip_w = 0, clip_h = 0;
+            if (rect.clip_to != entt::null && m_registry->valid(rect.clip_to)) {
+                ScreenRect* clip_rect = m_registry->try_get<ScreenRect>(rect.clip_to);
+                if (clip_rect && clip_rect->enabled) {
+                    has_clip = true;
+                    clip_x = clip_rect->computed_x;
+                    clip_y = clip_rect->computed_y;
+                    clip_w = clip_rect->computed_width;
+                    clip_h = clip_rect->computed_height;
+                }
+            }
+
+            TextItem item{};
+            item.entity = entity;
+            item.layer = text.layer;
+            item.is_screen_space = true;
+            item.origin_x = pos_x;
+            item.origin_y = pos_y;
+            item.rotation = 0.0f;
+            item.area_width = rect.width;
+            item.area_height = rect.height;
+            item.text = &text;
+            item.font = font;
+            item.font_size = font_size;
+            item.has_clip = has_clip;
+            item.clip_x = clip_x;
+            item.clip_y = clip_y;
+            item.clip_w = clip_w;
+            item.clip_h = clip_h;
+            items.push_back(item);
         }
     }
 
@@ -416,13 +524,15 @@ void TextRenderSystem::render(Engine& engine) {
     // Build all vertices
     std::vector<TextVertex> all_vertices;
 
-    // Batch by font + size combination
+    // Batch by font + size combination (includes clip info)
     struct Batch {
         render::DynamicFont* font;
         int font_size;
         size_t start_vertex;
         size_t vertex_count;
         bool is_screen_space;
+        bool has_clip;
+        float clip_x, clip_y, clip_w, clip_h;
     };
     std::vector<Batch> batches;
 
@@ -432,11 +542,23 @@ void TextRenderSystem::render(Engine& engine) {
         layout_text(*item.text, *item.font,
                     item.origin_x, item.origin_y,
                     item.rotation, item.is_screen_space,
+                    item.area_width, item.area_height,
                     all_vertices);
 
         size_t count = all_vertices.size() - start;
         if (count > 0) {
-            batches.push_back({ item.font, item.font_size, start, count, item.is_screen_space });
+            Batch batch{};
+            batch.font = item.font;
+            batch.font_size = item.font_size;
+            batch.start_vertex = start;
+            batch.vertex_count = count;
+            batch.is_screen_space = item.is_screen_space;
+            batch.has_clip = item.has_clip;
+            batch.clip_x = item.clip_x;
+            batch.clip_y = item.clip_y;
+            batch.clip_w = item.clip_w;
+            batch.clip_h = item.clip_h;
+            batches.push_back(batch);
         }
     }
 
@@ -466,7 +588,25 @@ void TextRenderSystem::render(Engine& engine) {
     // Bind vertex buffer
     ctx->bind_vertex_buffer(m_vbo.get(), 0, 0);
 
+    int screen_height = window.height();
+    bool scissor_enabled = false;
+
     for (const auto& batch : batches) {
+        // Handle scissor clipping via RHI abstraction
+        if (batch.has_clip) {
+            if (!scissor_enabled) {
+                ctx->enable_scissor_test(true);
+                scissor_enabled = true;
+            }
+            // Convert from top-left origin to OpenGL bottom-left origin
+            int scissor_y = screen_height - static_cast<int>(batch.clip_y + batch.clip_h);
+            ctx->set_scissor(static_cast<int>(batch.clip_x), scissor_y,
+                             static_cast<int>(batch.clip_w), static_cast<int>(batch.clip_h));
+        } else if (scissor_enabled) {
+            ctx->enable_scissor_test(false);
+            scissor_enabled = false;
+        }
+
         m_shader.set_bool("u_screen_space", batch.is_screen_space);
 
         auto* atlas = batch.font->get_atlas(batch.font_size);
@@ -476,6 +616,11 @@ void TextRenderSystem::render(Engine& engine) {
 
         ctx->draw(static_cast<uint32_t>(batch.vertex_count),
                   static_cast<uint32_t>(batch.start_vertex), 1);
+    }
+
+    // Disable scissor if it was enabled
+    if (scissor_enabled) {
+        ctx->enable_scissor_test(false);
     }
 }
 

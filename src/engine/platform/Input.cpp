@@ -49,4 +49,9 @@ bool Input::is_mouse_pressed(MouseButton button) const {
     return i >= 0 && i < MOUSE_COUNT && m_mouse[i] && !m_mouse_prev[i];
 }
 
+bool Input::is_mouse_released(MouseButton button) const {
+    int i = static_cast<int>(button);
+    return i >= 0 && i < MOUSE_COUNT && !m_mouse[i] && m_mouse_prev[i];
+}
+
 } // namespace engine::platform

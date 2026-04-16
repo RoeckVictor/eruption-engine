@@ -25,4 +25,11 @@
     X(engine::physics::CapsuleCollider) \
     X(engine::physics::CircleCollider) \
     X(engine::physics::DynamicCollider) \
-    X(engine::simulation::SimSurface)
+    X(engine::simulation::SimSurface) \
+    X(engine::ui::UIInteractable) \
+    X(engine::ui::Button) \
+    X(engine::ui::Slider) \
+    X(engine::ui::Checkbox) \
+    X(engine::ui::Panel) \
+    X(engine::ui::ScrollView) \
+    X(engine::ui::Dropdown)

@@ -13,7 +13,7 @@ struct DynamicFont;
 /// Handles 1-4 byte sequences, skipping invalid sequences.
 std::vector<uint32_t> decode_utf8(const std::string& text);
 
-/// Measure the width of a line of text in pixels.
+/// Measure the width of a line of text in pixels (using advance sum).
 /// @param codepoints Pre-decoded codepoints
 /// @param start Start index in codepoints
 /// @param end End index (exclusive)
@@ -21,6 +21,30 @@ std::vector<uint32_t> decode_utf8(const std::string& text);
 /// @param font_size Quantized font size for atlas lookup
 /// @param render_scale Scale factor for final pixel width
 float measure_line_width(
+    const std::vector<uint32_t>& codepoints,
+    size_t start, size_t end,
+    DynamicFont& font,
+    int font_size,
+    float render_scale
+);
+
+/// Visual bounds of a text line for accurate centering.
+struct TextVisualBounds {
+    float left = 0.0f;    // Left edge of first visible glyph (from cursor origin)
+    float right = 0.0f;   // Right edge of last visible glyph (from cursor origin)
+    float width() const { return right - left; }
+    float center() const { return (left + right) * 0.5f; }
+};
+
+/// Measure the visual bounds of a line of text.
+/// Unlike measure_line_width which uses advance sum, this returns actual visual bounds.
+/// @param codepoints Pre-decoded codepoints
+/// @param start Start index in codepoints
+/// @param end End index (exclusive)
+/// @param font The font to use for metrics
+/// @param font_size Quantized font size for atlas lookup
+/// @param render_scale Scale factor for final pixel size
+TextVisualBounds measure_visual_bounds(
     const std::vector<uint32_t>& codepoints,
     size_t start, size_t end,
     DynamicFont& font,

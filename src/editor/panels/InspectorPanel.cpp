@@ -8,6 +8,9 @@
 #include "editor/inspectors/PixelGridComponentInspector.h"
 #include "editor/inspectors/ImageInspector.h"
 #include "editor/inspectors/TextInspector.h"
+#include "editor/inspectors/UIInteractableInspector.h"
+#include "editor/inspectors/ButtonInspector.h"
+#include "editor/inspectors/DropdownInspector.h"
 #include "engine/reflection/TypeRegistry.h"
 #include "engine/core/Transform.h"
 #include "engine/core/ScreenRect.h"
@@ -20,6 +23,9 @@
 #include "engine/render/Text.h"
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
+#include "engine/ui/UIInteractable.h"
+#include "engine/ui/Button.h"
+#include "engine/ui/Dropdown.h"
 #include "editor/icons/IconsFontAwesome6.h"
 #include "editor/scripting/ScriptManager.h"
 #include "runtime/ScriptComponent.h"
@@ -475,6 +481,18 @@ void InspectorPanel::render_component_inspector(entt::entity entity, const engin
         else if (type_info.name() == "engine::render::Text") {
             changed = TextInspector::draw(*static_cast<engine::render::Text*>(component_ptr), m_context.scene_state().project_path());
         }
+        else if (type_info.name() == "engine::ui::UIInteractable") {
+            changed = UIInteractableInspector::draw(*static_cast<engine::ui::UIInteractable*>(component_ptr), m_context.scene_state().project_path());
+        }
+        else if (type_info.name() == "engine::ui::Button") {
+            changed = ButtonInspector::draw(*static_cast<engine::ui::Button*>(component_ptr), m_context.scene_state().project_path());
+        }
+        else if (type_info.name() == "engine::ui::Dropdown") {
+            auto* reg = m_context.registry();
+            if (reg) {
+                changed = DropdownInspector::draw(*static_cast<engine::ui::Dropdown*>(component_ptr), *reg, entity);
+            }
+        }
         else {
             // Extract short name from full type name (e.g., "engine::Transform" -> "Transform")
             const auto& full_name = type_info.name();
@@ -860,6 +878,7 @@ std::string InspectorPanel::get_component_category(const std::string& type_name)
 RecordingContext InspectorPanel::create_recording_context(entt::entity entity, const std::string& component_name) {
     RecordingContext rec_ctx;
     rec_ctx.entity = entity;
+    rec_ctx.registry = m_context.registry();
     rec_ctx.component_name = component_name;
     rec_ctx.is_recording = m_context.is_animation_recording(entity);
 

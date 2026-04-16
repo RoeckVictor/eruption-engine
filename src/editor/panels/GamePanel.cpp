@@ -2,6 +2,7 @@
 #include "editor/core/EditorContext.h"
 #include "editor/core/EditorComponents.h"
 #include "editor/core/RuntimeContext.h"
+#include "engine/core/Engine.h"
 #include "editor/core/SimulationPlayback.h"
 #include "editor/render/SceneRenderUtils.h"
 #include "engine/core/Transform.h"
@@ -19,6 +20,22 @@
 #include <cstdint>
 
 namespace editor {
+
+// Helper: resolve clip bounds from ScreenRect::clip_to and push ImGui clip rect.
+// Returns true if a clip rect was pushed (caller must pop it).
+static bool push_clip_rect_if_needed(ImDrawList* draw_list, entt::registry& registry,
+                                      const engine::ScreenRect& rect, ImVec2 panel_pos) {
+    if (rect.clip_to == entt::null || !registry.valid(rect.clip_to)) return false;
+    engine::ScreenRect* clip_rect = registry.try_get<engine::ScreenRect>(rect.clip_to);
+    if (!clip_rect || !clip_rect->enabled) return false;
+
+    ImVec2 clip_min(panel_pos.x + clip_rect->computed_x,
+                    panel_pos.y + clip_rect->computed_y);
+    ImVec2 clip_max(clip_min.x + clip_rect->computed_width,
+                    clip_min.y + clip_rect->computed_height);
+    draw_list->PushClipRect(clip_min, clip_max, true);
+    return true;
+}
 
 GamePanel::GamePanel(EditorContext& context)
     : Panel("Game")
@@ -219,6 +236,7 @@ entt::entity GamePanel::find_camera_entity() const {
 
 void GamePanel::render_screen_image(ImDrawList* draw_list, entt::entity entity,
                                      ImVec2 panel_pos, ImVec2 panel_size) {
+    (void)panel_size;  // No longer used for scaling
     auto* registry = m_context.registry();
     if (!registry) return;
 
@@ -227,17 +245,16 @@ void GamePanel::render_screen_image(ImDrawList* draw_list, entt::entity entity,
 
     if (!rect.enabled || !image.enabled) return;
 
+    bool has_clip = push_clip_rect_if_needed(draw_list, *registry, rect, panel_pos);
+
     int tex_width, tex_height;
     void* texture = m_scene_renderer.image_textures().get(image.sprite_path, tex_width, tex_height);
 
-    const auto& settings = m_context.scene_settings();
-    float scale_x = panel_size.x / settings.reference_width;
-    float scale_y = panel_size.y / settings.reference_height;
-
-    ImVec2 tl(panel_pos.x + rect.computed_x * scale_x,
-              panel_pos.y + rect.computed_y * scale_y);
-    ImVec2 br(panel_pos.x + (rect.computed_x + rect.computed_width) * scale_x,
-              panel_pos.y + (rect.computed_y + rect.computed_height) * scale_y);
+    // Use computed values directly - ScreenRectSystem computes with actual viewport dimensions
+    ImVec2 tl(panel_pos.x + rect.computed_x,
+              panel_pos.y + rect.computed_y);
+    ImVec2 br(panel_pos.x + rect.computed_x + rect.computed_width,
+              panel_pos.y + rect.computed_y + rect.computed_height);
 
     auto uv = compute_image_uv(image);
     ImU32 tint = compute_image_tint(image);
@@ -248,10 +265,27 @@ void GamePanel::render_screen_image(ImDrawList* draw_list, entt::entity entity,
         ImVec2(uv.u0, uv.v0), ImVec2(uv.u1, uv.v1),
         tint
     );
+
+    if (has_clip) {
+        draw_list->PopClipRect();
+    }
+}
+
+void GamePanel::ensure_text_renderer() {
+    if (m_text_renderer) return;
+
+    auto* runtime = m_context.runtime();
+    if (!runtime) return;
+
+    auto* eng = runtime->engine();
+    if (!eng) return;
+
+    m_text_renderer = std::make_unique<EditorTextRenderer>(eng->assets());
 }
 
 void GamePanel::render_screen_text(ImDrawList* draw_list, entt::entity entity,
                                     ImVec2 panel_pos, ImVec2 panel_size) {
+    (void)panel_size;  // No longer used for scaling
     auto* registry = m_context.registry();
     if (!registry) return;
 
@@ -260,22 +294,31 @@ void GamePanel::render_screen_text(ImDrawList* draw_list, entt::entity entity,
 
     if (!rect.enabled || !text.enabled) return;
 
-    const auto& settings = m_context.scene_settings();
-    float scale_x = panel_size.x / settings.reference_width;
-    float scale_y = panel_size.y / settings.reference_height;
+    bool has_clip = push_clip_rect_if_needed(draw_list, *registry, rect, panel_pos);
 
-    ImVec2 pos(panel_pos.x + rect.computed_x * scale_x,
-               panel_pos.y + rect.computed_y * scale_y);
+    // Use computed values directly - ScreenRectSystem computes with actual viewport dimensions
+    ImVec2 area_pos(panel_pos.x + rect.computed_x,
+                    panel_pos.y + rect.computed_y);
+    ImVec2 area_size(rect.computed_width, rect.computed_height);
 
-    // For screen-space text, we use ImGui's default font at a scaled size
-    // This is simpler than using EditorTextRenderer which is more for world-space
-    ImU32 color = IM_COL32(
-        static_cast<uint8_t>(text.color_r * 255.0f),
-        static_cast<uint8_t>(text.color_g * 255.0f),
-        static_cast<uint8_t>(text.color_b * 255.0f),
-        static_cast<uint8_t>(text.color_a * 255.0f)
-    );
-    draw_list->AddText(pos, color, text.content.c_str());
+    // Use EditorTextRenderer for proper font, size, and alignment support
+    ensure_text_renderer();
+    if (m_text_renderer) {
+        m_text_renderer->render_in_area(draw_list, text, area_pos, area_size, 1.0f);
+    } else {
+        // Fallback: use ImGui's default font (no alignment support)
+        ImU32 color = IM_COL32(
+            static_cast<uint8_t>(text.color_r * 255.0f),
+            static_cast<uint8_t>(text.color_g * 255.0f),
+            static_cast<uint8_t>(text.color_b * 255.0f),
+            static_cast<uint8_t>(text.color_a * 255.0f)
+        );
+        draw_list->AddText(area_pos, color, text.content.c_str());
+    }
+
+    if (has_clip) {
+        draw_list->PopClipRect();
+    }
 }
 
 void GamePanel::render_game_view(ImVec2 panel_pos, ImVec2 panel_size) {
@@ -303,45 +346,11 @@ void GamePanel::render_game_view(ImVec2 panel_pos, ImVec2 panel_size) {
     m_scene_renderer.render_world_entities(draw_list, *registry, wts, false, m_context.runtime());
 
     // Now render screen-space entities (on top of world-space)
-    struct ScreenRenderItem {
-        entt::entity entity;
-        int layer;
-        bool has_image;
-        bool has_text;
-    };
-    std::vector<ScreenRenderItem> screen_items;
+    // Update screen rects with actual panel dimensions before rendering
+    update_screen_rects(*registry, panel_size.x, panel_size.y);
 
-    {
-        auto view = registry->view<engine::ScreenRect>();
-        for (auto entity : view) {
-            if (registry->all_of<EntityInfo>(entity)) {
-                if (!registry->get<EntityInfo>(entity).enabled_in_hierarchy) continue;
-            }
+    auto screen_items = collect_screen_renderables(*registry, true);
 
-            auto& rect = view.get<engine::ScreenRect>(entity);
-            if (!rect.enabled) continue;
-
-            bool has_image = registry->all_of<engine::render::Image>(entity);
-            bool has_text = registry->all_of<engine::render::Text>(entity);
-
-            if (!has_image && !has_text) continue;
-
-            int layer = 0;
-            if (has_image) {
-                layer = registry->get<engine::render::Image>(entity).layer;
-            } else if (has_text) {
-                layer = registry->get<engine::render::Text>(entity).layer;
-            }
-
-            screen_items.push_back({entity, layer, has_image, has_text});
-        }
-    }
-
-    // Sort screen items by layer
-    std::sort(screen_items.begin(), screen_items.end(),
-              [](const ScreenRenderItem& a, const ScreenRenderItem& b) { return a.layer < b.layer; });
-
-    // Render screen-space entities
     for (const auto& item : screen_items) {
         if (item.has_image) {
             render_screen_image(draw_list, item.entity, panel_pos, panel_size);

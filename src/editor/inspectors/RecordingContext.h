@@ -12,6 +12,7 @@ namespace editor {
 // Used by all inspector types (AutoInspector, AnimatorInspector, PixelGridComponentInspector, etc.)
 struct RecordingContext {
     entt::entity entity = entt::null;
+    entt::registry* registry = nullptr;  // For entity ref dropdown access
 
     std::string component_name;
 

@@ -1,0 +1,166 @@
+{
+  "children": [
+    {
+      "components": [
+        {
+          "data": {
+            "enabled": true,
+            "x": -0.42,
+            "y": 0.0,
+            "rotation": 0.0,
+            "scale_x": 0.16,
+            "scale_y": 1.0
+          },
+          "type": "engine::Transform"
+        },
+        {
+          "data": {
+            "color_a": 1.0,
+            "color_b": 0.35,
+            "color_g": 0.35,
+            "color_r": 0.35,
+            "enabled": true,
+            "flip_x": false,
+            "flip_y": false,
+            "layer": 1,
+            "sprite_path": "",
+            "uv_max_x": 1.0,
+            "uv_max_y": 1.0,
+            "uv_min_x": 0.0,
+            "uv_min_y": 0.0
+          },
+          "type": "engine::render::Image"
+        }
+      ],
+      "name": "Background"
+    },
+    {
+      "components": [
+        {
+          "data": {
+            "enabled": true,
+            "x": -0.42,
+            "y": 0.0,
+            "rotation": 0.0,
+            "scale_x": 0.11,
+            "scale_y": 0.7
+          },
+          "type": "engine::Transform"
+        },
+        {
+          "data": {
+            "color_a": 1.0,
+            "color_b": 0.8,
+            "color_g": 0.6,
+            "color_r": 0.3,
+            "enabled": true,
+            "flip_x": false,
+            "flip_y": false,
+            "layer": 2,
+            "sprite_path": "",
+            "uv_max_x": 1.0,
+            "uv_max_y": 1.0,
+            "uv_min_x": 0.0,
+            "uv_min_y": 0.0
+          },
+          "type": "engine::render::Image"
+        }
+      ],
+      "name": "Checkmark"
+    },
+    {
+      "components": [
+        {
+          "data": {
+            "enabled": true,
+            "x": -0.2,
+            "y": 0.0,
+            "rotation": 0.0,
+            "scale_x": 0.0133,
+            "scale_y": 0.0833
+          },
+          "type": "engine::Transform"
+        },
+        {
+          "data": {
+            "bold": false,
+            "color_a": 1.0,
+            "color_b": 1.0,
+            "color_g": 1.0,
+            "color_r": 1.0,
+            "content": "Checkbox",
+            "enabled": true,
+            "font_path": "fonts/OpenSans-Regular.ttf",
+            "font_size": 16.0,
+            "h_align": 0,
+            "italic": false,
+            "layer": 0,
+            "line_height": 1.2,
+            "max_width": 0.0,
+            "underline": false,
+            "v_align": 1
+          },
+          "type": "engine::render::Text"
+        }
+      ],
+      "name": "Label"
+    }
+  ],
+  "components": [
+    {
+      "data": {
+        "enabled": true,
+        "x": 0.0,
+        "y": 0.0,
+        "rotation": 0.0,
+        "scale_x": 75.0,
+        "scale_y": 12.0
+      },
+      "type": "engine::Transform"
+    },
+    {
+      "data": {
+        "color_a": 0.0,
+        "color_b": 0.0,
+        "color_g": 0.0,
+        "color_r": 0.0,
+        "enabled": true,
+        "flip_x": false,
+        "flip_y": false,
+        "layer": 0,
+        "sprite_path": "",
+        "uv_max_x": 1.0,
+        "uv_max_y": 1.0,
+        "uv_min_x": 0.0,
+        "uv_min_y": 0.0
+      },
+      "type": "engine::render::Image"
+    },
+    {
+      "data": {
+        "disabled_color": [0.5, 0.5, 0.5, 0.5],
+        "disabled_sprite": "",
+        "enabled": true,
+        "hovered_color": [0.85, 0.85, 0.85, 1.0],
+        "hovered_sprite": "",
+        "interactable": true,
+        "normal_color": [1.0, 1.0, 1.0, 1.0],
+        "normal_sprite": "",
+        "pressed_color": [0.7, 0.7, 0.7, 1.0],
+        "pressed_sprite": "",
+        "transition_mode": 1
+      },
+      "type": "engine::ui::UIInteractable"
+    },
+    {
+      "data": {
+        "checked": false,
+        "checkmark": "Checkmark",
+        "enabled": true,
+        "toggle_group": ""
+      },
+      "type": "engine::ui::Checkbox"
+    }
+  ],
+  "name": "Checkbox"
+}

@@ -20,6 +20,9 @@ void PlayerController::on_fixed_update() {
     auto vel = get_velocity();
 
     if (move_dir != 0) {
+        auto scale = get_scale();
+        set_scale(move_dir < 0 ? -std::abs(scale.x) : std::abs(scale.x), scale.y);
+
         float target_vx = static_cast<float>(move_dir) * max_move_speed;
         float accel = move_accel * dt;
         if (vel.x < target_vx) {

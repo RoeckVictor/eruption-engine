@@ -5,11 +5,18 @@
 
 namespace engine::render {
 
-/// Text alignment options.
-enum class TextAlign : int {
+/// Horizontal text alignment options.
+enum class TextHAlign : int {
     Left = 0,
     Center = 1,
     Right = 2
+};
+
+/// Vertical text alignment options.
+enum class TextVAlign : int {
+    Top = 0,
+    Middle = 1,
+    Bottom = 2
 };
 
 /// Text component for bitmap text rendering.
@@ -27,7 +34,7 @@ struct Text {
 
     /// Font asset path (e.g., "fonts/Roboto-Regular.ttf").
     /// Empty path means no text rendering.
-    std::string font_path;
+    std::string font_path = "fonts/OpenSans-Regular.ttf";
 
     /// Font size in pixels.
     /// For Transform: world units.
@@ -40,8 +47,11 @@ struct Text {
     float color_b = 1.0f;
     float color_a = 1.0f;
 
-    /// Text alignment within the bounding area.
-    TextAlign align = TextAlign::Left;
+    /// Horizontal text alignment within the bounding area.
+    TextHAlign h_align = TextHAlign::Left;
+
+    /// Vertical text alignment within the bounding area.
+    TextVAlign v_align = TextVAlign::Top;
 
     /// Line height multiplier (1.0 = default font spacing).
     float line_height = 1.2f;

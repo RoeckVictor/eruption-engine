@@ -3,17 +3,64 @@
 #include "editor/core/ComponentTypeRegistry.h"
 #include "engine/core/Logger.h"
 #include "engine/core/Transform.h"
+#include "engine/core/TransformSystem.h"
 #include "engine/core/ScreenRect.h"
 #include "engine/core/ScreenRectSystem.h"
 #include "engine/reflection/ReflectionSerializer.h"
 #include "runtime/ScriptComponent.h"
 #include <fstream>
+#include <functional>
 
 namespace editor {
+
+// Recursively find an entity by name among descendants.
+// If multiple entities share the same name, the first match is returned and a warning is logged.
+static entt::entity find_entity_by_name_recursive(entt::registry& reg, entt::entity root, const std::string& name) {
+    if (!reg.valid(root)) return entt::null;
+
+    entt::entity result = entt::null;
+    int match_count = 0;
+
+    std::function<void(entt::entity)> search = [&](entt::entity parent) {
+        if (!reg.all_of<engine::Hierarchy>(parent)) return;
+        const auto& hierarchy = reg.get<engine::Hierarchy>(parent);
+        for (auto child : hierarchy.children) {
+            if (!reg.valid(child)) continue;
+            if (reg.all_of<EntityInfo>(child)) {
+                if (reg.get<EntityInfo>(child).name == name) {
+                    if (result == entt::null) {
+                        result = child;
+                    }
+                    match_count++;
+                }
+            }
+            search(child);
+        }
+    };
+
+    search(root);
+
+    if (match_count > 1) {
+        engine::Logger::instance().warning("SceneSerializer",
+            "Ambiguous entity reference: found %d entities named '%s' under the same hierarchy. "
+            "Using the first match. Consider using unique names for entity references.",
+            match_count, name.c_str());
+    }
+
+    return result;
+}
 
 SceneSerializer::SceneSerializer(entt::registry& registry)
     : m_registry(registry)
 {
+}
+
+std::string SceneSerializer::resolve_entity_name(entt::entity e) const {
+    if (e == entt::null || !m_registry.valid(e)) return "";
+    if (m_registry.all_of<EntityInfo>(e)) {
+        return m_registry.get<EntityInfo>(e).name;
+    }
+    return "";
 }
 
 bool SceneSerializer::save(const std::filesystem::path& path) {
@@ -220,10 +267,125 @@ bool SceneSerializer::deserialize(const nlohmann::json& json) {
     }
 }
 
+void SceneSerializer::serialize_components(entt::entity entity, nlohmann::json& json) const {
+    json["components"] = nlohmann::json::array();
+
+    auto& type_registry = engine::reflection::TypeRegistry::instance();
+    auto& component_registry = ComponentTypeRegistry::instance();
+    const auto& all_types = type_registry.all_types();
+
+    std::vector<const engine::reflection::TypeInfo*> present_types;
+    for (const auto* type_info_ptr : all_types) {
+        if (!type_info_ptr) continue;
+        void* ptr = component_registry.get_component(m_registry, entity, type_info_ptr->type_index());
+        if (ptr) {
+            present_types.push_back(type_info_ptr);
+        }
+    }
+
+    apply_component_order(m_registry, entity, present_types);
+
+    for (const auto* ti : present_types) {
+        void* ptr = component_registry.get_component(m_registry, entity, ti->type_index());
+        if (ptr) {
+            json["components"].push_back(serialize_component(entity, *ti, ptr));
+        }
+    }
+}
+
+void SceneSerializer::serialize_scripts(entt::entity entity, nlohmann::json& json) const {
+    if (!m_registry.all_of<runtime::ScriptComponent>(entity)) return;
+
+    const auto& sc = m_registry.get<runtime::ScriptComponent>(entity);
+    if (sc.script_types.empty()) return;
+
+    json["scripts"] = nlohmann::json::array();
+    for (size_t i = 0; i < sc.script_types.size(); ++i) {
+        nlohmann::json script_json;
+        script_json["type"] = sc.script_types[i];
+
+        if (i < sc.scripts.size() && sc.scripts[i]) {
+            nlohmann::json props;
+            sc.scripts[i]->serialize_properties(props);
+            script_json["properties"] = props;
+        } else if (i < sc.script_properties.size()) {
+            script_json["properties"] = sc.script_properties[i];
+        } else {
+            script_json["properties"] = nlohmann::json::object();
+        }
+
+        json["scripts"].push_back(script_json);
+    }
+}
+
+void SceneSerializer::serialize_children(entt::entity entity, nlohmann::json& json, bool is_prefab) const {
+    if (!m_registry.all_of<Hierarchy>(entity)) return;
+
+    const auto& hierarchy = m_registry.get<Hierarchy>(entity);
+    if (hierarchy.children.empty()) return;
+
+    json["children"] = nlohmann::json::array();
+    for (auto child : hierarchy.children) {
+        if (m_registry.valid(child)) {
+            json["children"].push_back(
+                is_prefab ? serialize_prefab_entity(child) : serialize_entity(child));
+        }
+    }
+}
+
+void SceneSerializer::deserialize_scripts(entt::entity entity, const nlohmann::json& json) {
+    if (!json.contains("scripts") || !json["scripts"].is_array()) return;
+
+    auto& sc = m_registry.emplace<runtime::ScriptComponent>(entity);
+    for (const auto& script_json : json["scripts"]) {
+        if (!script_json.is_object()) continue;
+
+        std::string type_name = script_json.value("type", "");
+        nlohmann::json properties = script_json.value("properties", nlohmann::json::object());
+
+        if (!type_name.empty()) {
+            sc.script_types.push_back(type_name);
+            sc.script_properties.push_back(properties);
+        }
+    }
+}
+
+void SceneSerializer::deserialize_children(entt::entity entity, const nlohmann::json& json, bool is_prefab) {
+    if (!json.contains("children") || !json["children"].is_array()) return;
+
+    for (const auto& child_json : json["children"]) {
+        if (is_prefab) {
+            deserialize_prefab_entity(child_json, entity);
+        } else {
+            deserialize_entity(child_json, entity);
+        }
+    }
+}
+
+void SceneSerializer::resolve_deferred_refs(entt::entity entity, entt::entity parent,
+                                             std::vector<engine::reflection::DeferredEntityRef>& deferred_refs) {
+    if (deferred_refs.empty()) return;
+
+    auto& component_registry = ComponentTypeRegistry::instance();
+    for (auto& ref : deferred_refs) {
+        entt::entity resolved = find_entity_by_name_recursive(m_registry, entity, ref.entity_name);
+
+        if (resolved == entt::null && parent != entt::null) {
+            resolved = find_entity_by_name_recursive(m_registry, parent, ref.entity_name);
+        }
+
+        void* comp_ptr = component_registry.get_component(m_registry, entity, ref.component_type);
+        if (comp_ptr) {
+            auto* target = reinterpret_cast<entt::entity*>(static_cast<char*>(comp_ptr) + ref.field_offset);
+            *target = resolved;
+        }
+    }
+}
+
 nlohmann::json SceneSerializer::serialize_entity(entt::entity entity) const {
     nlohmann::json json;
 
-    // Entity info
+    // Entity info (scene-specific metadata: guid, enabled, prefab link, component order)
     if (m_registry.all_of<EntityInfo>(entity)) {
         const auto& info = m_registry.get<EntityInfo>(entity);
         json["name"] = info.name;
@@ -241,77 +403,9 @@ nlohmann::json SceneSerializer::serialize_entity(entt::entity entity) const {
         json["enabled"] = true;
     }
 
-    // Components - serialize all components using reflection
-    json["components"] = nlohmann::json::array();
-
-    // Use TypeRegistry to dynamically serialize all components
-    auto& type_registry = engine::reflection::TypeRegistry::instance();
-    auto& component_registry = ComponentTypeRegistry::instance();
-    const auto& all_types = type_registry.all_types();
-
-    // Build ordered list of present components (respecting component_order)
-    std::vector<const engine::reflection::TypeInfo*> present_types;
-    for (const auto* type_info_ptr : all_types) {
-        if (!type_info_ptr) continue;
-        void* ptr = component_registry.get_component(m_registry, entity, type_info_ptr->type_index());
-        if (ptr) {
-            present_types.push_back(type_info_ptr);
-        }
-    }
-
-    // Apply custom component order if available
-    apply_component_order(m_registry, entity, present_types);
-
-    for (const auto* type_info_ptr : present_types) {
-        const auto& type_info = *type_info_ptr;
-
-        void* component_ptr = component_registry.get_component(m_registry, entity, type_info.type_index());
-        if (!component_ptr) continue;
-
-        nlohmann::json comp_json;
-        comp_json["type"] = type_info.name();
-        comp_json["data"] = nlohmann::json::object();
-        engine::reflection::serialize_properties(type_info, component_ptr, comp_json["data"]);
-        json["components"].push_back(comp_json);
-    }
-
-    // Scripts (with properties)
-    if (m_registry.all_of<runtime::ScriptComponent>(entity)) {
-        const auto& sc = m_registry.get<runtime::ScriptComponent>(entity);
-        if (!sc.script_types.empty()) {
-            json["scripts"] = nlohmann::json::array();
-            for (size_t i = 0; i < sc.script_types.size(); ++i) {
-                nlohmann::json script_json;
-                script_json["type"] = sc.script_types[i];
-
-                // Get properties from live instance (play mode) or stored data (edit mode)
-                if (i < sc.scripts.size() && sc.scripts[i]) {
-                    nlohmann::json props;
-                    sc.scripts[i]->serialize_properties(props);
-                    script_json["properties"] = props;
-                } else if (i < sc.script_properties.size()) {
-                    script_json["properties"] = sc.script_properties[i];
-                } else {
-                    script_json["properties"] = nlohmann::json::object();
-                }
-
-                json["scripts"].push_back(script_json);
-            }
-        }
-    }
-
-    // Children
-    if (m_registry.all_of<Hierarchy>(entity)) {
-        const auto& hierarchy = m_registry.get<Hierarchy>(entity);
-        if (!hierarchy.children.empty()) {
-            json["children"] = nlohmann::json::array();
-            for (auto child : hierarchy.children) {
-                if (m_registry.valid(child)) {
-                    json["children"].push_back(serialize_entity(child));
-                }
-            }
-        }
-    }
+    serialize_components(entity, json);
+    serialize_scripts(entity, json);
+    serialize_children(entity, json, false);
 
     return json;
 }
@@ -394,11 +488,14 @@ entt::entity SceneSerializer::deserialize_entity(const nlohmann::json& json, ent
     m_registry.emplace<EntityInfo>(entity, info);
 
     m_registry.emplace<Hierarchy>(entity);
-    if (parent != entt::null) {
-        set_parent(m_registry, entity, parent);
-    }
+    // NOTE: set_parent is called AFTER components are deserialized (below)
+    // because set_parent validates screen-space vs world-space matching,
+    // which requires ScreenRect to be present on the entity first.
 
     // Components - deserialize using reflection
+    // Collect deferred entity refs for later resolution
+    std::vector<engine::reflection::DeferredEntityRef> deferred_refs;
+
     if (json.contains("components") && json["components"].is_array()) {
         auto& type_registry = engine::reflection::TypeRegistry::instance();
         auto& component_registry = ComponentTypeRegistry::instance();
@@ -427,7 +524,7 @@ entt::entity SceneSerializer::deserialize_entity(const nlohmann::json& json, ent
                 continue;
             }
 
-            engine::reflection::deserialize_properties(*type_info, component_ptr, data);
+            engine::reflection::deserialize_properties_with_deferred(*type_info, component_ptr, data, &deferred_refs);
         }
     }
 
@@ -444,39 +541,32 @@ entt::entity SceneSerializer::deserialize_entity(const nlohmann::json& json, ent
         m_registry.emplace<engine::Transform>(entity);
     }
 
-    // Scripts (with properties)
-    if (json.contains("scripts") && json["scripts"].is_array()) {
-        auto& sc = m_registry.emplace<runtime::ScriptComponent>(entity);
-        for (const auto& script_json : json["scripts"]) {
-            if (!script_json.is_object()) continue;
-
-            std::string type_name = script_json.value("type", "");
-            nlohmann::json properties = script_json.value("properties", nlohmann::json::object());
-
-            if (!type_name.empty()) {
-                sc.script_types.push_back(type_name);
-                sc.script_properties.push_back(properties);
-            }
-        }
+    // Set parent relationship NOW that components are loaded.
+    // This must happen after ScreenRect is added so screen-space validation works.
+    // Use the engine's set_parent directly (not the editor's world-preserving version)
+    // because we want to keep the local transforms as specified in the serialized data,
+    // not recompute them to preserve world transforms (which are at defaults after deserialization).
+    if (parent != entt::null) {
+        engine::TransformSystem::set_parent(m_registry, entity, parent);
     }
 
-    // Children
-    if (json.contains("children") && json["children"].is_array()) {
-        for (const auto& child_json : json["children"]) {
-            deserialize_entity(child_json, entity);
-        }
-    }
+    deserialize_scripts(entity, json);
+    deserialize_children(entity, json, false);
+    resolve_deferred_refs(entity, parent, deferred_refs);
 
     return entity;
 }
 
 nlohmann::json SceneSerializer::serialize_component(entt::entity entity, const engine::reflection::TypeInfo& type_info, void* component_ptr) const {
+    (void)entity;  // May be used for context in future
     if (!component_ptr) return nlohmann::json();
 
     nlohmann::json json;
     json["type"] = type_info.name();
     json["data"] = nlohmann::json::object();
-    engine::reflection::serialize_properties(type_info, component_ptr, json["data"]);
+
+    auto name_resolver = [this](entt::entity e) -> std::string { return resolve_entity_name(e); };
+    engine::reflection::serialize_properties_with_context(type_info, component_ptr, json["data"], name_resolver);
     return json;
 }
 
@@ -504,6 +594,73 @@ bool SceneSerializer::deserialize_component(entt::entity entity, const nlohmann:
     return true;
 }
 
+nlohmann::json SceneSerializer::serialize_prefab_entity(entt::entity entity) const {
+    nlohmann::json json;
+
+    // Prefab only stores name (no guid, enabled, prefab link, component order)
+    if (m_registry.all_of<EntityInfo>(entity)) {
+        json["name"] = m_registry.get<EntityInfo>(entity).name;
+    } else {
+        json["name"] = "prefab";
+    }
+
+    serialize_components(entity, json);
+    serialize_scripts(entity, json);
+    serialize_children(entity, json, true);
+
+    return json;
+}
+
+entt::entity SceneSerializer::deserialize_prefab_entity(const nlohmann::json& json, entt::entity parent) {
+    if (!json.contains("components") || !json["components"].is_array()) {
+        return entt::null;
+    }
+
+    // Detect if this is a screen-space entity (has ScreenRect component)
+    bool is_screen_entity = false;
+    for (const auto& comp : json["components"]) {
+        if (comp.value("type", "") == "engine::ScreenRect") {
+            is_screen_entity = true;
+            break;
+        }
+    }
+
+    // Create entity with name (screen or world space based on components)
+    std::string name = json.value("name", "prefab");
+    auto entity = is_screen_entity
+        ? create_screen_entity(m_registry, name)
+        : create_entity(m_registry, name);
+
+    // Deserialize components with deferred entity ref support
+    std::vector<engine::reflection::DeferredEntityRef> deferred_refs;
+    auto& type_registry = engine::reflection::TypeRegistry::instance();
+    auto& component_registry = ComponentTypeRegistry::instance();
+
+    for (const auto& comp : json["components"]) {
+        std::string type = comp.value("type", "");
+        const auto& data = comp.value("data", nlohmann::json::object());
+
+        const auto* type_info = type_registry.get_by_name(type);
+        if (!type_info) continue;
+
+        void* component_ptr = component_registry.create_component(m_registry, entity, type_info->type_index());
+        if (!component_ptr) continue;
+
+        engine::reflection::deserialize_properties_with_deferred(*type_info, component_ptr, data, &deferred_refs);
+    }
+
+    // Set parent after components are loaded (ScreenRect must exist for space validation)
+    if (parent != entt::null) {
+        engine::TransformSystem::set_parent(m_registry, entity, parent);
+    }
+
+    deserialize_scripts(entity, json);
+    deserialize_children(entity, json, true);
+    resolve_deferred_refs(entity, parent, deferred_refs);
+
+    return entity;
+}
+
 entt::entity SceneSerializer::load_prefab(const std::filesystem::path& path) {
     try {
         std::ifstream file(path);
@@ -523,24 +680,14 @@ entt::entity SceneSerializer::load_prefab(const std::filesystem::path& path) {
             return entt::null;
         }
 
-        // Detect if this is a screen-space prefab (has ScreenRect component)
-        bool is_screen_prefab = false;
-        for (const auto& comp : json["components"]) {
-            if (comp.value("type", "") == "engine::ScreenRect") {
-                is_screen_prefab = true;
-                break;
-            }
-        }
+        // Deserialize entity hierarchy recursively
+        auto entity = deserialize_prefab_entity(json, entt::null);
 
-        // Create entity with name (screen or world space based on prefab type)
-        std::string name = json.value("name", path.stem().string());
-        auto entity = is_screen_prefab
-            ? create_screen_entity(m_registry, name)
-            : create_entity(m_registry, name);
-
-        // Deserialize each component
-        for (const auto& comp : json["components"]) {
-            deserialize_component(entity, comp);
+        // Mark the root entity as a prefab instance and store the source path
+        if (entity != entt::null && m_registry.all_of<EntityInfo>(entity)) {
+            auto& info = m_registry.get<EntityInfo>(entity);
+            info.prefab_path = path.string();
+            info.is_prefab_instance = true;
         }
 
         update_world_transforms(m_registry);
@@ -562,39 +709,8 @@ bool SceneSerializer::save_prefab(const std::filesystem::path& path, entt::entit
             return false;
         }
 
-        nlohmann::json json;
-
-        if (m_registry.all_of<EntityInfo>(entity)) {
-            json["name"] = m_registry.get<EntityInfo>(entity).name;
-        } else {
-            json["name"] = "prefab";
-        }
-
-        // Serialize components using reflection
-        json["components"] = nlohmann::json::array();
-
-        auto& type_registry = engine::reflection::TypeRegistry::instance();
-        auto& component_registry = ComponentTypeRegistry::instance();
-        const auto& all_types = type_registry.all_types();
-
-        // Respect component order if available
-        std::vector<const engine::reflection::TypeInfo*> present_types;
-        for (const auto* ti : all_types) {
-            if (!ti) continue;
-            void* ptr = component_registry.get_component(m_registry, entity, ti->type_index());
-            if (ptr) {
-                present_types.push_back(ti);
-            }
-        }
-
-        apply_component_order(m_registry, entity, present_types);
-
-        for (const auto* ti : present_types) {
-            void* ptr = component_registry.get_component(m_registry, entity, ti->type_index());
-            if (ptr) {
-                json["components"].push_back(serialize_component(entity, *ti, ptr));
-            }
-        }
+        // Serialize entity with all children recursively
+        nlohmann::json json = serialize_prefab_entity(entity);
 
         std::ofstream file(path);
         if (!file.is_open()) {
@@ -661,6 +777,28 @@ void SceneSerializer::sync_entity_from_prefab(entt::entity target, entt::registr
 
     update_world_transforms(m_registry);
     engine::ScreenRectSystem::update(m_registry, m_settings.reference_width, m_settings.reference_height);
+}
+
+bool SceneSerializer::is_screen_prefab(const std::filesystem::path& prefab_path) {
+    std::ifstream file(prefab_path);
+    if (!file.is_open()) return false;
+
+    nlohmann::json json;
+    try {
+        file >> json;
+    } catch (...) {
+        return false;
+    }
+
+    // Check root entity components for ScreenRect
+    if (json.contains("components")) {
+        for (const auto& comp : json["components"]) {
+            if (comp.contains("type") && comp["type"] == "engine::ScreenRect") {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 }

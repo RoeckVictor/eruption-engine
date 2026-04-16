@@ -21,6 +21,10 @@ namespace animation {
 class AnimationSystem;
 }
 
+namespace ui {
+class UIInteractionSystem;
+}
+
 namespace physics {
 class PhysicsWorld;
 struct Rigidbody;
@@ -132,6 +136,7 @@ private:
     std::unique_ptr<PhysicsPlayback> m_physics_playback;
     std::unique_ptr<SimulationPlayback> m_sim_playback;
     std::unique_ptr<engine::animation::AnimationSystem> m_animation_system;
+    std::unique_ptr<engine::ui::UIInteractionSystem> m_ui_interaction_system;
 
     void init_scripts();
     void shutdown_scripts();

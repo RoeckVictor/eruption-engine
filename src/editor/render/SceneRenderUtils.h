@@ -12,6 +12,8 @@
 #include "editor/core/EditorComponents.h"
 #include "editor/core/CoordinateUtils.h"
 #include "editor/core/EditorPixelGridLoader.h"
+#include "editor/render/EditorTextureCache.h"
+#include "editor/render/EditorTextRenderer.h"
 
 #include <imgui.h>
 #include <entt/entt.hpp>
@@ -282,6 +284,115 @@ inline std::vector<RenderableItem> collect_world_renderables(entt::registry& reg
               });
 
     return items;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Screen-space entity collection (ScreenRect-based UI entities)
+// ─────────────────────────────────────────────────────────────────────────────
+
+struct ScreenRenderEntry {
+    entt::entity entity;
+    int layer;
+    bool has_image;
+    bool has_text;
+};
+
+// Collect all visible ScreenRect entities, sorted by layer.
+// Set skip_empty to true to exclude entities that have neither Image nor Text.
+inline std::vector<ScreenRenderEntry> collect_screen_renderables(
+    entt::registry& registry, bool skip_empty = false)
+{
+    std::vector<ScreenRenderEntry> entries;
+
+    auto view = registry.view<engine::ScreenRect>();
+    for (auto entity : view) {
+        auto& rect = view.get<engine::ScreenRect>(entity);
+
+        if (registry.all_of<EntityInfo>(entity)) {
+            if (!registry.get<EntityInfo>(entity).enabled_in_hierarchy) continue;
+        }
+        if (!rect.enabled) continue;
+
+        bool has_image = registry.all_of<engine::render::Image>(entity);
+        bool has_text  = registry.all_of<engine::render::Text>(entity);
+
+        if (skip_empty && !has_image && !has_text) continue;
+
+        int layer = 0;
+        if (has_image) {
+            layer = registry.get<engine::render::Image>(entity).layer;
+        } else if (has_text) {
+            layer = registry.get<engine::render::Text>(entity).layer;
+        }
+
+        entries.push_back({ entity, layer, has_image, has_text });
+    }
+
+    std::sort(entries.begin(), entries.end(),
+              [](const ScreenRenderEntry& a, const ScreenRenderEntry& b) {
+                  return a.layer < b.layer;
+              });
+
+    return entries;
+}
+
+// Render a screen-space Image entity using a ScreenCanvasTransform.
+inline void render_screen_image(ImDrawList* draw_list,
+                                entt::registry& registry,
+                                EditorTextureCache& tex_cache,
+                                const ScreenCanvasTransform& sct,
+                                entt::entity entity,
+                                ImVec2 canvas_pos, ImVec2 canvas_size)
+{
+    auto& rect  = registry.get<engine::ScreenRect>(entity);
+    auto& image = registry.get<engine::render::Image>(entity);
+    if (!image.enabled) return;
+
+    int tex_w, tex_h;
+    void* texture = tex_cache.get(image.sprite_path, tex_w, tex_h);
+
+    ImVec2 tl = sct.to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
+    ImVec2 br = sct.to_canvas(rect.computed_x + rect.computed_width,
+                              rect.computed_y + rect.computed_height,
+                              canvas_pos, canvas_size);
+
+    auto uv   = compute_image_uv(image);
+    ImU32 tint = compute_image_tint(image);
+
+    draw_list->AddImage(
+        (ImTextureID)(uintptr_t)texture,
+        tl, br,
+        ImVec2(uv.u0, uv.v0), ImVec2(uv.u1, uv.v1),
+        tint
+    );
+}
+
+// Render a screen-space Text entity using a ScreenCanvasTransform.
+inline void render_screen_text(ImDrawList* draw_list,
+                               entt::registry& registry,
+                               EditorTextRenderer* text_renderer,
+                               const ScreenCanvasTransform& sct,
+                               entt::entity entity,
+                               ImVec2 canvas_pos, ImVec2 canvas_size)
+{
+    auto& rect = registry.get<engine::ScreenRect>(entity);
+    auto& text = registry.get<engine::render::Text>(entity);
+    if (!text.enabled) return;
+
+    ImVec2 area_pos  = sct.to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
+    ImVec2 area_size(rect.width * sct.zoom, rect.height * sct.zoom);
+
+    if (text_renderer) {
+        text_renderer->render_in_area(draw_list, text, area_pos, area_size, sct.zoom);
+    } else {
+        ImU32 color = IM_COL32(
+            static_cast<uint8_t>(text.color_r * 255.0f),
+            static_cast<uint8_t>(text.color_g * 255.0f),
+            static_cast<uint8_t>(text.color_b * 255.0f),
+            static_cast<uint8_t>(text.color_a * 255.0f)
+        );
+        draw_list->AddText(area_pos, color, text.content.c_str());
+    }
 }
 
 }

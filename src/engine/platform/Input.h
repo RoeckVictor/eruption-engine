@@ -16,6 +16,7 @@ public:
 
     bool is_mouse_held(MouseButton button) const;
     bool is_mouse_pressed(MouseButton button) const;
+    bool is_mouse_released(MouseButton button) const;
 
     double mouse_x() const { return m_mouse_x; }
     double mouse_y() const { return m_mouse_y; }

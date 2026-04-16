@@ -99,6 +99,23 @@ struct TypeRegistrar {
                 info.add_property(prop); \
             }
 
+/// Reflect an enum property with named values.
+/// Usage: REFLECT_PROPERTY_ENUM(myEnum, "My Enum", "Value0", "Value1", "Value2")
+#define REFLECT_PROPERTY_ENUM(member, displayName, ...) \
+            { \
+                PropertyInfo prop; \
+                prop.name = #member; \
+                prop.display_name = displayName; \
+                REFLECT_OFFSETOF_PUSH \
+                prop.offset = offsetof(CurrentType, member); \
+                REFLECT_OFFSETOF_POP \
+                prop.size = sizeof(CurrentType::member); \
+                prop.type = PropertyType::Enum; \
+                prop.flags = PropertyFlags::None; \
+                prop.enum_names = { __VA_ARGS__ }; \
+                info.add_property(prop); \
+            }
+
 /// End type reflection and register.
 #define REFLECT_TYPE_END() \
         } \

@@ -1,0 +1,149 @@
+{
+  "children": [
+    {
+      "components": [
+        {
+          "data": {
+            "enabled": true,
+            "x": -0.5,
+            "y": 0.0,
+            "rotation": 0.0,
+            "scale_x": 1.0,
+            "scale_y": 0.4
+          },
+          "type": "engine::Transform"
+        },
+        {
+          "data": {
+            "color_a": 1.0,
+            "color_b": 0.8,
+            "color_g": 0.5,
+            "color_r": 0.3,
+            "enabled": true,
+            "flip_x": false,
+            "flip_y": false,
+            "layer": 1,
+            "sprite_path": "",
+            "uv_max_x": 1.0,
+            "uv_max_y": 1.0,
+            "uv_min_x": 0.0,
+            "uv_min_y": 0.0
+          },
+          "type": "engine::render::Image"
+        }
+      ],
+      "name": "Fill"
+    },
+    {
+      "components": [
+        {
+          "data": {
+            "enabled": true,
+            "x": 0.0,
+            "y": 0.0,
+            "rotation": 0.0,
+            "scale_x": 0.0667,
+            "scale_y": 1.0
+          },
+          "type": "engine::Transform"
+        },
+        {
+          "data": {
+            "color_a": 1.0,
+            "color_b": 0.6,
+            "color_g": 0.6,
+            "color_r": 0.6,
+            "enabled": true,
+            "flip_x": false,
+            "flip_y": false,
+            "layer": 2,
+            "sprite_path": "",
+            "uv_max_x": 1.0,
+            "uv_max_y": 1.0,
+            "uv_min_x": 0.0,
+            "uv_min_y": 0.0
+          },
+          "type": "engine::render::Image"
+        },
+        {
+          "data": {
+            "disabled_color": [0.5, 0.5, 0.5, 0.5],
+            "disabled_sprite": "",
+            "enabled": true,
+            "hovered_color": [0.75, 0.75, 0.75, 1.0],
+            "hovered_sprite": "",
+            "interactable": true,
+            "normal_color": [1.0, 1.0, 1.0, 1.0],
+            "normal_sprite": "",
+            "pressed_color": [0.5, 0.5, 0.5, 1.0],
+            "pressed_sprite": "",
+            "transition_mode": 1
+          },
+          "type": "engine::ui::UIInteractable"
+        }
+      ],
+      "name": "Handle"
+    }
+  ],
+  "components": [
+    {
+      "data": {
+        "enabled": true,
+        "x": 0.0,
+        "y": 0.0,
+        "rotation": 0.0,
+        "scale_x": 90.0,
+        "scale_y": 10.0
+      },
+      "type": "engine::Transform"
+    },
+    {
+      "data": {
+        "color_a": 1.0,
+        "color_b": 0.25,
+        "color_g": 0.25,
+        "color_r": 0.25,
+        "enabled": true,
+        "flip_x": false,
+        "flip_y": false,
+        "layer": 0,
+        "sprite_path": "",
+        "uv_max_x": 1.0,
+        "uv_max_y": 1.0,
+        "uv_min_x": 0.0,
+        "uv_min_y": 0.0
+      },
+      "type": "engine::render::Image"
+    },
+    {
+      "data": {
+        "disabled_color": [0.5, 0.5, 0.5, 0.5],
+        "disabled_sprite": "",
+        "enabled": true,
+        "hovered_color": [1.0, 1.0, 1.0, 1.0],
+        "hovered_sprite": "",
+        "interactable": true,
+        "normal_color": [1.0, 1.0, 1.0, 1.0],
+        "normal_sprite": "",
+        "pressed_color": [1.0, 1.0, 1.0, 1.0],
+        "pressed_sprite": "",
+        "transition_mode": 0
+      },
+      "type": "engine::ui::UIInteractable"
+    },
+    {
+      "data": {
+        "direction": 0,
+        "enabled": true,
+        "fill_rect": "Fill",
+        "handle": "Handle",
+        "max_value": 1.0,
+        "min_value": 0.0,
+        "value": 0.5,
+        "whole_numbers": false
+      },
+      "type": "engine::ui::Slider"
+    }
+  ],
+  "name": "Slider"
+}

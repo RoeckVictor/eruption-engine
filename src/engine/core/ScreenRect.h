@@ -33,6 +33,10 @@ struct ScreenRect {
     float computed_y = 0.0f;      // Final Y position on screen
     float computed_width = 100.0f;  // Final width
     float computed_height = 100.0f; // Final height
+
+    // Clipping - if set, this entity's rendering is clipped to the specified entity's bounds.
+    // Runtime-only: set programmatically by systems (e.g., ScrollView). Not serialized via reflection.
+    entt::entity clip_to = entt::null;
 };
 
 } // namespace engine

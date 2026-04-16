@@ -61,6 +61,7 @@ private:
         float origin_x, float origin_y,
         float rotation,  // degrees (world space only)
         bool is_screen_space,
+        float area_width, float area_height,  // for screen-space alignment
         std::vector<TextVertex>& out_vertices
     );
 };

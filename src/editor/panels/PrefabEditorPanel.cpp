@@ -11,20 +11,26 @@
 #include "engine/core/MathConstants.h"
 #include "engine/core/Transform.h"
 #include "engine/core/TransformSystem.h"
+#include "engine/core/ScreenRect.h"
+#include "engine/core/ScreenRectSystem.h"
 #include "engine/core/Logger.h"
 #include "engine/simulation/PixelGridComponent.h"
 #include "engine/simulation/MaterialLibrary.h"
 #include "engine/render/PixelGridRenderer.h"
 #include "engine/render/Camera2D.h"
+#include "engine/render/Image.h"
+#include "engine/render/Text.h"
 #include "engine/physics/Colliders.h"
 #include "engine/asset/PixelGridFile.h"
 #include "engine/asset/PxgDataParser.h"
+#include "engine/core/Engine.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 
 namespace editor {
 
@@ -96,6 +102,10 @@ void PrefabEditorPanel::open_prefab(const std::string& path) {
         m_prefab_registry.clear();
         m_selection.clear();
         m_grid_textures.clear();
+        m_is_screen_prefab = false;
+        m_is_panning = false;
+        m_is_dragging = false;
+        m_drag_entity = entt::null;
 
         if (load_prefab_file(path)) {
             m_prefab_path = path;
@@ -124,10 +134,6 @@ void PrefabEditorPanel::open_prefab(const std::string& path) {
         do_open();
     }
 }
-
-// ---------------------------------------------------------------------------
-// Toolbar
-// ---------------------------------------------------------------------------
 
 void PrefabEditorPanel::render_toolbar() {
     // Save button
@@ -194,11 +200,15 @@ void PrefabEditorPanel::render_toolbar() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Viewport
-// ---------------------------------------------------------------------------
-
 void PrefabEditorPanel::render_viewport() {
+    if (m_is_screen_prefab) {
+        render_screen_viewport();
+    } else {
+        render_world_viewport();
+    }
+}
+
+void PrefabEditorPanel::render_world_viewport() {
     ImVec2 avail = ImGui::GetContentRegionAvail();
 
     // Invisible button to capture input - fills all remaining space
@@ -416,10 +426,6 @@ void PrefabEditorPanel::render_gizmos(ImDrawList* draw_list, ImVec2 vp_pos, ImVe
     );
 }
 
-// ---------------------------------------------------------------------------
-// Input
-// ---------------------------------------------------------------------------
-
 void PrefabEditorPanel::handle_viewport_input() {
     m_camera.handle_input();
 }
@@ -428,7 +434,8 @@ void PrefabEditorPanel::activate_editing_override() {
     m_main_context.set_editing_override({
         &m_prefab_registry,
         &m_selection,
-        [this]() { m_dirty = true; }
+        [this]() { m_dirty = true; },
+        [this]() { return save_prefab_file(); }
     });
 }
 
@@ -466,29 +473,42 @@ void PrefabEditorPanel::confirm_prefab_discard_or_save(std::function<void()> act
     m_show_unsaved_dialog = true;
 }
 
-// ---------------------------------------------------------------------------
-// Prefab I/O
-// ---------------------------------------------------------------------------
-
 bool PrefabEditorPanel::load_prefab_file(const std::string& path) {
     SceneSerializer serializer(m_prefab_registry);
     entt::entity entity = serializer.load_prefab(path);
-    return entity != entt::null;
+
+    if (entity == entt::null) {
+        return false;
+    }
+
+    // Detect if this is a screen-space prefab (root has ScreenRect)
+    m_is_screen_prefab = m_prefab_registry.all_of<engine::ScreenRect>(entity);
+
+    // Reset viewport state based on prefab type
+    if (m_is_screen_prefab) {
+        m_canvas.zoom = 0.0f;  // Signal to fit on first frame
+        m_canvas.pan_x = 0.0f;
+        m_canvas.pan_y = 0.0f;
+    }
+
+    return true;
 }
 
 bool PrefabEditorPanel::save_prefab_file() {
     if (m_prefab_path.empty()) return false;
 
-    // Find the root entity (first entity with EntityInfo)
-    entt::entity root = entt::null;
-    auto view = m_prefab_registry.view<EntityInfo>();
-    if (view.begin() != view.end()) {
-        root = *view.begin();
-    }
-
-    if (root == entt::null) {
+    // Find the actual root entity (entity with no parent in the hierarchy)
+    auto roots = get_root_entities(m_prefab_registry);
+    if (roots.empty()) {
         engine::Logger::instance().error("PrefabEditor", "No entity to save");
         return false;
+    }
+
+    // A prefab should have exactly one root entity
+    entt::entity root = roots.front();
+    if (roots.size() > 1) {
+        engine::Logger::instance().warning("PrefabEditor",
+            "Prefab has multiple root entities, saving only the first one");
     }
 
     SceneSerializer serializer(m_prefab_registry);
@@ -503,6 +523,258 @@ bool PrefabEditorPanel::save_prefab_file() {
     }
 
     return false;
+}
+
+void PrefabEditorPanel::render_screen_viewport() {
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+
+    // Invisible button to capture input
+    ImVec2 viewport_start = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("##PrefabScreenViewport", avail,
+        ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
+    bool viewport_hovered = ImGui::IsItemHovered();
+
+    m_viewport_pos = viewport_start;
+    m_viewport_size = avail;
+
+    if (m_canvas.zoom <= 0.0f) {
+        fit_screen_to_canvas();
+    }
+
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+    ImVec2 clip_max(m_viewport_pos.x + m_viewport_size.x, m_viewport_pos.y + m_viewport_size.y);
+    draw_list->PushClipRect(m_viewport_pos, clip_max, true);
+
+    draw_list->AddRectFilled(m_viewport_pos, clip_max, IM_COL32(30, 30, 38, 255));
+
+    engine::ScreenRectSystem::update(m_prefab_registry, m_canvas.ref_width, m_canvas.ref_height);
+
+    ImVec2 ref_tl = m_canvas.to_canvas(0, 0, m_viewport_pos, m_viewport_size);
+    ImVec2 ref_br = m_canvas.to_canvas(m_canvas.ref_width, m_canvas.ref_height, m_viewport_pos, m_viewport_size);
+    draw_list->AddRect(ref_tl, ref_br, IM_COL32(100, 100, 100, 150), 0.0f, 0, 2.0f);
+
+    render_screen_entities(draw_list, m_viewport_pos, m_viewport_size);
+
+    char info[128];
+    snprintf(info, sizeof(info), "Zoom: %.0f%%", m_canvas.zoom * 100.0f);
+    draw_list->AddText(ImVec2(m_viewport_pos.x + 8, m_viewport_pos.y + 8),
+                       IM_COL32(180, 180, 180, 180), info);
+
+    draw_list->PopClipRect();
+
+    if (viewport_hovered) {
+        handle_screen_input();
+    }
+}
+
+void PrefabEditorPanel::render_screen_entities(ImDrawList* draw_list, ImVec2 canvas_pos, ImVec2 canvas_size) {
+    ensure_text_renderer();
+    auto entries = collect_screen_renderables(m_prefab_registry);
+
+    for (const auto& entry : entries) {
+        auto& rect = m_prefab_registry.get<engine::ScreenRect>(entry.entity);
+        bool is_selected = std::find(m_selection.begin(), m_selection.end(), entry.entity) != m_selection.end();
+
+        if (entry.has_image) {
+            render_screen_image(draw_list, m_prefab_registry, m_image_textures, m_canvas,
+                                entry.entity, canvas_pos, canvas_size);
+        }
+
+        if (entry.has_text) {
+            render_screen_text(draw_list, m_prefab_registry, m_text_renderer.get(), m_canvas,
+                               entry.entity, canvas_pos, canvas_size);
+        }
+
+        // Placeholder for entities without Image or Text
+        if (!entry.has_image && !entry.has_text) {
+            ImVec2 tl = m_canvas.to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
+            ImVec2 br = m_canvas.to_canvas(
+                rect.computed_x + rect.computed_width,
+                rect.computed_y + rect.computed_height,
+                canvas_pos, canvas_size
+            );
+
+            ImU32 fill_color = is_selected ? IM_COL32(100, 150, 200, 60) : IM_COL32(80, 80, 100, 40);
+            ImU32 border_color = is_selected ? IM_COL32(100, 180, 255, 255) : IM_COL32(120, 120, 140, 180);
+
+            draw_list->AddRectFilled(tl, br, fill_color);
+            draw_list->AddRect(tl, br, border_color, 0.0f, 0, is_selected ? 2.0f : 1.0f);
+
+            if (m_prefab_registry.all_of<EntityInfo>(entry.entity)) {
+                const auto& info = m_prefab_registry.get<EntityInfo>(entry.entity);
+                ImVec2 text_pos(tl.x + 4, tl.y + 2);
+                draw_list->AddText(text_pos, IM_COL32(200, 200, 200, 200), info.name.c_str());
+            }
+        }
+
+        // Selection outline and anchor
+        if (is_selected) {
+            ImVec2 tl = m_canvas.to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
+            ImVec2 br = m_canvas.to_canvas(
+                rect.computed_x + rect.computed_width,
+                rect.computed_y + rect.computed_height,
+                canvas_pos, canvas_size
+            );
+
+            draw_list->AddRect(tl, br, IM_COL32(100, 180, 255, 255), 0.0f, 0, 2.0f);
+
+            ImVec2 anchor_pos = m_canvas.to_canvas(
+                rect.computed_x + rect.pivot_x * rect.computed_width,
+                rect.computed_y + rect.pivot_y * rect.computed_height,
+                canvas_pos, canvas_size
+            );
+            draw_list->AddCircleFilled(anchor_pos, 4.0f, IM_COL32(255, 200, 100, 200));
+            draw_list->AddCircle(anchor_pos, 4.0f, IM_COL32(255, 255, 255, 255), 12, 1.0f);
+        }
+    }
+}
+
+void PrefabEditorPanel::ensure_text_renderer() {
+    if (m_text_renderer) return;
+
+    auto* runtime = m_main_context.runtime();
+    if (!runtime) return;
+
+    auto* eng = runtime->engine();
+    if (!eng) return;
+
+    m_text_renderer = std::make_unique<EditorTextRenderer>(eng->assets());
+}
+
+void PrefabEditorPanel::handle_screen_input() {
+    ImGuiIO& io = ImGui::GetIO();
+
+    ImVec2 mouse_pos = io.MousePos;
+    ImVec2 local_mouse(mouse_pos.x - m_viewport_pos.x, mouse_pos.y - m_viewport_pos.y);
+
+    float screen_x, screen_y;
+    m_canvas.to_screen(local_mouse, m_viewport_size, screen_x, screen_y);
+
+    // Zoom with mouse wheel
+    if (io.MouseWheel != 0.0f) {
+        float zoom_factor = 1.1f;
+        if (io.MouseWheel > 0) {
+            m_canvas.zoom *= zoom_factor;
+        } else {
+            m_canvas.zoom /= zoom_factor;
+        }
+        m_canvas.zoom = std::clamp(m_canvas.zoom, 0.1f, 10.0f);
+    }
+
+    // Reset with Home key
+    if (ImGui::IsKeyPressed(ImGuiKey_Home)) {
+        fit_screen_to_canvas();
+    }
+
+    // Pan with middle mouse button
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
+        m_is_panning = true;
+        m_pan_start_mouse_x = io.MousePos.x;
+        m_pan_start_mouse_y = io.MousePos.y;
+        m_pan_start_offset_x = m_canvas.pan_x;
+        m_pan_start_offset_y = m_canvas.pan_y;
+    }
+
+    if (m_is_panning) {
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
+            float scale = m_canvas.zoom;
+            float dx = io.MousePos.x - m_pan_start_mouse_x;
+            float dy = io.MousePos.y - m_pan_start_mouse_y;
+            m_canvas.pan_x = m_pan_start_offset_x - dx / scale;
+            m_canvas.pan_y = m_pan_start_offset_y - dy / scale;
+        } else {
+            m_is_panning = false;
+        }
+    }
+
+    // Entity dragging
+    if (m_is_dragging) {
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            if (m_prefab_registry.valid(m_drag_entity) && m_prefab_registry.all_of<engine::ScreenRect>(m_drag_entity)) {
+                auto& rect = m_prefab_registry.get<engine::ScreenRect>(m_drag_entity);
+
+                float dx = screen_x - m_drag_start_x;
+                float dy = screen_y - m_drag_start_y;
+
+                rect.offset_x = m_entity_start_offset_x + dx;
+                rect.offset_y = m_entity_start_offset_y + dy;
+
+                m_dirty = true;
+            }
+        } else {
+            m_is_dragging = false;
+            m_drag_entity = entt::null;
+        }
+        return;
+    }
+
+    // Click to select
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !m_is_panning) {
+        entt::entity hit_entity = entt::null;
+        int hit_layer = std::numeric_limits<int>::min();
+
+        auto view = m_prefab_registry.view<engine::ScreenRect>();
+        for (auto entity : view) {
+            auto& rect = view.get<engine::ScreenRect>(entity);
+
+            if (m_prefab_registry.all_of<EntityInfo>(entity)) {
+                if (!m_prefab_registry.get<EntityInfo>(entity).enabled_in_hierarchy) continue;
+            }
+            if (!rect.enabled) continue;
+
+            if (screen_x >= rect.computed_x &&
+                screen_x <= rect.computed_x + rect.computed_width &&
+                screen_y >= rect.computed_y &&
+                screen_y <= rect.computed_y + rect.computed_height) {
+                // Pick the entity with the highest layer (topmost visually)
+                int layer = 0;
+                if (m_prefab_registry.all_of<engine::render::Image>(entity)) {
+                    layer = m_prefab_registry.get<engine::render::Image>(entity).layer;
+                } else if (m_prefab_registry.all_of<engine::render::Text>(entity)) {
+                    layer = m_prefab_registry.get<engine::render::Text>(entity).layer;
+                }
+                if (hit_entity == entt::null || layer >= hit_layer) {
+                    hit_entity = entity;
+                    hit_layer = layer;
+                }
+            }
+        }
+
+        if (hit_entity != entt::null) {
+            bool already_selected = std::find(m_selection.begin(), m_selection.end(), hit_entity) != m_selection.end();
+
+            if (io.KeyCtrl) {
+                if (already_selected) {
+                    m_selection.erase(std::remove(m_selection.begin(), m_selection.end(), hit_entity), m_selection.end());
+                } else {
+                    m_selection.push_back(hit_entity);
+                }
+            } else if (io.KeyShift) {
+                if (!already_selected) {
+                    m_selection.push_back(hit_entity);
+                }
+            } else {
+                m_selection.clear();
+                m_selection.push_back(hit_entity);
+            }
+
+            // Start dragging
+            if (std::find(m_selection.begin(), m_selection.end(), hit_entity) != m_selection.end()) {
+                m_is_dragging = true;
+                m_drag_entity = hit_entity;
+                m_drag_start_x = screen_x;
+                m_drag_start_y = screen_y;
+                auto& rect = m_prefab_registry.get<engine::ScreenRect>(hit_entity);
+                m_entity_start_offset_x = rect.offset_x;
+                m_entity_start_offset_y = rect.offset_y;
+            }
+        } else {
+            if (!io.KeyCtrl && !io.KeyShift) {
+                m_selection.clear();
+            }
+        }
+    }
 }
 
 }

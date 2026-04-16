@@ -12,6 +12,7 @@
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
 #include "engine/simulation/SimSurface.h"
+#include "engine/ui/UIComponents.h"
 #include "engine/core/Logger.h"
 
 namespace engine::animation {

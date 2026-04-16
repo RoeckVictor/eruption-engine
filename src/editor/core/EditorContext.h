@@ -48,6 +48,7 @@ struct EditingOverride {
     entt::registry* registry = nullptr;
     std::vector<entt::entity>* selection = nullptr;
     std::function<void()> mark_dirty;
+    std::function<bool()> save;
 };
 
 // Main editor context that coordinates all editor subsystems
@@ -76,6 +77,7 @@ public:
     void set_editing_override(const EditingOverride& override);
     void clear_editing_override();
     bool has_editing_override() const { return m_editing_override.registry != nullptr; }
+    bool try_save_override() { return m_editing_override.save && m_editing_override.save(); }
 
     CommandHistory& history() { return m_history; }
     const CommandHistory& history() const { return m_history; }

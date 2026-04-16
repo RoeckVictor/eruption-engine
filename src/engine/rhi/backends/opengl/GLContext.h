@@ -17,6 +17,7 @@ public:
 
     void set_viewport(int x, int y, int w, int h) override;
     void set_scissor(int x, int y, int w, int h) override;
+    void enable_scissor_test(bool enable) override;
     void clear(float r, float g, float b, float a = 1.0f) override;
     void clear_depth(float depth = 1.0f) override;
     void clear_stencil(int stencil = 0) override;

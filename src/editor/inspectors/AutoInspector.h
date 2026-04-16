@@ -29,6 +29,7 @@ private:
     static bool draw_vec3(const engine::reflection::PropertyInfo& prop, void* instance);
     static bool draw_color(const engine::reflection::PropertyInfo& prop, void* instance);
     static bool draw_enum(const engine::reflection::PropertyInfo& prop, void* instance);
+    static bool draw_entity_ref(const engine::reflection::PropertyInfo& prop, void* instance);
 
     static bool try_record(const std::string& prop_name,
                            const engine::animation::PropertyValue& value,

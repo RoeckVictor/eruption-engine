@@ -18,41 +18,56 @@ class EditorTextRenderer {
 public:
     explicit EditorTextRenderer(engine::asset::AssetDatabase& assets);
 
-    /// Render text at a position using ImGui draw list with DynamicFont glyphs.
-    /// @param draw_list ImGui draw list to render to
-    /// @param text Text component with font_path, content, color, etc.
-    /// @param pos Screen position (top-left)
-    /// @param scale Scale factor for the text (1.0 = use text.font_size directly)
     void render(ImDrawList* draw_list,
                 const engine::render::Text& text,
                 ImVec2 pos,
                 float scale = 1.0f);
 
-    /// Render text centered at a position.
-    /// @param draw_list ImGui draw list to render to
-    /// @param text Text component with font_path, content, color, etc.
-    /// @param center Screen position (center of text)
-    /// @param scale Scale factor for the text (1.0 = use text.font_size directly)
+    void render_in_area(ImDrawList* draw_list,
+                        const engine::render::Text& text,
+                        ImVec2 area_pos,
+                        ImVec2 area_size,
+                        float scale = 1.0f);
+
     void render_centered(ImDrawList* draw_list,
                          const engine::render::Text& text,
                          ImVec2 center,
                          float scale = 1.0f);
 
-    /// Measure the bounds of text (width, height).
-    /// @param text Text component
-    /// @param scale Scale factor
-    /// @return Size of the text bounds
     ImVec2 measure_text(const engine::render::Text& text, float scale = 1.0f);
 
-    /// Clear the font cache.
     void clear_cache();
 
 private:
     engine::asset::AssetDatabase& m_assets;
     std::unordered_map<std::string, engine::asset::Handle<engine::render::DynamicFont>> m_font_cache;
 
-    /// Get or load a font.
     engine::render::DynamicFont* get_font(const std::string& font_path);
+
+    // Shared text layout data
+    struct LayoutLine {
+        size_t start;
+        size_t end;
+        float width;
+    };
+
+    struct TextLayout {
+        engine::render::DynamicFont* font = nullptr;
+        int atlas_size = 0;
+        engine::render::SizedAtlas* atlas = nullptr;
+        float render_scale = 1.0f;
+        float line_height_px = 0.0f;
+        std::vector<uint32_t> codepoints;
+        std::vector<LayoutLine> lines;
+        ImU32 color = 0;
+    };
+
+    // Compute layout (font, lines, color) shared between render() and render_in_area()
+    bool compute_layout(const engine::render::Text& text, float scale, TextLayout& out);
+
+    // Render glyphs for a single line at cursor_x/cursor_y, returns updated cursor_x
+    void render_glyphs(ImDrawList* draw_list, const TextLayout& layout, ImTextureID tex_id,
+                       const LayoutLine& line, float cursor_x, float cursor_y);
 };
 
-} // namespace editor
+}

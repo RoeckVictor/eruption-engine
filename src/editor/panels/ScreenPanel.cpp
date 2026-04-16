@@ -2,6 +2,7 @@
 #include "editor/core/EditorContext.h"
 #include "editor/core/EditorComponents.h"
 #include "editor/core/RuntimeContext.h"
+#include "editor/serialization/SceneSerializer.h"
 #include "editor/render/SceneRenderUtils.h"
 #include "engine/core/ScreenRect.h"
 #include "engine/core/Logger.h"
@@ -16,6 +17,8 @@
 #include <imgui.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <filesystem>
 
 namespace editor {
 
@@ -34,7 +37,7 @@ ScreenPanel::~ScreenPanel() {
 
 void ScreenPanel::on_open() {
     // Will fit to canvas once framebuffer is created
-    m_zoom = 0.0f;  // Signal to fit on first frame
+    m_canvas.zoom = 0.0f;  // Signal to fit on first frame
 }
 
 void ScreenPanel::on_close() {
@@ -65,7 +68,7 @@ void ScreenPanel::on_gui() {
         destroy_framebuffer();
         create_framebuffer(m_resize_debouncer.target_width(), m_resize_debouncer.target_height());
         // Fit to canvas on first creation
-        if (was_first_create || m_zoom <= 0.0f) {
+        if (was_first_create || m_canvas.zoom <= 0.0f) {
             fit_to_canvas();
         }
     }
@@ -88,6 +91,54 @@ void ScreenPanel::on_gui() {
     ImVec2 canvas_pos = ImGui::GetItemRectMin();
     ImVec2 canvas_size = ImGui::GetItemRectSize();
 
+    // Handle prefab drag-drop onto screen panel
+    if (ImGui::BeginDragDropTarget()) {
+        // Peek for feedback
+        if (const ImGuiPayload* peek = ImGui::GetDragDropPayload()) {
+            if (peek->IsDataType("ASSET_PATH")) {
+                std::string path(static_cast<const char*>(peek->Data));
+                std::filesystem::path fs_path(path);
+                if (fs_path.extension() == ".prefab") {
+                    if (!SceneSerializer::is_screen_prefab(fs_path)) {
+                        ImGui::SetTooltip("Cannot drop world prefab in screen panel");
+                    }
+                }
+            }
+        }
+
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_PATH")) {
+            std::string path(static_cast<const char*>(payload->Data));
+            std::filesystem::path fs_path(path);
+            if (fs_path.extension() == ".prefab") {
+                if (SceneSerializer::is_screen_prefab(fs_path)) {
+                    auto* registry = m_context.registry();
+                    if (registry) {
+                        // Calculate screen position from mouse position
+                        ImVec2 mouse = ImGui::GetMousePos();
+                        ImVec2 local_mouse = ImVec2(mouse.x - canvas_pos.x, mouse.y - canvas_pos.y);
+                        float screen_x, screen_y;
+                        m_canvas.to_screen(local_mouse, canvas_size, screen_x, screen_y);
+
+                        // Load prefab
+                        SceneSerializer serializer(*registry);
+                        entt::entity e = serializer.load_prefab(fs_path);
+                        if (e != entt::null) {
+                            // Set position via offset (offset is relative to anchor position)
+                            if (registry->all_of<engine::ScreenRect>(e)) {
+                                auto& rect = registry->get<engine::ScreenRect>(e);
+                                rect.offset_x = screen_x - rect.anchor_x * m_canvas.ref_width + rect.pivot_x * rect.width;
+                                rect.offset_y = screen_y - rect.anchor_y * m_canvas.ref_height + rect.pivot_y * rect.height;
+                            }
+                            m_context.selection().select(e);
+                            m_context.scene_state().mark_dirty();
+                        }
+                    }
+                }
+            }
+        }
+        ImGui::EndDragDropTarget();
+    }
+
     // Handle input when hovered
     if (ImGui::IsItemHovered()) {
         handle_input(canvas_pos, canvas_size);
@@ -100,7 +151,7 @@ void ScreenPanel::on_gui() {
 
     // Draw zoom info
     char info[128];
-    snprintf(info, sizeof(info), "Zoom: %.0f%%", m_zoom * 100.0f);
+    snprintf(info, sizeof(info), "Zoom: %.0f%%", m_canvas.zoom * 100.0f);
     draw_list->AddText(
         ImVec2(canvas_pos.x + 10, canvas_pos.y + 10),
         IM_COL32(200, 200, 200, 200),
@@ -136,9 +187,8 @@ void ScreenPanel::render_toolbar() {
             bool is_selected = (m_resolution_index == i);
             if (ImGui::Selectable(RESOLUTIONS[i].name, is_selected)) {
                 m_resolution_index = i;
-                m_ref_width = RESOLUTIONS[i].width;
-                m_ref_height = RESOLUTIONS[i].height;
-                // Fit the new resolution to canvas
+                m_canvas.ref_width = RESOLUTIONS[i].width;
+                m_canvas.ref_height = RESOLUTIONS[i].height;
                 fit_to_canvas();
             }
             if (is_selected) {
@@ -165,9 +215,7 @@ void ScreenPanel::render_toolbar() {
 
     // Reset view button (1:1 pixel mode)
     if (ImGui::Button("1:1")) {
-        m_zoom = 1.0f;
-        m_pan_x = 0.0f;
-        m_pan_y = 0.0f;
+        m_canvas.reset();
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("View at 100%% zoom (1 pixel = 1 pixel)");
@@ -177,8 +225,8 @@ void ScreenPanel::render_toolbar() {
 
     // Reset pan only
     if (ImGui::Button("Center")) {
-        m_pan_x = 0.0f;
-        m_pan_y = 0.0f;
+        m_canvas.pan_x = 0.0f;
+        m_canvas.pan_y = 0.0f;
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Center view (Home)");
@@ -252,117 +300,40 @@ void ScreenPanel::render_scene() {
     ctx->bind_framebuffer(nullptr);
 }
 
-ImVec2 ScreenPanel::screen_to_canvas(float sx, float sy, ImVec2 canvas_pos, ImVec2 canvas_size) const {
-    // Pixel-accurate mode: zoom 1.0 = 1 reference pixel = 1 canvas pixel
-    float scale = m_zoom;
-
-    // Center of the canvas
-    float center_x = canvas_pos.x + canvas_size.x * 0.5f;
-    float center_y = canvas_pos.y + canvas_size.y * 0.5f;
-
-    // Transform: screen coord relative to reference center, then apply scale and pan
-    float ref_center_x = m_ref_width * 0.5f;
-    float ref_center_y = m_ref_height * 0.5f;
-
-    float canvas_x = center_x + ((sx - ref_center_x) - m_pan_x) * scale;
-    float canvas_y = center_y + ((sy - ref_center_y) - m_pan_y) * scale;
-
-    return ImVec2(canvas_x, canvas_y);
-}
-
-void ScreenPanel::canvas_to_screen(ImVec2 canvas_mouse, ImVec2 canvas_size, float& out_sx, float& out_sy) const {
-    // Pixel-accurate mode: zoom 1.0 = 1 reference pixel = 1 canvas pixel
-    float scale = m_zoom;
-
-    // Center of the canvas
-    float center_x = canvas_size.x * 0.5f;
-    float center_y = canvas_size.y * 0.5f;
-
-    // Reference center
-    float ref_center_x = m_ref_width * 0.5f;
-    float ref_center_y = m_ref_height * 0.5f;
-
-    // Reverse transform
-    out_sx = ((canvas_mouse.x - center_x) / scale) + m_pan_x + ref_center_x;
-    out_sy = ((canvas_mouse.y - center_y) / scale) + m_pan_y + ref_center_y;
-}
-
-void ScreenPanel::fit_to_canvas() {
-    // Calculate zoom to fit reference rect in current canvas
-    if (m_canvas_width <= 0 || m_canvas_height <= 0) return;
-
-    float scale_x = static_cast<float>(m_canvas_width) / m_ref_width;
-    float scale_y = static_cast<float>(m_canvas_height) / m_ref_height;
-    m_zoom = std::min(scale_x, scale_y) * 0.95f;  // 95% to leave a small margin
-    m_pan_x = 0.0f;
-    m_pan_y = 0.0f;
-}
-
 void ScreenPanel::render_entities(ImDrawList* draw_list, ImVec2 canvas_pos, ImVec2 canvas_size) {
     auto* registry = m_context.registry();
     if (!registry) return;
 
+    // Update screen rects using reference resolution
+    update_screen_rects(*registry, m_canvas.ref_width, m_canvas.ref_height);
+
     // Draw reference screen bounds
-    ImVec2 ref_tl = screen_to_canvas(0, 0, canvas_pos, canvas_size);
-    ImVec2 ref_br = screen_to_canvas(m_ref_width, m_ref_height, canvas_pos, canvas_size);
+    ImVec2 ref_tl = m_canvas.to_canvas(0, 0, canvas_pos, canvas_size);
+    ImVec2 ref_br = m_canvas.to_canvas(m_canvas.ref_width, m_canvas.ref_height, canvas_pos, canvas_size);
     draw_list->AddRect(ref_tl, ref_br, IM_COL32(100, 100, 100, 150), 0.0f, 0, 2.0f);
 
-    // Collect and sort entities by layer for proper rendering order
-    struct RenderEntry {
-        entt::entity entity;
-        int layer;
-        bool has_image;
-        bool has_text;
-    };
-    std::vector<RenderEntry> entries;
+    // Collect and sort entities by layer
+    ensure_text_renderer();
+    auto entries = collect_screen_renderables(*registry);
 
-    auto view = registry->view<engine::ScreenRect>();
-    for (auto entity : view) {
-        auto& rect = view.get<engine::ScreenRect>(entity);
-
-        // Skip disabled entities
-        if (registry->all_of<EntityInfo>(entity)) {
-            if (!registry->get<EntityInfo>(entity).enabled_in_hierarchy) continue;
-        }
-        if (!rect.enabled) continue;
-
-        bool has_image = registry->all_of<engine::render::Image>(entity);
-        bool has_text = registry->all_of<engine::render::Text>(entity);
-
-        int layer = 0;
-        if (has_image) {
-            layer = registry->get<engine::render::Image>(entity).layer;
-        } else if (has_text) {
-            layer = registry->get<engine::render::Text>(entity).layer;
-        }
-
-        entries.push_back({ entity, layer, has_image, has_text });
-    }
-
-    // Sort by layer (ascending)
-    std::sort(entries.begin(), entries.end(), [](const RenderEntry& a, const RenderEntry& b) {
-        return a.layer < b.layer;
-    });
-
-    // Render entities in layer order
     for (const auto& entry : entries) {
         auto& rect = registry->get<engine::ScreenRect>(entry.entity);
         bool is_selected = m_context.selection().is_selected(entry.entity);
 
-        // Render Image component if present
         if (entry.has_image) {
-            render_image_entity(draw_list, entry.entity, canvas_pos, canvas_size);
+            render_screen_image(draw_list, *registry, m_image_textures, m_canvas,
+                                entry.entity, canvas_pos, canvas_size);
         }
 
-        // Render Text component if present
         if (entry.has_text) {
-            render_text_entity(draw_list, entry.entity, canvas_pos, canvas_size);
+            render_screen_text(draw_list, *registry, m_text_renderer.get(), m_canvas,
+                               entry.entity, canvas_pos, canvas_size);
         }
 
-        // If entity has neither Image nor Text, draw a placeholder box
+        // Placeholder for entities without Image or Text
         if (!entry.has_image && !entry.has_text) {
-            ImVec2 tl = screen_to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
-            ImVec2 br = screen_to_canvas(
+            ImVec2 tl = m_canvas.to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
+            ImVec2 br = m_canvas.to_canvas(
                 rect.computed_x + rect.computed_width,
                 rect.computed_y + rect.computed_height,
                 canvas_pos, canvas_size
@@ -373,29 +344,19 @@ void ScreenPanel::render_entities(ImDrawList* draw_list, ImVec2 canvas_pos, ImVe
 
             draw_list->AddRectFilled(tl, br, fill_color);
             draw_list->AddRect(tl, br, border_color, 0.0f, 0, is_selected ? 2.0f : 1.0f);
-
-            // Draw entity name for placeholders
-            if (registry->all_of<EntityInfo>(entry.entity)) {
-                const auto& info = registry->get<EntityInfo>(entry.entity);
-                ImVec2 text_pos(tl.x + 4, tl.y + 2);
-                draw_list->AddText(text_pos, IM_COL32(200, 200, 200, 200), info.name.c_str());
-            }
         }
 
-        // Only draw selection outline and anchor for selected entities
         if (is_selected) {
-            ImVec2 tl = screen_to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
-            ImVec2 br = screen_to_canvas(
+            ImVec2 tl = m_canvas.to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
+            ImVec2 br = m_canvas.to_canvas(
                 rect.computed_x + rect.computed_width,
                 rect.computed_y + rect.computed_height,
                 canvas_pos, canvas_size
             );
 
-            // Draw selection border
             draw_list->AddRect(tl, br, IM_COL32(100, 180, 255, 255), 0.0f, 0, 2.0f);
 
-            // Draw anchor point indicator
-            ImVec2 anchor_pos = screen_to_canvas(
+            ImVec2 anchor_pos = m_canvas.to_canvas(
                 rect.computed_x + rect.pivot_x * rect.computed_width,
                 rect.computed_y + rect.pivot_y * rect.computed_height,
                 canvas_pos, canvas_size
@@ -417,8 +378,8 @@ void ScreenPanel::render_gizmos(ImDrawList* draw_list, ImVec2 canvas_pos, ImVec2
 
         auto& rect = registry->get<engine::ScreenRect>(entity);
 
-        ImVec2 tl = screen_to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
-        ImVec2 br = screen_to_canvas(
+        ImVec2 tl = m_canvas.to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
+        ImVec2 br = m_canvas.to_canvas(
             rect.computed_x + rect.computed_width,
             rect.computed_y + rect.computed_height,
             canvas_pos, canvas_size
@@ -474,17 +435,17 @@ void ScreenPanel::handle_input(ImVec2 canvas_pos, ImVec2 canvas_size) {
     ImVec2 local_mouse(mouse_pos.x - canvas_pos.x, mouse_pos.y - canvas_pos.y);
 
     float screen_x, screen_y;
-    canvas_to_screen(local_mouse, canvas_size, screen_x, screen_y);
+    m_canvas.to_screen(local_mouse, canvas_size, screen_x, screen_y);
 
     // Zoom with mouse wheel
     if (io.MouseWheel != 0.0f) {
         float zoom_factor = 1.1f;
         if (io.MouseWheel > 0) {
-            m_zoom *= zoom_factor;
+            m_canvas.zoom *= zoom_factor;
         } else {
-            m_zoom /= zoom_factor;
+            m_canvas.zoom /= zoom_factor;
         }
-        m_zoom = std::clamp(m_zoom, 0.1f, 10.0f);
+        m_canvas.zoom = std::clamp(m_canvas.zoom, 0.1f, 10.0f);
     }
 
     // Reset with Home key
@@ -497,21 +458,19 @@ void ScreenPanel::handle_input(ImVec2 canvas_pos, ImVec2 canvas_size) {
         m_is_panning = true;
         m_pan_start_mouse_x = io.MousePos.x;
         m_pan_start_mouse_y = io.MousePos.y;
-        m_pan_start_offset_x = m_pan_x;
-        m_pan_start_offset_y = m_pan_y;
+        m_pan_start_offset_x = m_canvas.pan_x;
+        m_pan_start_offset_y = m_canvas.pan_y;
     }
 
     if (m_is_panning) {
         if (ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
-            // Pixel-accurate mode: zoom is the direct scale factor
-            float scale = m_zoom;
+            float scale = m_canvas.zoom;
 
             float dx = io.MousePos.x - m_pan_start_mouse_x;
             float dy = io.MousePos.y - m_pan_start_mouse_y;
 
-            // Pan in opposite direction of mouse movement
-            m_pan_x = m_pan_start_offset_x - dx / scale;
-            m_pan_y = m_pan_start_offset_y - dy / scale;
+            m_canvas.pan_x = m_pan_start_offset_x - dx / scale;
+            m_canvas.pan_y = m_pan_start_offset_y - dy / scale;
         } else {
             m_is_panning = false;
         }
@@ -604,59 +563,6 @@ void ScreenPanel::ensure_text_renderer() {
     if (!eng) return;
 
     m_text_renderer = std::make_unique<EditorTextRenderer>(eng->assets());
-}
-
-void ScreenPanel::render_image_entity(ImDrawList* draw_list, entt::entity entity, ImVec2 canvas_pos, ImVec2 canvas_size) {
-    auto* registry = m_context.registry();
-    if (!registry) return;
-
-    auto& rect = registry->get<engine::ScreenRect>(entity);
-    auto& image = registry->get<engine::render::Image>(entity);
-
-    if (!image.enabled) return;
-
-    // Get texture
-    int tex_width, tex_height;
-    void* texture = m_image_textures.get(image.sprite_path, tex_width, tex_height);
-
-    // Compute canvas positions
-    ImVec2 tl = screen_to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
-    ImVec2 br = screen_to_canvas(
-        rect.computed_x + rect.computed_width,
-        rect.computed_y + rect.computed_height,
-        canvas_pos, canvas_size
-    );
-
-    // Use shared utilities for UV and tint computation
-    auto uv = compute_image_uv(image);
-    ImU32 tint = compute_image_tint(image);
-
-    // Draw the image
-    draw_list->AddImage(
-        (ImTextureID)(uintptr_t)texture,
-        tl, br,
-        ImVec2(uv.u0, uv.v0), ImVec2(uv.u1, uv.v1),
-        tint
-    );
-}
-
-void ScreenPanel::render_text_entity(ImDrawList* draw_list, entt::entity entity, ImVec2 canvas_pos, ImVec2 canvas_size) {
-    auto* registry = m_context.registry();
-    if (!registry) return;
-
-    ensure_text_renderer();
-    if (!m_text_renderer) return;
-
-    auto& rect = registry->get<engine::ScreenRect>(entity);
-    auto& text = registry->get<engine::render::Text>(entity);
-
-    if (!text.enabled) return;
-
-    // Compute canvas position
-    ImVec2 pos = screen_to_canvas(rect.computed_x, rect.computed_y, canvas_pos, canvas_size);
-
-    // Use EditorTextRenderer with m_zoom as the scale factor
-    m_text_renderer->render(draw_list, text, pos, m_zoom);
 }
 
 }

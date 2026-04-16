@@ -81,12 +81,21 @@ bool TextInspector::draw(engine::render::Text& component, const std::string& pro
 
     SectionSeparator();
 
-    // Alignment
-    ImGui::Text("Alignment");
-    int align_idx = static_cast<int>(component.align);
-    const char* align_items[] = { "Left", "Center", "Right" };
-    if (ImGui::Combo("##Alignment", &align_idx, align_items, 3)) {
-        component.align = static_cast<engine::render::TextAlign>(align_idx);
+    // Horizontal Alignment
+    ImGui::Text("Horizontal Align");
+    int h_align_idx = static_cast<int>(component.h_align);
+    const char* h_align_items[] = { "Left", "Center", "Right" };
+    if (ImGui::Combo("##HAlignment", &h_align_idx, h_align_items, 3)) {
+        component.h_align = static_cast<engine::render::TextHAlign>(h_align_idx);
+        changed = true;
+    }
+
+    // Vertical Alignment
+    ImGui::Text("Vertical Align");
+    int v_align_idx = static_cast<int>(component.v_align);
+    const char* v_align_items[] = { "Top", "Middle", "Bottom" };
+    if (ImGui::Combo("##VAlignment", &v_align_idx, v_align_items, 3)) {
+        component.v_align = static_cast<engine::render::TextVAlign>(v_align_idx);
         changed = true;
     }
 

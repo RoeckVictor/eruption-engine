@@ -335,7 +335,9 @@ void EditorApplication::handle_shortcuts(engine::Engine& engine) {
     auto& input = engine.input();
 
     if (input.is_held(KeyCode::LeftCtrl) && input.is_pressed(KeyCode::S)) {
-        save_scene();
+        if (!m_context.try_save_override()) {
+            save_scene();
+        }
     }
 
     if (input.is_held(KeyCode::LeftCtrl) && input.is_pressed(KeyCode::Z)) {

@@ -1,0 +1,362 @@
+{
+  "children": [
+    {
+      "components": [
+        {
+          "data": {
+            "anchor_x": 0.0,
+            "anchor_y": 0.5,
+            "enabled": true,
+            "height": 32.0,
+            "offset_x": 8.0,
+            "offset_y": 0.0,
+            "pivot_x": 0.0,
+            "pivot_y": 0.5,
+            "width": 140.0
+          },
+          "type": "engine::ScreenRect"
+        },
+        {
+          "data": {
+            "bold": false,
+            "color_a": 1.0,
+            "color_b": 1.0,
+            "color_g": 1.0,
+            "color_r": 1.0,
+            "content": "Select...",
+            "enabled": true,
+            "font_path": "fonts/OpenSans-Regular.ttf",
+            "font_size": 16.0,
+            "h_align": 0,
+            "italic": false,
+            "layer": 1,
+            "line_height": 1.2,
+            "max_width": 0.0,
+            "underline": false,
+            "v_align": 1
+          },
+          "type": "engine::render::Text"
+        }
+      ],
+      "name": "SelectedText"
+    },
+    {
+      "components": [
+        {
+          "data": {
+            "anchor_x": 1.0,
+            "anchor_y": 0.5,
+            "enabled": true,
+            "height": 16.0,
+            "offset_x": -8.0,
+            "offset_y": 0.0,
+            "pivot_x": 1.0,
+            "pivot_y": 0.5,
+            "width": 16.0
+          },
+          "type": "engine::ScreenRect"
+        },
+        {
+          "data": {
+            "color_a": 1.0,
+            "color_b": 0.7,
+            "color_g": 0.7,
+            "color_r": 0.7,
+            "enabled": true,
+            "flip_x": false,
+            "flip_y": false,
+            "layer": 1,
+            "sprite_path": "",
+            "uv_max_x": 1.0,
+            "uv_max_y": 1.0,
+            "uv_min_x": 0.0,
+            "uv_min_y": 0.0
+          },
+          "type": "engine::render::Image"
+        }
+      ],
+      "name": "Arrow"
+    },
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.5,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 160.0,
+                    "offset_x": 0.0,
+                    "offset_y": 0.0,
+                    "pivot_x": 0.5,
+                    "pivot_y": 0.0,
+                    "width": 160.0
+                  },
+                  "type": "engine::ScreenRect"
+                }
+              ],
+              "name": "Content"
+            }
+          ],
+          "components": [
+            {
+              "data": {
+                "anchor_x": 0.0,
+                "anchor_y": 0.0,
+                "enabled": true,
+                "height": 160.0,
+                "offset_x": 0.0,
+                "offset_y": 0.0,
+                "pivot_x": 0.0,
+                "pivot_y": 0.0,
+                "width": 160.0
+              },
+              "type": "engine::ScreenRect"
+            }
+          ],
+          "name": "Viewport"
+        },
+        {
+          "children": [
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.5,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 40.0,
+                    "offset_x": 0.0,
+                    "offset_y": 0.0,
+                    "pivot_x": 0.5,
+                    "pivot_y": 0.0,
+                    "width": 14.0
+                  },
+                  "type": "engine::ScreenRect"
+                },
+                {
+                  "data": {
+                    "color_a": 1.0,
+                    "color_b": 0.55,
+                    "color_g": 0.55,
+                    "color_r": 0.55,
+                    "enabled": true,
+                    "flip_x": false,
+                    "flip_y": false,
+                    "layer": 3,
+                    "sprite_path": "",
+                    "uv_max_x": 1.0,
+                    "uv_max_y": 1.0,
+                    "uv_min_x": 0.0,
+                    "uv_min_y": 0.0
+                  },
+                  "type": "engine::render::Image"
+                },
+                {
+                  "data": {
+                    "disabled_color": [0.5, 0.5, 0.5, 0.5],
+                    "disabled_sprite": "",
+                    "enabled": true,
+                    "hovered_color": [0.7, 0.7, 0.7, 1.0],
+                    "hovered_sprite": "",
+                    "interactable": true,
+                    "normal_color": [1.0, 1.0, 1.0, 1.0],
+                    "normal_sprite": "",
+                    "pressed_color": [0.5, 0.5, 0.5, 1.0],
+                    "pressed_sprite": "",
+                    "transition_mode": 1
+                  },
+                  "type": "engine::ui::UIInteractable"
+                }
+              ],
+              "name": "Handle"
+            }
+          ],
+          "components": [
+            {
+              "data": {
+                "anchor_x": 1.0,
+                "anchor_y": 0.0,
+                "enabled": true,
+                "height": 160.0,
+                "offset_x": 0.0,
+                "offset_y": 0.0,
+                "pivot_x": 1.0,
+                "pivot_y": 0.0,
+                "width": 16.0
+              },
+              "type": "engine::ScreenRect"
+            },
+            {
+              "data": {
+                "color_a": 1.0,
+                "color_b": 0.3,
+                "color_g": 0.3,
+                "color_r": 0.3,
+                "enabled": true,
+                "flip_x": false,
+                "flip_y": false,
+                "layer": 2,
+                "sprite_path": "",
+                "uv_max_x": 1.0,
+                "uv_max_y": 1.0,
+                "uv_min_x": 0.0,
+                "uv_min_y": 0.0
+              },
+              "type": "engine::render::Image"
+            }
+          ],
+          "name": "VerticalScrollbar"
+        }
+      ],
+      "components": [
+        {
+          "data": {
+            "anchor_x": 0.5,
+            "anchor_y": 1.0,
+            "enabled": true,
+            "height": 160.0,
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+            "pivot_x": 0.5,
+            "pivot_y": 0.0,
+            "width": 176.0
+          },
+          "type": "engine::ScreenRect"
+        },
+        {
+          "data": {
+            "color_a": 1.0,
+            "color_b": 0.22,
+            "color_g": 0.22,
+            "color_r": 0.22,
+            "enabled": true,
+            "flip_x": false,
+            "flip_y": false,
+            "layer": 1,
+            "sprite_path": "",
+            "uv_max_x": 1.0,
+            "uv_max_y": 1.0,
+            "uv_min_x": 0.0,
+            "uv_min_y": 0.0
+          },
+          "type": "engine::render::Image"
+        },
+        {
+          "data": {
+            "disabled_color": [0.5, 0.5, 0.5, 0.5],
+            "disabled_sprite": "",
+            "enabled": true,
+            "hovered_color": [1.0, 1.0, 1.0, 1.0],
+            "hovered_sprite": "",
+            "interactable": true,
+            "normal_color": [1.0, 1.0, 1.0, 1.0],
+            "normal_sprite": "",
+            "pressed_color": [1.0, 1.0, 1.0, 1.0],
+            "pressed_sprite": "",
+            "transition_mode": 0
+          },
+          "type": "engine::ui::UIInteractable"
+        },
+        {
+          "data": {
+            "blocks_raycast": true,
+            "drag_handle": "",
+            "draggable": false,
+            "enabled": true
+          },
+          "type": "engine::ui::Panel"
+        },
+        {
+          "data": {
+            "content": "Content",
+            "deceleration_rate": 0.135,
+            "elastic": true,
+            "elasticity": 0.1,
+            "enabled": true,
+            "horizontal": false,
+            "horizontal_scrollbar": "",
+            "horizontal_scrollbar_visibility": 2,
+            "inertia": true,
+            "scroll_sensitivity": 20.0,
+            "vertical": true,
+            "vertical_scrollbar": "VerticalScrollbar",
+            "vertical_scrollbar_visibility": 2,
+            "viewport": "Viewport"
+          },
+          "type": "engine::ui::ScrollView"
+        }
+      ],
+      "name": "OptionsPanel"
+    }
+  ],
+  "components": [
+    {
+      "data": {
+        "anchor_x": 0.5,
+        "anchor_y": 0.5,
+        "enabled": true,
+        "height": 32.0,
+        "offset_x": 0.0,
+        "offset_y": 0.0,
+        "pivot_x": 0.5,
+        "pivot_y": 0.5,
+        "width": 180.0
+      },
+      "type": "engine::ScreenRect"
+    },
+    {
+      "data": {
+        "color_a": 1.0,
+        "color_b": 0.35,
+        "color_g": 0.35,
+        "color_r": 0.35,
+        "enabled": true,
+        "flip_x": false,
+        "flip_y": false,
+        "layer": 0,
+        "sprite_path": "",
+        "uv_max_x": 1.0,
+        "uv_max_y": 1.0,
+        "uv_min_x": 0.0,
+        "uv_min_y": 0.0
+      },
+      "type": "engine::render::Image"
+    },
+    {
+      "data": {
+        "disabled_color": [0.5, 0.5, 0.5, 0.5],
+        "disabled_sprite": "",
+        "enabled": true,
+        "hovered_color": [0.85, 0.85, 0.85, 1.0],
+        "hovered_sprite": "",
+        "interactable": true,
+        "normal_color": [1.0, 1.0, 1.0, 1.0],
+        "normal_sprite": "",
+        "pressed_color": [0.7, 0.7, 0.7, 1.0],
+        "pressed_sprite": "",
+        "transition_mode": 1
+      },
+      "type": "engine::ui::UIInteractable"
+    },
+    {
+      "data": {
+        "enabled": true,
+        "item_height": 32.0,
+        "max_visible_items": 5,
+        "options": ["Option 1", "Option 2", "Option 3"],
+        "options_content": "Content",
+        "options_panel": "OptionsPanel",
+        "options_scrollview": "OptionsPanel",
+        "selected_index": 0,
+        "selected_text": "SelectedText",
+        "arrow": "Arrow"
+      },
+      "type": "engine::ui::Dropdown"
+    }
+  ],
+  "name": "Dropdown"
+}

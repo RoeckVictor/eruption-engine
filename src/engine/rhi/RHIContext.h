@@ -28,6 +28,7 @@ public:
 
     virtual void set_viewport(int x, int y, int w, int h) = 0;
     virtual void set_scissor(int x, int y, int w, int h) = 0;
+    virtual void enable_scissor_test(bool enable) = 0;
     virtual void clear(float r, float g, float b, float a = 1.0f) = 0;
     virtual void clear_depth(float depth = 1.0f) = 0;
     virtual void clear_stencil(int stencil = 0) = 0;

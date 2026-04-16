@@ -14,7 +14,9 @@ void screen_to_world(const Camera2D& camera,
     float vis_h = screen_h / camera.zoom;
 
     out_world_x = camera.x - vis_w * 0.5f + norm_x * vis_w;
-    out_world_y = camera.y - vis_h * 0.5f + norm_y * vis_h;
+    // Use Y-UP convention: screen top (norm_y=0) → positive world_y,
+    // screen bottom (norm_y=1) → negative world_y
+    out_world_y = camera.y + vis_h * 0.5f - norm_y * vis_h;
 }
 
 } // namespace engine::render

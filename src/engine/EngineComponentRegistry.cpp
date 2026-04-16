@@ -13,6 +13,7 @@
 #include "engine/simulation/SimSurface.h"
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
+#include "engine/ui/UIComponents.h"
 
 namespace engine {
 

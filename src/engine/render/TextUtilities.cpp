@@ -86,4 +86,48 @@ float measure_line_width(
     return width;
 }
 
+TextVisualBounds measure_visual_bounds(
+    const std::vector<uint32_t>& codepoints,
+    size_t start, size_t end,
+    DynamicFont& font,
+    int font_size,
+    float render_scale
+) {
+    TextVisualBounds bounds;
+    float cursor_x = 0.0f;
+    uint32_t prev_cp = 0;
+    bool first_visible = true;
+
+    for (size_t i = start; i < end; ++i) {
+        uint32_t cp = codepoints[i];
+        if (cp == '\n' || cp == '\r') continue;
+
+        const auto* glyph = font.get_glyph(font_size, cp);
+        if (!glyph) continue;
+
+        if (prev_cp != 0) {
+            cursor_x += font.get_kerning(font_size, prev_cp, cp) * render_scale;
+        }
+
+        // Track visual bounds (only for visible glyphs with actual width)
+        if (glyph->atlas_w > 0) {
+            float glyph_left = cursor_x + glyph->bearing_x * render_scale;
+            float glyph_right = glyph_left + glyph->atlas_w * render_scale;
+
+            if (first_visible) {
+                bounds.left = glyph_left;
+                bounds.right = glyph_right;
+                first_visible = false;
+            } else {
+                bounds.right = glyph_right;
+            }
+        }
+
+        cursor_x += glyph->advance * render_scale;
+        prev_cp = cp;
+    }
+
+    return bounds;
+}
+
 } // namespace engine::render

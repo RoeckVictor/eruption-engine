@@ -1,0 +1,375 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "components": [
+            {
+              "data": {
+                "enabled": true,
+                "x": 0.0,
+                "y": 0.0,
+                "rotation": 0.0,
+                "scale_x": 0.0067,
+                "scale_y": 0.0625
+              },
+              "type": "engine::Transform"
+            },
+            {
+              "data": {
+                "bold": false,
+                "color_a": 1.0,
+                "color_b": 1.0,
+                "color_g": 1.0,
+                "color_r": 1.0,
+                "content": "Window Title",
+                "enabled": true,
+                "font_path": "fonts/OpenSans-Regular.ttf",
+                "font_size": 16.0,
+                "h_align": 0,
+                "italic": false,
+                "layer": 2,
+                "line_height": 1.2,
+                "max_width": 0.0,
+                "underline": false,
+                "v_align": 1
+              },
+              "type": "engine::render::Text"
+            }
+          ],
+          "name": "TitleText"
+        },
+        {
+          "components": [
+            {
+              "data": {
+                "enabled": true,
+                "x": 0.467,
+                "y": 0.0,
+                "rotation": 0.0,
+                "scale_x": 0.08,
+                "scale_y": 0.75
+              },
+              "type": "engine::Transform"
+            },
+            {
+              "data": {
+                "color_a": 1.0,
+                "color_b": 0.4,
+                "color_g": 0.4,
+                "color_r": 0.8,
+                "enabled": true,
+                "flip_x": false,
+                "flip_y": false,
+                "layer": 2,
+                "sprite_path": "",
+                "uv_max_x": 1.0,
+                "uv_max_y": 1.0,
+                "uv_min_x": 0.0,
+                "uv_min_y": 0.0
+              },
+              "type": "engine::render::Image"
+            },
+            {
+              "data": {
+                "disabled_color": [0.5, 0.5, 0.5, 0.5],
+                "disabled_sprite": "",
+                "enabled": true,
+                "hovered_color": [1.0, 0.5, 0.5, 1.0],
+                "hovered_sprite": "",
+                "interactable": true,
+                "normal_color": [1.0, 1.0, 1.0, 1.0],
+                "normal_sprite": "",
+                "pressed_color": [0.6, 0.3, 0.3, 1.0],
+                "pressed_sprite": "",
+                "transition_mode": 1
+              },
+              "type": "engine::ui::UIInteractable"
+            },
+            {
+              "data": {
+                "enabled": true
+              },
+              "type": "engine::ui::Button"
+            }
+          ],
+          "name": "CloseButton"
+        }
+      ],
+      "components": [
+        {
+          "data": {
+            "enabled": true,
+            "x": 0.0,
+            "y": 0.45,
+            "rotation": 0.0,
+            "scale_x": 1.0,
+            "scale_y": 0.16
+          },
+          "type": "engine::Transform"
+        },
+        {
+          "data": {
+            "color_a": 1.0,
+            "color_b": 0.5,
+            "color_g": 0.4,
+            "color_r": 0.3,
+            "enabled": true,
+            "flip_x": false,
+            "flip_y": false,
+            "layer": 1,
+            "sprite_path": "",
+            "uv_max_x": 1.0,
+            "uv_max_y": 1.0,
+            "uv_min_x": 0.0,
+            "uv_min_y": 0.0
+          },
+          "type": "engine::render::Image"
+        }
+      ],
+      "name": "TitleBar"
+    },
+    {
+      "children": [
+        {
+          "components": [
+            {
+              "data": {
+                "enabled": true,
+                "x": -0.414,
+                "y": 0.3125,
+                "rotation": 0.0,
+                "scale_x": 0.0069,
+                "scale_y": 0.0125
+              },
+              "type": "engine::Transform"
+            },
+            {
+              "data": {
+                "bold": false,
+                "color_a": 1.0,
+                "color_b": 1.0,
+                "color_g": 1.0,
+                "color_r": 1.0,
+                "content": "Name: John Doe",
+                "enabled": true,
+                "font_path": "fonts/OpenSans-Regular.ttf",
+                "font_size": 12.0,
+                "h_align": 0,
+                "italic": false,
+                "layer": 2,
+                "line_height": 1.2,
+                "max_width": 0.0,
+                "underline": false,
+                "v_align": 0
+              },
+              "type": "engine::render::Text"
+            }
+          ],
+          "name": "Label1"
+        },
+        {
+          "components": [
+            {
+              "data": {
+                "enabled": true,
+                "x": -0.414,
+                "y": 0.0625,
+                "rotation": 0.0,
+                "scale_x": 0.0069,
+                "scale_y": 0.0125
+              },
+              "type": "engine::Transform"
+            },
+            {
+              "data": {
+                "bold": false,
+                "color_a": 1.0,
+                "color_b": 1.0,
+                "color_g": 1.0,
+                "color_r": 1.0,
+                "content": "Level: 42",
+                "enabled": true,
+                "font_path": "fonts/OpenSans-Regular.ttf",
+                "font_size": 12.0,
+                "h_align": 0,
+                "italic": false,
+                "layer": 2,
+                "line_height": 1.2,
+                "max_width": 0.0,
+                "underline": false,
+                "v_align": 0
+              },
+              "type": "engine::render::Text"
+            }
+          ],
+          "name": "Label2"
+        },
+        {
+          "components": [
+            {
+              "data": {
+                "enabled": true,
+                "x": -0.414,
+                "y": -0.1875,
+                "rotation": 0.0,
+                "scale_x": 0.0069,
+                "scale_y": 0.0125
+              },
+              "type": "engine::Transform"
+            },
+            {
+              "data": {
+                "bold": false,
+                "color_a": 1.0,
+                "color_b": 1.0,
+                "color_g": 1.0,
+                "color_r": 1.0,
+                "content": "Health: 100/100",
+                "enabled": true,
+                "font_path": "fonts/OpenSans-Regular.ttf",
+                "font_size": 12.0,
+                "h_align": 0,
+                "italic": false,
+                "layer": 2,
+                "line_height": 1.2,
+                "max_width": 0.0,
+                "underline": false,
+                "v_align": 0
+              },
+              "type": "engine::render::Text"
+            }
+          ],
+          "name": "Label3"
+        },
+        {
+          "components": [
+            {
+              "data": {
+                "enabled": true,
+                "x": -0.414,
+                "y": -0.4375,
+                "rotation": 0.0,
+                "scale_x": 0.0069,
+                "scale_y": 0.0125
+              },
+              "type": "engine::Transform"
+            },
+            {
+              "data": {
+                "bold": false,
+                "color_a": 0.7,
+                "color_b": 0.7,
+                "color_g": 0.7,
+                "color_r": 0.7,
+                "content": "Status: Active",
+                "enabled": true,
+                "font_path": "fonts/OpenSans-Regular.ttf",
+                "font_size": 10.0,
+                "h_align": 0,
+                "italic": false,
+                "layer": 2,
+                "line_height": 1.2,
+                "max_width": 0.0,
+                "underline": false,
+                "v_align": 0
+              },
+              "type": "engine::render::Text"
+            }
+          ],
+          "name": "Label4"
+        }
+      ],
+      "components": [
+        {
+          "data": {
+            "enabled": true,
+            "x": 0.0,
+            "y": -0.1,
+            "rotation": 0.0,
+            "scale_x": 0.967,
+            "scale_y": 0.8
+          },
+          "type": "engine::Transform"
+        },
+        {
+          "data": {
+            "color_a": 0.3,
+            "color_b": 0.3,
+            "color_g": 0.3,
+            "color_r": 0.3,
+            "enabled": true,
+            "flip_x": false,
+            "flip_y": false,
+            "layer": 1,
+            "sprite_path": "",
+            "uv_max_x": 1.0,
+            "uv_max_y": 1.0,
+            "uv_min_x": 0.0,
+            "uv_min_y": 0.0
+          },
+          "type": "engine::render::Image"
+        }
+      ],
+      "name": "Content"
+    }
+  ],
+  "components": [
+    {
+      "data": {
+        "enabled": true,
+        "x": 0.0,
+        "y": 0.0,
+        "rotation": 0.0,
+        "scale_x": 150.0,
+        "scale_y": 100.0
+      },
+      "type": "engine::Transform"
+    },
+    {
+      "data": {
+        "color_a": 1.0,
+        "color_b": 0.25,
+        "color_g": 0.22,
+        "color_r": 0.2,
+        "enabled": true,
+        "flip_x": false,
+        "flip_y": false,
+        "layer": 0,
+        "sprite_path": "",
+        "uv_max_x": 1.0,
+        "uv_max_y": 1.0,
+        "uv_min_x": 0.0,
+        "uv_min_y": 0.0
+      },
+      "type": "engine::render::Image"
+    },
+    {
+      "data": {
+        "disabled_color": [0.5, 0.5, 0.5, 0.5],
+        "disabled_sprite": "",
+        "enabled": true,
+        "hovered_color": [1.0, 1.0, 1.0, 1.0],
+        "hovered_sprite": "",
+        "interactable": true,
+        "normal_color": [1.0, 1.0, 1.0, 1.0],
+        "normal_sprite": "",
+        "pressed_color": [1.0, 1.0, 1.0, 1.0],
+        "pressed_sprite": "",
+        "transition_mode": 0
+      },
+      "type": "engine::ui::UIInteractable"
+    },
+    {
+      "data": {
+        "blocks_raycast": true,
+        "close_button": "CloseButton",
+        "drag_handle": "TitleBar",
+        "draggable": true,
+        "enabled": true
+      },
+      "type": "engine::ui::Panel"
+    }
+  ],
+  "name": "Panel"
+}

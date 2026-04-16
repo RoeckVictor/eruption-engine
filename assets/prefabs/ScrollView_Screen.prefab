@@ -1,0 +1,764 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.0,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 30.0,
+                    "offset_x": 8.0,
+                    "offset_y": 8.0,
+                    "pivot_x": 0.0,
+                    "pivot_y": 0.0,
+                    "width": 260.0
+                  },
+                  "type": "engine::ScreenRect"
+                },
+                {
+                  "data": {
+                    "bold": false,
+                    "color_a": 1.0,
+                    "color_b": 1.0,
+                    "color_g": 1.0,
+                    "color_r": 1.0,
+                    "content": "Item 1 - First entry",
+                    "enabled": true,
+                    "font_path": "fonts/OpenSans-Regular.ttf",
+                    "font_size": 14.0,
+                    "h_align": 0,
+                    "italic": false,
+                    "layer": 2,
+                    "line_height": 1.2,
+                    "max_width": 0.0,
+                    "underline": false,
+                    "v_align": 0
+                  },
+                  "type": "engine::render::Text"
+                }
+              ],
+              "name": "Item1"
+            },
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.0,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 30.0,
+                    "offset_x": 8.0,
+                    "offset_y": 46.0,
+                    "pivot_x": 0.0,
+                    "pivot_y": 0.0,
+                    "width": 260.0
+                  },
+                  "type": "engine::ScreenRect"
+                },
+                {
+                  "data": {
+                    "bold": false,
+                    "color_a": 1.0,
+                    "color_b": 1.0,
+                    "color_g": 1.0,
+                    "color_r": 1.0,
+                    "content": "Item 2 - Second entry",
+                    "enabled": true,
+                    "font_path": "fonts/OpenSans-Regular.ttf",
+                    "font_size": 14.0,
+                    "h_align": 0,
+                    "italic": false,
+                    "layer": 2,
+                    "line_height": 1.2,
+                    "max_width": 0.0,
+                    "underline": false,
+                    "v_align": 0
+                  },
+                  "type": "engine::render::Text"
+                }
+              ],
+              "name": "Item2"
+            },
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.0,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 30.0,
+                    "offset_x": 8.0,
+                    "offset_y": 84.0,
+                    "pivot_x": 0.0,
+                    "pivot_y": 0.0,
+                    "width": 260.0
+                  },
+                  "type": "engine::ScreenRect"
+                },
+                {
+                  "data": {
+                    "bold": false,
+                    "color_a": 1.0,
+                    "color_b": 1.0,
+                    "color_g": 1.0,
+                    "color_r": 1.0,
+                    "content": "Item 3 - Third entry",
+                    "enabled": true,
+                    "font_path": "fonts/OpenSans-Regular.ttf",
+                    "font_size": 14.0,
+                    "h_align": 0,
+                    "italic": false,
+                    "layer": 2,
+                    "line_height": 1.2,
+                    "max_width": 0.0,
+                    "underline": false,
+                    "v_align": 0
+                  },
+                  "type": "engine::render::Text"
+                }
+              ],
+              "name": "Item3"
+            },
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.0,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 30.0,
+                    "offset_x": 8.0,
+                    "offset_y": 122.0,
+                    "pivot_x": 0.0,
+                    "pivot_y": 0.0,
+                    "width": 260.0
+                  },
+                  "type": "engine::ScreenRect"
+                },
+                {
+                  "data": {
+                    "bold": false,
+                    "color_a": 1.0,
+                    "color_b": 1.0,
+                    "color_g": 1.0,
+                    "color_r": 1.0,
+                    "content": "Item 4 - Fourth entry",
+                    "enabled": true,
+                    "font_path": "fonts/OpenSans-Regular.ttf",
+                    "font_size": 14.0,
+                    "h_align": 0,
+                    "italic": false,
+                    "layer": 2,
+                    "line_height": 1.2,
+                    "max_width": 0.0,
+                    "underline": false,
+                    "v_align": 0
+                  },
+                  "type": "engine::render::Text"
+                }
+              ],
+              "name": "Item4"
+            },
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.0,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 30.0,
+                    "offset_x": 8.0,
+                    "offset_y": 160.0,
+                    "pivot_x": 0.0,
+                    "pivot_y": 0.0,
+                    "width": 260.0
+                  },
+                  "type": "engine::ScreenRect"
+                },
+                {
+                  "data": {
+                    "bold": false,
+                    "color_a": 1.0,
+                    "color_b": 1.0,
+                    "color_g": 1.0,
+                    "color_r": 1.0,
+                    "content": "Item 5 - Fifth entry",
+                    "enabled": true,
+                    "font_path": "fonts/OpenSans-Regular.ttf",
+                    "font_size": 14.0,
+                    "h_align": 0,
+                    "italic": false,
+                    "layer": 2,
+                    "line_height": 1.2,
+                    "max_width": 0.0,
+                    "underline": false,
+                    "v_align": 0
+                  },
+                  "type": "engine::render::Text"
+                }
+              ],
+              "name": "Item5"
+            },
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.0,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 30.0,
+                    "offset_x": 8.0,
+                    "offset_y": 198.0,
+                    "pivot_x": 0.0,
+                    "pivot_y": 0.0,
+                    "width": 260.0
+                  },
+                  "type": "engine::ScreenRect"
+                },
+                {
+                  "data": {
+                    "bold": false,
+                    "color_a": 1.0,
+                    "color_b": 1.0,
+                    "color_g": 1.0,
+                    "color_r": 1.0,
+                    "content": "Item 6 - Sixth entry",
+                    "enabled": true,
+                    "font_path": "fonts/OpenSans-Regular.ttf",
+                    "font_size": 14.0,
+                    "h_align": 0,
+                    "italic": false,
+                    "layer": 2,
+                    "line_height": 1.2,
+                    "max_width": 0.0,
+                    "underline": false,
+                    "v_align": 0
+                  },
+                  "type": "engine::render::Text"
+                }
+              ],
+              "name": "Item6"
+            },
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.0,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 30.0,
+                    "offset_x": 8.0,
+                    "offset_y": 236.0,
+                    "pivot_x": 0.0,
+                    "pivot_y": 0.0,
+                    "width": 260.0
+                  },
+                  "type": "engine::ScreenRect"
+                },
+                {
+                  "data": {
+                    "bold": false,
+                    "color_a": 1.0,
+                    "color_b": 1.0,
+                    "color_g": 1.0,
+                    "color_r": 1.0,
+                    "content": "Item 7 - Seventh entry",
+                    "enabled": true,
+                    "font_path": "fonts/OpenSans-Regular.ttf",
+                    "font_size": 14.0,
+                    "h_align": 0,
+                    "italic": false,
+                    "layer": 2,
+                    "line_height": 1.2,
+                    "max_width": 0.0,
+                    "underline": false,
+                    "v_align": 0
+                  },
+                  "type": "engine::render::Text"
+                }
+              ],
+              "name": "Item7"
+            },
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.0,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 30.0,
+                    "offset_x": 8.0,
+                    "offset_y": 274.0,
+                    "pivot_x": 0.0,
+                    "pivot_y": 0.0,
+                    "width": 260.0
+                  },
+                  "type": "engine::ScreenRect"
+                },
+                {
+                  "data": {
+                    "bold": false,
+                    "color_a": 1.0,
+                    "color_b": 1.0,
+                    "color_g": 1.0,
+                    "color_r": 1.0,
+                    "content": "Item 8 - Eighth entry",
+                    "enabled": true,
+                    "font_path": "fonts/OpenSans-Regular.ttf",
+                    "font_size": 14.0,
+                    "h_align": 0,
+                    "italic": false,
+                    "layer": 2,
+                    "line_height": 1.2,
+                    "max_width": 0.0,
+                    "underline": false,
+                    "v_align": 0
+                  },
+                  "type": "engine::render::Text"
+                }
+              ],
+              "name": "Item8"
+            },
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.0,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 30.0,
+                    "offset_x": 8.0,
+                    "offset_y": 312.0,
+                    "pivot_x": 0.0,
+                    "pivot_y": 0.0,
+                    "width": 260.0
+                  },
+                  "type": "engine::ScreenRect"
+                },
+                {
+                  "data": {
+                    "bold": false,
+                    "color_a": 1.0,
+                    "color_b": 1.0,
+                    "color_g": 1.0,
+                    "color_r": 1.0,
+                    "content": "Item 9 - Ninth entry",
+                    "enabled": true,
+                    "font_path": "fonts/OpenSans-Regular.ttf",
+                    "font_size": 14.0,
+                    "h_align": 0,
+                    "italic": false,
+                    "layer": 2,
+                    "line_height": 1.2,
+                    "max_width": 0.0,
+                    "underline": false,
+                    "v_align": 0
+                  },
+                  "type": "engine::render::Text"
+                }
+              ],
+              "name": "Item9"
+            },
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.0,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 30.0,
+                    "offset_x": 8.0,
+                    "offset_y": 350.0,
+                    "pivot_x": 0.0,
+                    "pivot_y": 0.0,
+                    "width": 260.0
+                  },
+                  "type": "engine::ScreenRect"
+                },
+                {
+                  "data": {
+                    "bold": false,
+                    "color_a": 1.0,
+                    "color_b": 1.0,
+                    "color_g": 1.0,
+                    "color_r": 1.0,
+                    "content": "Item 10 - Tenth entry",
+                    "enabled": true,
+                    "font_path": "fonts/OpenSans-Regular.ttf",
+                    "font_size": 14.0,
+                    "h_align": 0,
+                    "italic": false,
+                    "layer": 2,
+                    "line_height": 1.2,
+                    "max_width": 0.0,
+                    "underline": false,
+                    "v_align": 0
+                  },
+                  "type": "engine::render::Text"
+                }
+              ],
+              "name": "Item10"
+            },
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.0,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 30.0,
+                    "offset_x": 8.0,
+                    "offset_y": 388.0,
+                    "pivot_x": 0.0,
+                    "pivot_y": 0.0,
+                    "width": 260.0
+                  },
+                  "type": "engine::ScreenRect"
+                },
+                {
+                  "data": {
+                    "bold": false,
+                    "color_a": 0.7,
+                    "color_b": 0.7,
+                    "color_g": 0.7,
+                    "color_r": 0.7,
+                    "content": "Item 11 - Scroll to see more...",
+                    "enabled": true,
+                    "font_path": "fonts/OpenSans-Regular.ttf",
+                    "font_size": 12.0,
+                    "h_align": 0,
+                    "italic": false,
+                    "layer": 2,
+                    "line_height": 1.2,
+                    "max_width": 0.0,
+                    "underline": false,
+                    "v_align": 0
+                  },
+                  "type": "engine::render::Text"
+                }
+              ],
+              "name": "Item11"
+            },
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.0,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 30.0,
+                    "offset_x": 8.0,
+                    "offset_y": 426.0,
+                    "pivot_x": 0.0,
+                    "pivot_y": 0.0,
+                    "width": 260.0
+                  },
+                  "type": "engine::ScreenRect"
+                },
+                {
+                  "data": {
+                    "bold": false,
+                    "color_a": 0.7,
+                    "color_b": 0.7,
+                    "color_g": 0.7,
+                    "color_r": 0.7,
+                    "content": "Item 12 - Almost at the end",
+                    "enabled": true,
+                    "font_path": "fonts/OpenSans-Regular.ttf",
+                    "font_size": 12.0,
+                    "h_align": 0,
+                    "italic": false,
+                    "layer": 2,
+                    "line_height": 1.2,
+                    "max_width": 0.0,
+                    "underline": false,
+                    "v_align": 0
+                  },
+                  "type": "engine::render::Text"
+                }
+              ],
+              "name": "Item12"
+            },
+            {
+              "components": [
+                {
+                  "data": {
+                    "anchor_x": 0.0,
+                    "anchor_y": 0.0,
+                    "enabled": true,
+                    "height": 30.0,
+                    "offset_x": 8.0,
+                    "offset_y": 464.0,
+                    "pivot_x": 0.0,
+                    "pivot_y": 0.0,
+                    "width": 260.0
+                  },
+                  "type": "engine::ScreenRect"
+                },
+                {
+                  "data": {
+                    "bold": false,
+                    "color_a": 0.5,
+                    "color_b": 0.5,
+                    "color_g": 0.5,
+                    "color_r": 0.5,
+                    "content": "Item 13 - End of list",
+                    "enabled": true,
+                    "font_path": "fonts/OpenSans-Regular.ttf",
+                    "font_size": 12.0,
+                    "h_align": 0,
+                    "italic": false,
+                    "layer": 2,
+                    "line_height": 1.2,
+                    "max_width": 0.0,
+                    "underline": false,
+                    "v_align": 0
+                  },
+                  "type": "engine::render::Text"
+                }
+              ],
+              "name": "Item13"
+            }
+          ],
+          "components": [
+            {
+              "data": {
+                "anchor_x": 0.5,
+                "anchor_y": 0.0,
+                "enabled": true,
+                "height": 600.0,
+                "offset_x": 0.0,
+                "offset_y": 0.0,
+                "pivot_x": 0.5,
+                "pivot_y": 0.0,
+                "width": 280.0
+              },
+              "type": "engine::ScreenRect"
+            },
+            {
+              "data": {
+                "color_a": 0.0,
+                "color_b": 1.0,
+                "color_g": 1.0,
+                "color_r": 1.0,
+                "enabled": false,
+                "flip_x": false,
+                "flip_y": false,
+                "layer": 1,
+                "sprite_path": "",
+                "uv_max_x": 1.0,
+                "uv_max_y": 1.0,
+                "uv_min_x": 0.0,
+                "uv_min_y": 0.0
+              },
+              "type": "engine::render::Image"
+            }
+          ],
+          "name": "Content"
+        }
+      ],
+      "components": [
+        {
+          "data": {
+            "anchor_x": 0.0,
+            "anchor_y": 0.0,
+            "enabled": true,
+            "height": 300.0,
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+            "pivot_x": 0.0,
+            "pivot_y": 0.0,
+            "width": 280.0
+          },
+          "type": "engine::ScreenRect"
+        },
+        {
+          "data": {
+            "color_a": 0.0,
+            "color_b": 1.0,
+            "color_g": 1.0,
+            "color_r": 1.0,
+            "enabled": false,
+            "flip_x": false,
+            "flip_y": false,
+            "layer": 0,
+            "sprite_path": "",
+            "uv_max_x": 1.0,
+            "uv_max_y": 1.0,
+            "uv_min_x": 0.0,
+            "uv_min_y": 0.0
+          },
+          "type": "engine::render::Image"
+        }
+      ],
+      "name": "Viewport"
+    },
+    {
+      "children": [
+        {
+          "components": [
+            {
+              "data": {
+                "anchor_x": 0.5,
+                "anchor_y": 0.0,
+                "enabled": true,
+                "height": 50.0,
+                "offset_x": 0.0,
+                "offset_y": 0.0,
+                "pivot_x": 0.5,
+                "pivot_y": 0.0,
+                "width": 16.0
+              },
+              "type": "engine::ScreenRect"
+            },
+            {
+              "data": {
+                "color_a": 1.0,
+                "color_b": 0.6,
+                "color_g": 0.6,
+                "color_r": 0.6,
+                "enabled": true,
+                "flip_x": false,
+                "flip_y": false,
+                "layer": 3,
+                "sprite_path": "",
+                "uv_max_x": 1.0,
+                "uv_max_y": 1.0,
+                "uv_min_x": 0.0,
+                "uv_min_y": 0.0
+              },
+              "type": "engine::render::Image"
+            },
+            {
+              "data": {
+                "disabled_color": [0.5, 0.5, 0.5, 0.5],
+                "disabled_sprite": "",
+                "enabled": true,
+                "hovered_color": [0.75, 0.75, 0.75, 1.0],
+                "hovered_sprite": "",
+                "interactable": true,
+                "normal_color": [1.0, 1.0, 1.0, 1.0],
+                "normal_sprite": "",
+                "pressed_color": [0.5, 0.5, 0.5, 1.0],
+                "pressed_sprite": "",
+                "transition_mode": 1
+              },
+              "type": "engine::ui::UIInteractable"
+            }
+          ],
+          "name": "Handle"
+        }
+      ],
+      "components": [
+        {
+          "data": {
+            "anchor_x": 1.0,
+            "anchor_y": 0.0,
+            "enabled": true,
+            "height": 300.0,
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+            "pivot_x": 1.0,
+            "pivot_y": 0.0,
+            "width": 20.0
+          },
+          "type": "engine::ScreenRect"
+        },
+        {
+          "data": {
+            "color_a": 1.0,
+            "color_b": 0.35,
+            "color_g": 0.35,
+            "color_r": 0.35,
+            "enabled": true,
+            "flip_x": false,
+            "flip_y": false,
+            "layer": 2,
+            "sprite_path": "",
+            "uv_max_x": 1.0,
+            "uv_max_y": 1.0,
+            "uv_min_x": 0.0,
+            "uv_min_y": 0.0
+          },
+          "type": "engine::render::Image"
+        }
+      ],
+      "name": "VerticalScrollbar"
+    }
+  ],
+  "components": [
+    {
+      "data": {
+        "anchor_x": 0.5,
+        "anchor_y": 0.5,
+        "enabled": true,
+        "height": 300.0,
+        "offset_x": 0.0,
+        "offset_y": 0.0,
+        "pivot_x": 0.5,
+        "pivot_y": 0.5,
+        "width": 300.0
+      },
+      "type": "engine::ScreenRect"
+    },
+    {
+      "data": {
+        "color_a": 1.0,
+        "color_b": 0.2,
+        "color_g": 0.2,
+        "color_r": 0.2,
+        "enabled": true,
+        "flip_x": false,
+        "flip_y": false,
+        "layer": 0,
+        "sprite_path": "",
+        "uv_max_x": 1.0,
+        "uv_max_y": 1.0,
+        "uv_min_x": 0.0,
+        "uv_min_y": 0.0
+      },
+      "type": "engine::render::Image"
+    },
+    {
+      "data": {
+        "disabled_color": [0.5, 0.5, 0.5, 0.5],
+        "disabled_sprite": "",
+        "enabled": true,
+        "hovered_color": [1.0, 1.0, 1.0, 1.0],
+        "hovered_sprite": "",
+        "interactable": true,
+        "normal_color": [1.0, 1.0, 1.0, 1.0],
+        "normal_sprite": "",
+        "pressed_color": [1.0, 1.0, 1.0, 1.0],
+        "pressed_sprite": "",
+        "transition_mode": 0
+      },
+      "type": "engine::ui::UIInteractable"
+    },
+    {
+      "data": {
+        "content": "Content",
+        "deceleration_rate": 0.135,
+        "elastic": true,
+        "elasticity": 0.1,
+        "enabled": true,
+        "horizontal": false,
+        "horizontal_scrollbar": "",
+        "horizontal_scrollbar_visibility": 1,
+        "inertia": true,
+        "scroll_sensitivity": 20.0,
+        "vertical": true,
+        "vertical_scrollbar": "VerticalScrollbar",
+        "vertical_scrollbar_visibility": 1,
+        "viewport": "Viewport"
+      },
+      "type": "engine::ui::ScrollView"
+    }
+  ],
+  "name": "ScrollView"
+}

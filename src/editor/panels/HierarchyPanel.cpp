@@ -4,6 +4,7 @@
 #include "editor/serialization/SceneSerializer.h"
 #include "editor/icons/IconsFontAwesome6.h"
 #include "editor/EditorFileDialogs.h"
+#include "engine/platform/PlatformUtils.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -68,20 +69,60 @@ void HierarchyPanel::on_gui() {
                 ImGuiPopupFlags_NoOpenOverItems | ImGuiPopupFlags_MouseButtonRight)) {
             if (m_world_section_open) {
                 if (ImGui::BeginMenu(ICON_FA_GLOBE " Create World Entity")) {
-                    if (ImGui::MenuItem("Empty Entity")) {
+                    if (ImGui::MenuItem(ICON_FA_CUBE " Empty Entity")) {
                         auto entity = create_entity(*registry, "New Entity");
                         m_context.selection().select(entity);
                         m_context.scene_state().mark_dirty();
+                    }
+
+                    auto& selection = m_context.selection().selection();
+                    bool has_world_selection = !selection.empty() && is_world_space_entity(*registry, selection[0]);
+                    if (ImGui::MenuItem(ICON_FA_SITEMAP " Child of Selected", nullptr, false, has_world_selection)) {
+                        auto entity = create_entity(*registry, "Child Entity");
+                        set_parent(*registry, entity, selection[0]);
+                        m_context.selection().select(entity);
+                        m_context.scene_state().mark_dirty();
+                    }
+
+                    ImGui::Separator();
+                    render_prefab_submenu(false, false);
+
+                    ImGui::Separator();
+                    if (ImGui::MenuItem(ICON_FA_FILE " From File...")) {
+                        auto path = select_prefab();
+                        if (!path.empty() && !SceneSerializer::is_screen_prefab(path)) {
+                            load_prefab_and_select(path);
+                        }
                     }
                     ImGui::EndMenu();
                 }
             }
             if (m_screen_section_open) {
                 if (ImGui::BeginMenu(ICON_FA_DISPLAY " Create Screen Entity")) {
-                    if (ImGui::MenuItem("Empty Screen Entity")) {
+                    if (ImGui::MenuItem(ICON_FA_CUBE " Empty Entity")) {
                         auto entity = create_screen_entity(*registry, "New Screen Entity");
                         m_context.selection().select(entity);
                         m_context.scene_state().mark_dirty();
+                    }
+
+                    auto& selection = m_context.selection().selection();
+                    bool has_screen_selection = !selection.empty() && is_screen_space_entity(*registry, selection[0]);
+                    if (ImGui::MenuItem(ICON_FA_SITEMAP " Child of Selected", nullptr, false, has_screen_selection)) {
+                        auto entity = create_screen_entity(*registry, "Child Screen Entity");
+                        set_parent(*registry, entity, selection[0]);
+                        m_context.selection().select(entity);
+                        m_context.scene_state().mark_dirty();
+                    }
+
+                    ImGui::Separator();
+                    render_prefab_submenu(true, false);
+
+                    ImGui::Separator();
+                    if (ImGui::MenuItem(ICON_FA_FILE " From File...")) {
+                        auto path = select_prefab();
+                        if (!path.empty() && SceneSerializer::is_screen_prefab(path)) {
+                            load_prefab_and_select(path);
+                        }
                     }
                     ImGui::EndMenu();
                 }
@@ -180,30 +221,33 @@ void HierarchyPanel::render_world_hierarchy() {
     ImGui::TextDisabled("Add world entity");
 
     if (ImGui::BeginPopup("CreateWorldEntityPopup")) {
-        if (ImGui::MenuItem("Empty Entity")) {
+        if (ImGui::MenuItem(ICON_FA_CUBE " Empty Entity")) {
             auto entity = create_entity(*registry, "New Entity");
             m_context.selection().select(entity);
             m_context.scene_state().mark_dirty();
         }
-        if (ImGui::MenuItem("Child of Selected")) {
-            auto& selection = m_context.selection().selection();
-            if (!selection.empty() && is_world_space_entity(*registry, selection[0])) {
-                auto entity = create_entity(*registry, "Child Entity");
-                set_parent(*registry, entity, selection[0]);
-                m_context.selection().select(entity);
-                m_context.scene_state().mark_dirty();
-            }
+
+        // Child of Selected - only enabled when a world entity is selected
+        auto& selection = m_context.selection().selection();
+        bool has_world_selection = !selection.empty() && is_world_space_entity(*registry, selection[0]);
+        if (ImGui::MenuItem(ICON_FA_SITEMAP " Child of Selected", nullptr, false, has_world_selection)) {
+            auto entity = create_entity(*registry, "Child Entity");
+            set_parent(*registry, entity, selection[0]);
+            m_context.selection().select(entity);
+            m_context.scene_state().mark_dirty();
         }
+
         ImGui::Separator();
-        if (ImGui::MenuItem("From Prefab...")) {
+
+        // Engine and Project prefab submenus (world space)
+        render_prefab_submenu(false, false);
+
+        ImGui::Separator();
+
+        if (ImGui::MenuItem(ICON_FA_FILE " From File...")) {
             auto path = select_prefab();
-            if (!path.empty()) {
-                SceneSerializer serializer(*registry);
-                entt::entity e = serializer.load_prefab(path);
-                if (e != entt::null) {
-                    m_context.selection().select(e);
-                    m_context.scene_state().mark_dirty();
-                }
+            if (!path.empty() && !SceneSerializer::is_screen_prefab(path)) {
+                load_prefab_and_select(path);
             }
         }
         ImGui::EndPopup();
@@ -217,6 +261,8 @@ void HierarchyPanel::render_world_hierarchy() {
             render_entity_node(entity, 0, false);
         }
     }
+
+    render_prefab_drop_target("##WorldDropArea", false, "Cannot drop screen prefab in world section");
 }
 
 void HierarchyPanel::render_screen_hierarchy() {
@@ -231,18 +277,33 @@ void HierarchyPanel::render_screen_hierarchy() {
     ImGui::TextDisabled("Add screen entity");
 
     if (ImGui::BeginPopup("CreateScreenEntityPopup")) {
-        if (ImGui::MenuItem("Empty Screen Entity")) {
+        if (ImGui::MenuItem(ICON_FA_CUBE " Empty Entity")) {
             auto entity = create_screen_entity(*registry, "New Screen Entity");
             m_context.selection().select(entity);
             m_context.scene_state().mark_dirty();
         }
-        if (ImGui::MenuItem("Child of Selected")) {
-            auto& selection = m_context.selection().selection();
-            if (!selection.empty() && is_screen_space_entity(*registry, selection[0])) {
-                auto entity = create_screen_entity(*registry, "Child Screen Entity");
-                set_parent(*registry, entity, selection[0]);
-                m_context.selection().select(entity);
-                m_context.scene_state().mark_dirty();
+
+        // Child of Selected - only enabled when a screen entity is selected
+        auto& selection = m_context.selection().selection();
+        bool has_screen_selection = !selection.empty() && is_screen_space_entity(*registry, selection[0]);
+        if (ImGui::MenuItem(ICON_FA_SITEMAP " Child of Selected", nullptr, false, has_screen_selection)) {
+            auto entity = create_screen_entity(*registry, "Child Screen Entity");
+            set_parent(*registry, entity, selection[0]);
+            m_context.selection().select(entity);
+            m_context.scene_state().mark_dirty();
+        }
+
+        ImGui::Separator();
+
+        // Engine and Project prefab submenus (screen space)
+        render_prefab_submenu(true, false);
+
+        ImGui::Separator();
+
+        if (ImGui::MenuItem(ICON_FA_FILE " From File...")) {
+            auto path = select_prefab();
+            if (!path.empty() && SceneSerializer::is_screen_prefab(path)) {
+                load_prefab_and_select(path);
             }
         }
         ImGui::EndPopup();
@@ -256,6 +317,8 @@ void HierarchyPanel::render_screen_hierarchy() {
             render_entity_node(entity, 0, true);
         }
     }
+
+    render_prefab_drop_target("##ScreenDropArea", true, "Cannot drop world prefab in screen section");
 }
 
 void HierarchyPanel::render_entity_node(entt::entity entity, int depth, bool is_screen_space) {
@@ -526,6 +589,134 @@ void HierarchyPanel::render_entity_node(entt::entity entity, int depth, bool is_
     }
 
     ImGui::PopID();
+}
+
+bool HierarchyPanel::load_prefab_and_select(const std::filesystem::path& path) {
+    auto* registry = m_context.registry();
+    if (!registry) return false;
+
+    SceneSerializer serializer(*registry);
+    entt::entity e = serializer.load_prefab(path);
+    if (e != entt::null) {
+        m_context.selection().select(e);
+        m_context.scene_state().mark_dirty();
+        return true;
+    }
+    return false;
+}
+
+void HierarchyPanel::render_prefab_drop_target(const char* id, bool accept_screen, const char* reject_tooltip) {
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    if (avail.y <= 0) return;
+
+    ImGui::InvisibleButton(id, ImVec2(-1, avail.y > 50 ? 50 : avail.y));
+    if (!ImGui::BeginDragDropTarget()) return;
+
+    // Peek for feedback
+    if (const ImGuiPayload* peek = ImGui::GetDragDropPayload()) {
+        if (peek->IsDataType("ASSET_PATH")) {
+            std::string path(static_cast<const char*>(peek->Data));
+            std::filesystem::path fs_path(path);
+            if (fs_path.extension() == ".prefab") {
+                bool is_screen = SceneSerializer::is_screen_prefab(fs_path);
+                if (is_screen != accept_screen) {
+                    ImGui::SetTooltip("%s", reject_tooltip);
+                }
+            }
+        }
+    }
+
+    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_PATH")) {
+        std::string path(static_cast<const char*>(payload->Data));
+        std::filesystem::path fs_path(path);
+        if (fs_path.extension() == ".prefab") {
+            bool is_screen = SceneSerializer::is_screen_prefab(fs_path);
+            if (is_screen == accept_screen) {
+                load_prefab_and_select(fs_path);
+            }
+        }
+    }
+    ImGui::EndDragDropTarget();
+}
+
+std::vector<std::filesystem::path> HierarchyPanel::scan_engine_prefabs(bool screen_prefabs) {
+    std::vector<std::filesystem::path> result;
+    std::filesystem::path engine_prefabs = std::filesystem::path(engine::platform::executable_directory()) / "assets" / "prefabs";
+
+    if (!std::filesystem::exists(engine_prefabs)) return result;
+
+    for (const auto& entry : std::filesystem::directory_iterator(engine_prefabs)) {
+        if (entry.path().extension() == ".prefab") {
+            std::string stem = entry.path().stem().string();
+            bool is_screen = stem.find("_Screen") != std::string::npos;
+            bool is_world = stem.find("_World") != std::string::npos;
+
+            if (screen_prefabs && is_screen) {
+                result.push_back(entry.path());
+            } else if (!screen_prefabs && is_world) {
+                result.push_back(entry.path());
+            }
+        }
+    }
+
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+std::vector<std::filesystem::path> HierarchyPanel::scan_project_prefabs(bool screen_prefabs) {
+    std::vector<std::filesystem::path> result;
+    std::filesystem::path project_prefabs = std::filesystem::path(m_context.scene_state().project_path()) / "Assets" / "Prefabs";
+
+    if (!std::filesystem::exists(project_prefabs)) return result;
+
+    for (const auto& entry : std::filesystem::directory_iterator(project_prefabs)) {
+        if (entry.path().extension() == ".prefab") {
+            // Check if it's a screen prefab using the serializer's method
+            bool is_screen = SceneSerializer::is_screen_prefab(entry.path());
+
+            if (screen_prefabs == is_screen) {
+                result.push_back(entry.path());
+            }
+        }
+    }
+
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+void HierarchyPanel::render_prefab_submenu(bool is_screen_space, bool as_child) {
+    auto* registry = m_context.registry();
+    if (!registry) return;
+
+    auto render_prefab_list = [&](const char* label, const std::vector<std::filesystem::path>& prefabs) {
+        if (!prefabs.empty()) {
+            if (ImGui::BeginMenu(label)) {
+                for (const auto& prefab_path : prefabs) {
+                    std::string name = prefab_path.stem().string();
+                    if (ImGui::MenuItem(name.c_str())) {
+                        // Capture parent before load_prefab_and_select changes selection
+                        auto& sel = m_context.selection().selection();
+                        entt::entity parent_target = (as_child && !sel.empty()) ? sel[0] : entt::null;
+
+                        if (load_prefab_and_select(prefab_path) && parent_target != entt::null) {
+                            auto& new_sel = m_context.selection().selection();
+                            if (!new_sel.empty()) {
+                                set_parent(*registry, new_sel[0], parent_target);
+                            }
+                        }
+                    }
+                }
+                ImGui::EndMenu();
+            }
+        } else {
+            ImGui::BeginDisabled();
+            ImGui::MenuItem(label);
+            ImGui::EndDisabled();
+        }
+    };
+
+    render_prefab_list(ICON_FA_GEAR " Engine Prefabs", scan_engine_prefabs(is_screen_space));
+    render_prefab_list(ICON_FA_FOLDER " Project Prefabs", scan_project_prefabs(is_screen_space));
 }
 
 }

@@ -186,6 +186,9 @@ void ImageRenderSystem::render(Engine& engine) {
         float r, g, b, a;
         // Texture
         graphics::Texture* texture;
+        // Clip bounds (if has_clip is true)
+        bool has_clip = false;
+        float clip_x = 0, clip_y = 0, clip_w = 0, clip_h = 0;
     };
 
     std::vector<RenderItem> items;
@@ -255,18 +258,46 @@ void ImageRenderSystem::render(Engine& engine) {
             float u1 = image.flip_x ? image.uv_min_x : image.uv_max_x;
             float v1 = image.flip_y ? image.uv_min_y : image.uv_max_y;
 
-            items.push_back({
-                entity,
-                image.layer,
-                true,  // is_screen_space
-                pos_x, pos_y,
-                w, h,
-                0.0f,  // no rotation for screen space
-                1.0f, 1.0f,  // no scale for screen space (already in computed size)
-                u0, v0, u1, v1,
-                image.color_r, image.color_g, image.color_b, image.color_a,
-                texture
-            });
+            // Check for clip bounds
+            bool has_clip = false;
+            float clip_x = 0, clip_y = 0, clip_w = 0, clip_h = 0;
+            if (rect.clip_to != entt::null && m_registry->valid(rect.clip_to)) {
+                ScreenRect* clip_rect = m_registry->try_get<ScreenRect>(rect.clip_to);
+                if (clip_rect && clip_rect->enabled) {
+                    has_clip = true;
+                    clip_x = clip_rect->computed_x;
+                    clip_y = clip_rect->computed_y;
+                    clip_w = clip_rect->computed_width;
+                    clip_h = clip_rect->computed_height;
+                }
+            }
+
+            RenderItem item{};
+            item.entity = entity;
+            item.layer = image.layer;
+            item.is_screen_space = true;
+            item.x = pos_x;
+            item.y = pos_y;
+            item.w = w;
+            item.h = h;
+            item.rotation = 0.0f;
+            item.scale_x = 1.0f;
+            item.scale_y = 1.0f;
+            item.u0 = u0;
+            item.v0 = v0;
+            item.u1 = u1;
+            item.v1 = v1;
+            item.r = image.color_r;
+            item.g = image.color_g;
+            item.b = image.color_b;
+            item.a = image.color_a;
+            item.texture = texture;
+            item.has_clip = has_clip;
+            item.clip_x = clip_x;
+            item.clip_y = clip_y;
+            item.clip_w = clip_w;
+            item.clip_h = clip_h;
+            items.push_back(item);
         }
     }
 
@@ -296,7 +327,25 @@ void ImageRenderSystem::render(Engine& engine) {
 
     constexpr float DEG_TO_RAD = 3.14159265358979323846f / 180.0f;
 
+    int screen_height = window.height();
+    bool scissor_enabled = false;
+
     for (const auto& item : items) {
+        // Handle scissor clipping via RHI abstraction
+        if (item.has_clip) {
+            if (!scissor_enabled) {
+                ctx->enable_scissor_test(true);
+                scissor_enabled = true;
+            }
+            // Convert from top-left origin to OpenGL bottom-left origin
+            int scissor_y = screen_height - static_cast<int>(item.clip_y + item.clip_h);
+            ctx->set_scissor(static_cast<int>(item.clip_x), scissor_y,
+                             static_cast<int>(item.clip_w), static_cast<int>(item.clip_h));
+        } else if (scissor_enabled) {
+            ctx->enable_scissor_test(false);
+            scissor_enabled = false;
+        }
+
         // Set screen space mode
         m_shader.set_bool("u_screen_space", item.is_screen_space);
 
@@ -357,6 +406,11 @@ void ImageRenderSystem::render(Engine& engine) {
 
         // Draw quad
         ctx->draw(6, 0, 1);
+    }
+
+    // Disable scissor if it was enabled
+    if (scissor_enabled) {
+        ctx->enable_scissor_test(false);
     }
 }
 

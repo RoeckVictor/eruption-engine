@@ -3,6 +3,8 @@
 #include "Panel.h"
 #include <entt/entt.hpp>
 #include <string>
+#include <filesystem>
+#include <vector>
 
 namespace editor {
 
@@ -20,6 +22,13 @@ private:
     void render_world_hierarchy();
     void render_screen_hierarchy();
     void render_entity_node(entt::entity entity, int depth = 0, bool is_screen_space = false);
+
+    // Prefab menu helpers
+    void render_prefab_submenu(bool is_screen_space, bool as_child);
+    void render_prefab_drop_target(const char* id, bool accept_screen, const char* reject_tooltip);
+    bool load_prefab_and_select(const std::filesystem::path& path);
+    std::vector<std::filesystem::path> scan_engine_prefabs(bool screen_prefabs);
+    std::vector<std::filesystem::path> scan_project_prefabs(bool screen_prefabs);
 
     EditorContext& m_context;
     char m_filter[128] = "";

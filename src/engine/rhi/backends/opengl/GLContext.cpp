@@ -55,6 +55,14 @@ void GLContext::set_scissor(int x, int y, int w, int h) {
     glScissor(x, y, w, h);
 }
 
+void GLContext::enable_scissor_test(bool enable) {
+    if (enable) {
+        glEnable(GL_SCISSOR_TEST);
+    } else {
+        glDisable(GL_SCISSOR_TEST);
+    }
+}
+
 void GLContext::clear(float r, float g, float b, float a) {
     glClearColor(r, g, b, a);
     glClear(GL_COLOR_BUFFER_BIT);

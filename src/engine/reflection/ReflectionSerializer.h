@@ -6,16 +6,37 @@
 #include "engine/core/Logger.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <functional>
 
 namespace engine::reflection {
 
-/// Serialize all reflected properties of an object to a flat JSON object.
-/// Skips ReadOnly properties. Keys are the C++ member names.
-inline void serialize_properties(const TypeInfo& type_info, const void* obj, nlohmann::json& out) {
+/// Deferred entity reference for post-load resolution.
+/// Stores type_index + offset instead of raw pointer to avoid dangling pointers
+/// when EnTT reallocates component pools during recursive deserialization.
+struct DeferredEntityRef {
+    std::type_index component_type;  // Which component pool the field lives in
+    size_t field_offset;             // Offset of the entt::entity field within the component
+    std::string entity_name;         // Name of the entity to resolve
+
+    DeferredEntityRef(std::type_index type, size_t offset, std::string name)
+        : component_type(type), field_offset(offset), entity_name(std::move(name)) {}
+};
+
+/// Callback type for resolving entity name from entity handle
+using EntityNameResolver = std::function<std::string(entt::entity)>;
+
+/// Serialize all reflected properties to JSON.
+/// If name_resolver is provided, EntityRef properties are serialized as entity names.
+/// If name_resolver is null, EntityRef properties are silently skipped.
+inline void serialize_properties_with_context(
+    const TypeInfo& type_info,
+    const void* obj,
+    nlohmann::json& out,
+    EntityNameResolver name_resolver = nullptr
+) {
     for (const auto& prop : type_info.properties()) {
         if (has_flag(prop.flags, PropertyFlags::ReadOnly)) continue;
 
-        // Bounds check: ensure the property fits within the type's memory layout
         if (prop.offset + prop.size > type_info.size()) {
             Logger::instance().error("Reflection",
                 "Property '%s' offset+size (%zu+%zu) exceeds type size (%zu), skipping",
@@ -41,6 +62,11 @@ inline void serialize_properties(const TypeInfo& type_info, const void* obj, nlo
             case PropertyType::String:
                 out[prop.name] = *static_cast<const std::string*>(prop_ptr);
                 break;
+            case PropertyType::StringList: {
+                const auto* vec = static_cast<const std::vector<std::string>*>(prop_ptr);
+                out[prop.name] = *vec;
+                break;
+            }
             case PropertyType::Enum:
                 out[prop.name] = *static_cast<const int*>(prop_ptr);
                 break;
@@ -60,21 +86,44 @@ inline void serialize_properties(const TypeInfo& type_info, const void* obj, nlo
                 out[prop.name] = { f[0], f[1], f[2], f[3] };
                 break;
             }
+            case PropertyType::EntityRef: {
+                entt::entity entity = *static_cast<const entt::entity*>(prop_ptr);
+                if (entity != entt::null && name_resolver) {
+                    std::string name = name_resolver(entity);
+                    if (!name.empty()) {
+                        out[prop.name] = name;
+                    } else {
+                        out[prop.name] = nullptr;
+                    }
+                } else {
+                    out[prop.name] = nullptr;
+                }
+                break;
+            }
             default:
                 break;
         }
     }
 }
 
-/// Deserialize reflected properties from a flat JSON object into an existing object.
-/// Only writes properties present in the JSON. Skips ReadOnly properties.
-/// Logs a warning on type mismatches.
-inline void deserialize_properties(const TypeInfo& type_info, void* obj, const nlohmann::json& data) {
+/// Convenience overload without entity ref support (EntityRef properties are skipped).
+inline void serialize_properties(const TypeInfo& type_info, const void* obj, nlohmann::json& out) {
+    serialize_properties_with_context(type_info, obj, out, nullptr);
+}
+
+/// Deserialize reflected properties from JSON into an existing object.
+/// If deferred_refs is provided, EntityRef properties are collected for later resolution.
+/// If deferred_refs is null, EntityRef properties are silently skipped.
+inline void deserialize_properties_with_deferred(
+    const TypeInfo& type_info,
+    void* obj,
+    const nlohmann::json& data,
+    std::vector<DeferredEntityRef>* deferred_refs = nullptr
+) {
     for (const auto& prop : type_info.properties()) {
         if (has_flag(prop.flags, PropertyFlags::ReadOnly)) continue;
         if (!data.contains(prop.name)) continue;
 
-        // Bounds check: ensure the property fits within the type's memory layout
         if (prop.offset + prop.size > type_info.size()) {
             Logger::instance().error("Reflection",
                 "Property '%s' offset+size (%zu+%zu) exceeds type size (%zu), skipping",
@@ -101,6 +150,17 @@ inline void deserialize_properties(const TypeInfo& type_info, void* obj, const n
                     break;
                 case PropertyType::String:
                     *static_cast<std::string*>(prop_ptr) = val.get<std::string>();
+                    break;
+                case PropertyType::StringList:
+                    if (val.is_array()) {
+                        auto* vec = static_cast<std::vector<std::string>*>(prop_ptr);
+                        vec->clear();
+                        for (const auto& item : val) {
+                            if (item.is_string()) {
+                                vec->push_back(item.get<std::string>());
+                            }
+                        }
+                    }
                     break;
                 case PropertyType::Enum: {
                     int enum_val = val.get<int>();
@@ -140,6 +200,15 @@ inline void deserialize_properties(const TypeInfo& type_info, void* obj, const n
                         f[3] = val[3].get<float>();
                     }
                     break;
+                case PropertyType::EntityRef:
+                    if (deferred_refs && val.is_string()) {
+                        deferred_refs->emplace_back(
+                            type_info.type_index(),
+                            prop.offset,
+                            val.get<std::string>()
+                        );
+                    }
+                    break;
                 default:
                     break;
             }
@@ -149,6 +218,11 @@ inline void deserialize_properties(const TypeInfo& type_info, void* obj, const n
                 prop.name.c_str(), type_info.name().c_str(), e.what());
         }
     }
+}
+
+/// Convenience overload without entity ref support (EntityRef properties are skipped).
+inline void deserialize_properties(const TypeInfo& type_info, void* obj, const nlohmann::json& data) {
+    deserialize_properties_with_deferred(type_info, obj, data, nullptr);
 }
 
 /// Convenience: default-construct T, then fill from JSON using reflection.

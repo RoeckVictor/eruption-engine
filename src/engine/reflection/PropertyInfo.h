@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <array>
+#include <entt/entt.hpp>
 
 namespace engine::reflection {
 
@@ -15,6 +17,7 @@ enum class PropertyType {
     Float,
     Double,
     String,
+    StringList, // std::vector<std::string>
     Vec2,       // float[2]
     Vec3,       // float[3]
     Vec4,       // float[4] or color
@@ -94,8 +97,19 @@ constexpr PropertyType get_property_type() {
         return PropertyType::Double;
     } else if constexpr (std::is_same_v<T, std::string>) {
         return PropertyType::String;
+    } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
+        return PropertyType::StringList;
+    } else if constexpr (std::is_same_v<T, entt::entity>) {
+        // Must check entt::entity BEFORE is_enum_v because entt::entity is an enum class
+        return PropertyType::EntityRef;
     } else if constexpr (std::is_enum_v<T>) {
         return PropertyType::Enum;
+    } else if constexpr (std::is_same_v<T, std::array<float, 2>>) {
+        return PropertyType::Vec2;
+    } else if constexpr (std::is_same_v<T, std::array<float, 3>>) {
+        return PropertyType::Vec3;
+    } else if constexpr (std::is_same_v<T, std::array<float, 4>>) {
+        return PropertyType::Color;  // RGBA color
     } else {
         return PropertyType::Unknown;
     }

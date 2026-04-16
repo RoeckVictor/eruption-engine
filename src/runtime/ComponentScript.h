@@ -133,6 +133,42 @@ public:
     virtual void on_trigger_stay(const CollisionInfo& info) { (void)info; }
     virtual void on_trigger_exit(const CollisionInfo& info) { (void)info; }
 
+    // --- UI Callbacks (called by UIInteractionSystem) ---
+    /// Called when a Button is clicked (mouse released over the same button that was pressed)
+    virtual void on_button_click(entt::entity button) { (void)button; }
+    /// Called when mouse is pressed down on a Button
+    virtual void on_button_press(entt::entity button) { (void)button; }
+    /// Called when mouse is released from a Button (even if not over it)
+    virtual void on_button_release(entt::entity button) { (void)button; }
+
+    /// Called when pointer enters a UIInteractable element
+    virtual void on_pointer_enter(entt::entity ui_element) { (void)ui_element; }
+    /// Called when pointer exits a UIInteractable element
+    virtual void on_pointer_exit(entt::entity ui_element) { (void)ui_element; }
+
+    /// Called when a Slider value changes
+    virtual void on_slider_changed(entt::entity slider, float value) { (void)slider; (void)value; }
+    /// Called when user starts dragging a Slider
+    virtual void on_slider_drag_start(entt::entity slider) { (void)slider; }
+    /// Called when user stops dragging a Slider
+    virtual void on_slider_drag_end(entt::entity slider) { (void)slider; }
+
+    /// Called when a Checkbox is toggled
+    virtual void on_checkbox_changed(entt::entity checkbox, bool checked) { (void)checkbox; (void)checked; }
+
+    /// Called when a Dropdown selection changes
+    virtual void on_dropdown_changed(entt::entity dropdown, int selected_index) { (void)dropdown; (void)selected_index; }
+
+    /// Called when a ScrollView is scrolled
+    virtual void on_scroll(entt::entity scrollview, float scroll_x, float scroll_y) {
+        (void)scrollview; (void)scroll_x; (void)scroll_y;
+    }
+
+    /// Called when a draggable Panel is being dragged
+    virtual void on_panel_drag(entt::entity panel, float delta_x, float delta_y) {
+        (void)panel; (void)delta_x; (void)delta_y;
+    }
+
     virtual void on_render() {}
     virtual void on_inspector_gui(nlohmann::json& properties) { (void)properties; }
     virtual void on_gizmo() {}

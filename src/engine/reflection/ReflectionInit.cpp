@@ -12,6 +12,7 @@
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
 #include "engine/simulation/SimSurface.h"
+#include "engine/ui/UIComponents.h"
 #include "engine/core/Logger.h"
 #include "ReflectionMacros.h"
 
@@ -80,7 +81,8 @@ REFLECT_TYPE_BEGIN(engine::render::Text)
     REFLECT_PROPERTY_RANGE(color_g, "Color G", 0.0f, 1.0f, 0.01f)
     REFLECT_PROPERTY_RANGE(color_b, "Color B", 0.0f, 1.0f, 0.01f)
     REFLECT_PROPERTY_RANGE(color_a, "Color A", 0.0f, 1.0f, 0.01f)
-    REFLECT_PROPERTY(align, "Alignment")
+    REFLECT_PROPERTY(h_align, "Horizontal Align")
+    REFLECT_PROPERTY(v_align, "Vertical Align")
     REFLECT_PROPERTY_RANGE(line_height, "Line Height", 0.5f, 3.0f, 0.1f)
     REFLECT_PROPERTY(bold, "Bold")
     REFLECT_PROPERTY(italic, "Italic")
@@ -212,6 +214,92 @@ REFLECT_TYPE_BEGIN(engine::simulation::SimSurface)
     REFLECT_PROPERTY_RANGE(chunk_size_y, "Chunk Size Y", 8, 128, 8)
     REFLECT_PROPERTY(generate_colliders, "Generate Colliders")
     REFLECT_PROPERTY(initialized, "Initialized")
+REFLECT_TYPE_END()
+
+// --- UI Components ---
+
+// UIInteractable reflection
+REFLECT_TYPE_BEGIN(engine::ui::UIInteractable)
+    REFLECT_PROPERTY(enabled, "Enabled")
+    REFLECT_PROPERTY(interactable, "Interactable")
+    REFLECT_PROPERTY_ENUM(transition_mode, "Transition Mode", "None", "Color Tint", "Sprite Swap")
+    // Color tint mode
+    REFLECT_PROPERTY(normal_color, "Normal Color")
+    REFLECT_PROPERTY(hovered_color, "Hovered Color")
+    REFLECT_PROPERTY(pressed_color, "Pressed Color")
+    REFLECT_PROPERTY(disabled_color, "Disabled Color")
+    // Sprite swap mode
+    REFLECT_PROPERTY(normal_sprite, "Normal Sprite")
+    REFLECT_PROPERTY(hovered_sprite, "Hovered Sprite")
+    REFLECT_PROPERTY(pressed_sprite, "Pressed Sprite")
+    REFLECT_PROPERTY(disabled_sprite, "Disabled Sprite")
+REFLECT_TYPE_END()
+
+// Button reflection
+// Note: 'enabled' is on UIInteractable, not duplicated here
+REFLECT_TYPE_BEGIN(engine::ui::Button)
+    REFLECT_PROPERTY(click_sound, "Click Sound")
+REFLECT_TYPE_END()
+
+// Slider reflection
+// Note: 'enabled' is on UIInteractable, not duplicated here
+REFLECT_TYPE_BEGIN(engine::ui::Slider)
+    REFLECT_PROPERTY_RANGE(value, "Value", 0.0f, 1.0f, 0.01f)
+    REFLECT_PROPERTY(min_value, "Min Value")
+    REFLECT_PROPERTY(max_value, "Max Value")
+    REFLECT_PROPERTY(whole_numbers, "Whole Numbers")
+    REFLECT_PROPERTY_ENUM(direction, "Direction", "Left to Right", "Right to Left", "Bottom to Top", "Top to Bottom")
+    REFLECT_PROPERTY(fill_rect, "Fill Rect")
+    REFLECT_PROPERTY(handle, "Handle")
+REFLECT_TYPE_END()
+
+// Checkbox reflection
+// Note: 'enabled' is on UIInteractable, not duplicated here
+REFLECT_TYPE_BEGIN(engine::ui::Checkbox)
+    REFLECT_PROPERTY(checked, "Checked")
+    REFLECT_PROPERTY(toggle_group, "Toggle Group")
+    REFLECT_PROPERTY(checkmark, "Checkmark")
+REFLECT_TYPE_END()
+
+// Panel reflection
+REFLECT_TYPE_BEGIN(engine::ui::Panel)
+    REFLECT_PROPERTY(enabled, "Enabled")
+    REFLECT_PROPERTY(blocks_raycast, "Blocks Raycast")
+    REFLECT_PROPERTY(draggable, "Draggable")
+    REFLECT_PROPERTY(drag_handle, "Drag Handle")
+    REFLECT_PROPERTY(close_button, "Close Button")
+REFLECT_TYPE_END()
+
+// ScrollView reflection
+REFLECT_TYPE_BEGIN(engine::ui::ScrollView)
+    REFLECT_PROPERTY(enabled, "Enabled")
+    REFLECT_PROPERTY(horizontal, "Horizontal")
+    REFLECT_PROPERTY(vertical, "Vertical")
+    REFLECT_PROPERTY_RANGE(scroll_sensitivity, "Scroll Sensitivity", 1.0f, 100.0f, 1.0f)
+    REFLECT_PROPERTY(inertia, "Inertia")
+    REFLECT_PROPERTY_RANGE(deceleration_rate, "Deceleration Rate", 0.0f, 1.0f, 0.01f)
+    REFLECT_PROPERTY(elastic, "Elastic")
+    REFLECT_PROPERTY_RANGE(elasticity, "Elasticity", 0.0f, 1.0f, 0.01f)
+    REFLECT_PROPERTY_ENUM(horizontal_scrollbar_visibility, "H Scrollbar Visibility", "Permanent", "Auto Hide", "Auto Hide & Expand")
+    REFLECT_PROPERTY_ENUM(vertical_scrollbar_visibility, "V Scrollbar Visibility", "Permanent", "Auto Hide", "Auto Hide & Expand")
+    REFLECT_PROPERTY(viewport, "Viewport")
+    REFLECT_PROPERTY(content, "Content")
+    REFLECT_PROPERTY(horizontal_scrollbar, "H Scrollbar")
+    REFLECT_PROPERTY(vertical_scrollbar, "V Scrollbar")
+REFLECT_TYPE_END()
+
+// Dropdown reflection
+// Note: 'enabled' is on UIInteractable, not duplicated here
+REFLECT_TYPE_BEGIN(engine::ui::Dropdown)
+    REFLECT_PROPERTY(selected_index, "Selected Index")
+    REFLECT_PROPERTY(options, "Options")
+    REFLECT_PROPERTY(max_visible_items, "Max Visible Items")
+    REFLECT_PROPERTY_RANGE(item_height, "Item Height", 16.0f, 64.0f, 1.0f)
+    REFLECT_PROPERTY(selected_text, "Selected Text")
+    REFLECT_PROPERTY(arrow, "Arrow")
+    REFLECT_PROPERTY(options_panel, "Options Panel")
+    REFLECT_PROPERTY(options_scrollview, "Options ScrollView")
+    REFLECT_PROPERTY(options_content, "Options Content")
 REFLECT_TYPE_END()
 
 namespace engine::reflection {
