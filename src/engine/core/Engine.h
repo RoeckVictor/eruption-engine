@@ -8,6 +8,9 @@
 #include "engine/core/EngineConfig.h"
 #include "engine/core/SubsystemRegistry.h"
 #include "engine/asset/AssetDatabase.h"
+#include "engine/audio/AudioEngine.h"
+#include "engine/platform/InputAction.h"
+#include "engine/save/SaveSystem.h"
 #include "engine/scene/SceneManager.h"
 #include "engine/core/Logger.h"
 #include "engine/rhi/RHIDevice.h"
@@ -30,13 +33,9 @@ public:
     Engine(const Engine&) = delete;
     Engine& operator=(const Engine&) = delete;
 
-    /// Initialize engine with window and subsystems.
-    /// If config_file_path is provided, loads config from JSON (falls back to defaults on error).
     bool init(const char* title, int width, int height, const char* config_file_path = nullptr);
     void run(Application& app);
     void shutdown();
-
-    // --- Subsystem accessors ---
 
     platform::Window& window() { return m_window; }
     const platform::Window& window() const { return m_window; }
@@ -47,14 +46,11 @@ public:
     graphics::RenderContext& render_context() { return m_render_context; }
     const graphics::RenderContext& render_context() const { return m_render_context; }
 
-    /// Access the RHI device (for creating GPU resources)
     rhi::RHIDevice* rhi_device() { return m_rhi_device.get(); }
     const rhi::RHIDevice* rhi_device() const { return m_rhi_device.get(); }
 
-    /// Access the RHI context (for rendering commands)
     rhi::RHIContext* rhi_context();
 
-    /// Access the GPU profiler (may be null if not supported)
     profiler::GPUProfiler* gpu_profiler() { return m_gpu_profiler.get(); }
     const profiler::GPUProfiler* gpu_profiler() const { return m_gpu_profiler.get(); }
 
@@ -64,17 +60,20 @@ public:
     scene::SceneManager& scenes() { return m_scenes; }
     const scene::SceneManager& scenes() const { return m_scenes; }
 
-    /// Subsystem registry for extensible subsystem lookup.
-    /// Built-in subsystems are pre-registered; custom ones can be added.
+    audio::AudioEngine* audio_engine() { return m_audio_engine.get(); }
+    const audio::AudioEngine* audio_engine() const { return m_audio_engine.get(); }
+
+    platform::InputActionMap& action_map() { return m_action_map; }
+    const platform::InputActionMap& action_map() const { return m_action_map; }
+
+    save::SaveSystem* save_system() { return m_save_system.get(); }
+    const save::SaveSystem* save_system() const { return m_save_system.get(); }
+
     SubsystemRegistry& subsystems() { return m_subsystems; }
     const SubsystemRegistry& subsystems() const { return m_subsystems; }
 
-    /// Access engine configuration.
     const EngineConfig& config() const { return m_config; }
 
-    /// Store a game-specific context object on the engine.
-    /// Systems retrieve it in their init() to resolve dependencies.
-    /// Type-safe: app_context<T>() will throw if T doesn't match what was set.
     template<typename T>
     void set_app_context(T& ctx) { m_app_ctx = &ctx; }
 
@@ -87,14 +86,12 @@ public:
         return **ptr;
     }
 
-    /// Try to get the app context, returning nullptr if not set or wrong type.
     template<typename T>
     T* try_app_context() const {
         auto* ptr = std::any_cast<T*>(&m_app_ctx);
         return (ptr && *ptr) ? *ptr : nullptr;
     }
 
-    /// Set the framebuffer clear color (called before render systems each frame).
     void set_clear_color(float r, float g, float b) {
         m_clear_r = r; m_clear_g = g; m_clear_b = b;
     }
@@ -111,6 +108,9 @@ private:
     asset::AssetDatabase m_assets;
     scene::SceneManager m_scenes;
     SubsystemRegistry m_subsystems;
+    std::unique_ptr<audio::AudioEngine> m_audio_engine;
+    platform::InputActionMap m_action_map;
+    std::unique_ptr<save::SaveSystem> m_save_system;
 
     std::any m_app_ctx;
 
@@ -119,4 +119,4 @@ private:
     float m_clear_b = 0.0f;
 };
 
-} // namespace engine
+}

@@ -11,7 +11,10 @@
 #include "editor/inspectors/UIInteractableInspector.h"
 #include "editor/inspectors/ButtonInspector.h"
 #include "editor/inspectors/DropdownInspector.h"
+#include "editor/inspectors/AudioSourceInspector.h"
 #include "engine/reflection/TypeRegistry.h"
+#include "engine/audio/AudioSource.h"
+#include "engine/core/Engine.h"
 #include "engine/core/Transform.h"
 #include "engine/core/ScreenRect.h"
 #include "engine/core/Logger.h"
@@ -486,6 +489,18 @@ void InspectorPanel::render_component_inspector(entt::entity entity, const engin
         }
         else if (type_info.name() == "engine::ui::Button") {
             changed = ButtonInspector::draw(*static_cast<engine::ui::Button*>(component_ptr), m_context.scene_state().project_path());
+        }
+        else if (type_info.name() == "engine::audio::AudioSource") {
+            engine::audio::AudioEngine* audio_eng = nullptr;
+            if (auto* rt = m_context.runtime()) {
+                if (auto* eng = rt->engine()) {
+                    audio_eng = eng->audio_engine();
+                }
+            }
+            changed = AudioSourceInspector::draw(
+                *static_cast<engine::audio::AudioSource*>(component_ptr),
+                m_context.scene_state().project_path(),
+                audio_eng);
         }
         else if (type_info.name() == "engine::ui::Dropdown") {
             auto* reg = m_context.registry();

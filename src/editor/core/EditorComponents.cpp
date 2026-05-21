@@ -16,6 +16,8 @@
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
 #include "engine/ui/UIComponents.h"
+#include "engine/audio/AudioSource.h"
+#include "engine/audio/AudioListener.h"
 #include <cmath>
 #include <unordered_map>
 #include <random>

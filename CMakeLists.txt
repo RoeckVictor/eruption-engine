@@ -66,6 +66,7 @@ target_link_libraries(eruption_engine
         glad
         lz4
         stb
+        miniaudio
         imgui          # ImGuiBackendGLFW.cpp
 )
 

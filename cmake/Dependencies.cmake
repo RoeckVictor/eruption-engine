@@ -73,3 +73,9 @@ add_library(stb INTERFACE)
 target_include_directories(stb INTERFACE
     "${PROJECT_SOURCE_DIR}/external/stb"
 )
+
+# miniaudio - single-header audio library (WAV/MP3/OGG/FLAC)
+add_library(miniaudio INTERFACE)
+target_include_directories(miniaudio INTERFACE
+    "${PROJECT_SOURCE_DIR}/external/miniaudio"
+)

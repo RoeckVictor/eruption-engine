@@ -44,6 +44,9 @@ struct EngineConfig {
     float clear_color_g = 0.1f;
     float clear_color_b = 0.1f;
 
+    float master_volume = 1.0f;
+    int audio_sample_rate = 44100;
+
     std::string asset_base_path = ".";
     double hot_reload_poll_interval = 1.0;
 

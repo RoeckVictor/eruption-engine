@@ -40,6 +40,21 @@ const char* gl_error_to_string(GLenum err) {
 } // anonymous namespace
 
 void GLContext::begin_frame() {
+    // Ensure we're rendering to the default framebuffer at the start of each frame.
+    // ImGui multi-viewport rendering (update_platform_windows) may leave a non-default
+    // framebuffer bound, which would cause subsequent clear/draw calls to target the
+    // wrong surface — resulting in rapid flickering of the main window.
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Reset GL state that may leak from the previous frame's rendering.
+    // Panel FBO rendering (ViewportPanel, ScreenPanel, GamePanel) may leave
+    // depth test, scissor, or blend enabled which interferes with ImGui.
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_STENCIL_TEST);
+    glDisable(GL_CULL_FACE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_TRUE);
 }
 
 void GLContext::end_frame() {

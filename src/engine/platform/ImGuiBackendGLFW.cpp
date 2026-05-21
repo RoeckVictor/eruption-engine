@@ -5,6 +5,7 @@
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
+#include <glad/gl.h>
 #include <GLFW/glfw3.h>
 
 namespace engine::platform {
@@ -69,6 +70,7 @@ public:
             ImGui::UpdatePlatformWindows();
             ImGui::RenderPlatformWindowsDefault();
             glfwMakeContextCurrent(backup_context);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
         }
     }
 

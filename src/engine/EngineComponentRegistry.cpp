@@ -14,6 +14,8 @@
 #include "engine/physics/Rigidbody.h"
 #include "engine/physics/Colliders.h"
 #include "engine/ui/UIComponents.h"
+#include "engine/audio/AudioSource.h"
+#include "engine/audio/AudioListener.h"
 
 namespace engine {
 

@@ -13,6 +13,8 @@
 #include "engine/physics/Colliders.h"
 #include "engine/simulation/SimSurface.h"
 #include "engine/ui/UIComponents.h"
+#include "engine/audio/AudioSource.h"
+#include "engine/audio/AudioListener.h"
 #include "engine/core/Logger.h"
 #include "ReflectionMacros.h"
 
@@ -300,6 +302,26 @@ REFLECT_TYPE_BEGIN(engine::ui::Dropdown)
     REFLECT_PROPERTY(options_panel, "Options Panel")
     REFLECT_PROPERTY(options_scrollview, "Options ScrollView")
     REFLECT_PROPERTY(options_content, "Options Content")
+REFLECT_TYPE_END()
+
+// AudioSource reflection
+REFLECT_TYPE_BEGIN(engine::audio::AudioSource)
+    REFLECT_PROPERTY(enabled, "Enabled")
+    REFLECT_PROPERTY(clip_path, "Audio Clip")
+    REFLECT_PROPERTY_RANGE(volume, "Volume", 0.0f, 1.0f, 0.01f)
+    REFLECT_PROPERTY_RANGE(pitch, "Pitch", 0.1f, 3.0f, 0.01f)
+    REFLECT_PROPERTY_RANGE(pan, "Pan", -1.0f, 1.0f, 0.01f)
+    REFLECT_PROPERTY(loop, "Loop")
+    REFLECT_PROPERTY(play_on_start, "Play On Start")
+    REFLECT_PROPERTY(spatial, "Spatial")
+    REFLECT_PROPERTY_RANGE(min_distance, "Min Distance", 1.0f, 1000.0f, 1.0f)
+    REFLECT_PROPERTY_RANGE(max_distance, "Max Distance", 10.0f, 5000.0f, 10.0f)
+    REFLECT_PROPERTY_ENUM(channel_group, "Channel", "Master", "SFX", "Music", "UI")
+REFLECT_TYPE_END()
+
+// AudioListener reflection
+REFLECT_TYPE_BEGIN(engine::audio::AudioListener)
+    REFLECT_PROPERTY(enabled, "Enabled")
 REFLECT_TYPE_END()
 
 namespace engine::reflection {

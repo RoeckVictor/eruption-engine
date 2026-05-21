@@ -106,6 +106,37 @@ struct ScriptHostAPI {
 
     bool (*raycast)(ScriptHostAPI*, float origin_x, float origin_y, float dir_x, float dir_y,
                     float max_distance, float* hit_x, float* hit_y, float* hit_normal_x, float* hit_normal_y) = nullptr;
+
+    void (*play_sound)(ScriptHostAPI*, const char* clip_path, float volume, float pitch) = nullptr;
+    void (*stop_sound)(ScriptHostAPI*, entt::registry*, entt::entity) = nullptr;
+    void (*set_sound_volume)(ScriptHostAPI*, entt::registry*, entt::entity, float volume) = nullptr;
+    bool (*is_sound_playing)(ScriptHostAPI*, entt::registry*, entt::entity) = nullptr;
+    void (*play_music)(ScriptHostAPI*, const char* clip_path, float volume, float fade_time) = nullptr;
+    void (*stop_music)(ScriptHostAPI*, float fade_time) = nullptr;
+
+    bool (*is_gamepad_connected)(ScriptHostAPI*, int index) = nullptr;
+    int  (*connected_gamepad_count)(ScriptHostAPI*) = nullptr;
+    bool (*is_gamepad_button_held)(ScriptHostAPI*, int index, int button) = nullptr;
+    bool (*is_gamepad_button_pressed)(ScriptHostAPI*, int index, int button) = nullptr;
+    bool (*is_gamepad_button_released)(ScriptHostAPI*, int index, int button) = nullptr;
+    float (*get_gamepad_axis)(ScriptHostAPI*, int index, int axis) = nullptr;
+
+    bool (*is_action_held)(ScriptHostAPI*, const char* name) = nullptr;
+    bool (*is_action_pressed)(ScriptHostAPI*, const char* name) = nullptr;
+    bool (*is_action_released)(ScriptHostAPI*, const char* name) = nullptr;
+    float (*get_action_axis)(ScriptHostAPI*, const char* name) = nullptr;
+
+    bool (*save_game)(ScriptHostAPI*, const char* slot) = nullptr;
+    bool (*load_game)(ScriptHostAPI*, const char* slot) = nullptr;
+    bool (*has_save)(ScriptHostAPI*, const char* slot) = nullptr;
+    bool (*delete_save)(ScriptHostAPI*, const char* slot) = nullptr;
+    void (*set_pref_int)(ScriptHostAPI*, const char* key, int value) = nullptr;
+    int  (*get_pref_int)(ScriptHostAPI*, const char* key, int default_val) = nullptr;
+    void (*set_pref_float)(ScriptHostAPI*, const char* key, float value) = nullptr;
+    float (*get_pref_float)(ScriptHostAPI*, const char* key, float default_val) = nullptr;
+    void (*set_pref_string)(ScriptHostAPI*, const char* key, const char* value) = nullptr;
+    const char* (*get_pref_string)(ScriptHostAPI*, const char* key, const char* default_val) = nullptr;
+    void (*save_prefs)(ScriptHostAPI*) = nullptr;
 };
 
 inline ScriptHostAPI*& get_global_host_api();
@@ -133,38 +164,25 @@ public:
     virtual void on_trigger_stay(const CollisionInfo& info) { (void)info; }
     virtual void on_trigger_exit(const CollisionInfo& info) { (void)info; }
 
-    // --- UI Callbacks (called by UIInteractionSystem) ---
-    /// Called when a Button is clicked (mouse released over the same button that was pressed)
     virtual void on_button_click(entt::entity button) { (void)button; }
-    /// Called when mouse is pressed down on a Button
     virtual void on_button_press(entt::entity button) { (void)button; }
-    /// Called when mouse is released from a Button (even if not over it)
     virtual void on_button_release(entt::entity button) { (void)button; }
 
-    /// Called when pointer enters a UIInteractable element
     virtual void on_pointer_enter(entt::entity ui_element) { (void)ui_element; }
-    /// Called when pointer exits a UIInteractable element
     virtual void on_pointer_exit(entt::entity ui_element) { (void)ui_element; }
 
-    /// Called when a Slider value changes
     virtual void on_slider_changed(entt::entity slider, float value) { (void)slider; (void)value; }
-    /// Called when user starts dragging a Slider
     virtual void on_slider_drag_start(entt::entity slider) { (void)slider; }
-    /// Called when user stops dragging a Slider
     virtual void on_slider_drag_end(entt::entity slider) { (void)slider; }
 
-    /// Called when a Checkbox is toggled
     virtual void on_checkbox_changed(entt::entity checkbox, bool checked) { (void)checkbox; (void)checked; }
 
-    /// Called when a Dropdown selection changes
     virtual void on_dropdown_changed(entt::entity dropdown, int selected_index) { (void)dropdown; (void)selected_index; }
 
-    /// Called when a ScrollView is scrolled
     virtual void on_scroll(entt::entity scrollview, float scroll_x, float scroll_y) {
         (void)scrollview; (void)scroll_x; (void)scroll_y;
     }
 
-    /// Called when a draggable Panel is being dragged
     virtual void on_panel_drag(entt::entity panel, float delta_x, float delta_y) {
         (void)panel; (void)delta_x; (void)delta_y;
     }
@@ -550,6 +568,118 @@ public:
         if (m_host_api && m_host_api->get_viewport_offset)
             m_host_api->get_viewport_offset(m_host_api, &offset.x, &offset.y);
         return offset;
+    }
+
+    void play_sound(const char* clip_path, float volume = 1.0f, float pitch = 1.0f) {
+        if (m_host_api && m_host_api->play_sound)
+            m_host_api->play_sound(m_host_api, clip_path, volume, pitch);
+    }
+    void stop_sound() {
+        if (m_host_api && m_host_api->stop_sound)
+            m_host_api->stop_sound(m_host_api, m_registry, m_entity);
+    }
+    void set_sound_volume(float volume) {
+        if (m_host_api && m_host_api->set_sound_volume)
+            m_host_api->set_sound_volume(m_host_api, m_registry, m_entity, volume);
+    }
+    bool is_sound_playing() {
+        if (!m_host_api || !m_host_api->is_sound_playing) return false;
+        return m_host_api->is_sound_playing(m_host_api, m_registry, m_entity);
+    }
+    void play_music(const char* clip_path, float volume = 1.0f, float fade_time = 0.5f) {
+        if (m_host_api && m_host_api->play_music)
+            m_host_api->play_music(m_host_api, clip_path, volume, fade_time);
+    }
+    void stop_music(float fade_time = 0.5f) {
+        if (m_host_api && m_host_api->stop_music)
+            m_host_api->stop_music(m_host_api, fade_time);
+    }
+
+    bool is_gamepad_connected(int index = 0) {
+        if (!m_host_api || !m_host_api->is_gamepad_connected) return false;
+        return m_host_api->is_gamepad_connected(m_host_api, index);
+    }
+    int connected_gamepad_count() {
+        if (!m_host_api || !m_host_api->connected_gamepad_count) return 0;
+        return m_host_api->connected_gamepad_count(m_host_api);
+    }
+    bool is_gamepad_button_held(int button, int index = 0) {
+        if (!m_host_api || !m_host_api->is_gamepad_button_held) return false;
+        return m_host_api->is_gamepad_button_held(m_host_api, index, button);
+    }
+    bool is_gamepad_button_pressed(int button, int index = 0) {
+        if (!m_host_api || !m_host_api->is_gamepad_button_pressed) return false;
+        return m_host_api->is_gamepad_button_pressed(m_host_api, index, button);
+    }
+    bool is_gamepad_button_released(int button, int index = 0) {
+        if (!m_host_api || !m_host_api->is_gamepad_button_released) return false;
+        return m_host_api->is_gamepad_button_released(m_host_api, index, button);
+    }
+    float get_gamepad_axis(int axis, int index = 0) {
+        if (!m_host_api || !m_host_api->get_gamepad_axis) return 0.0f;
+        return m_host_api->get_gamepad_axis(m_host_api, index, axis);
+    }
+
+    bool is_action_held(const char* name) {
+        if (!m_host_api || !m_host_api->is_action_held) return false;
+        return m_host_api->is_action_held(m_host_api, name);
+    }
+    bool is_action_pressed(const char* name) {
+        if (!m_host_api || !m_host_api->is_action_pressed) return false;
+        return m_host_api->is_action_pressed(m_host_api, name);
+    }
+    bool is_action_released(const char* name) {
+        if (!m_host_api || !m_host_api->is_action_released) return false;
+        return m_host_api->is_action_released(m_host_api, name);
+    }
+    float get_axis(const char* name) {
+        if (!m_host_api || !m_host_api->get_action_axis) return 0.0f;
+        return m_host_api->get_action_axis(m_host_api, name);
+    }
+
+    bool save_game(const char* slot) {
+        if (!m_host_api || !m_host_api->save_game) return false;
+        return m_host_api->save_game(m_host_api, slot);
+    }
+    bool load_game(const char* slot) {
+        if (!m_host_api || !m_host_api->load_game) return false;
+        return m_host_api->load_game(m_host_api, slot);
+    }
+    bool has_save(const char* slot) {
+        if (!m_host_api || !m_host_api->has_save) return false;
+        return m_host_api->has_save(m_host_api, slot);
+    }
+    bool delete_save(const char* slot) {
+        if (!m_host_api || !m_host_api->delete_save) return false;
+        return m_host_api->delete_save(m_host_api, slot);
+    }
+    void set_pref_int(const char* key, int value) {
+        if (m_host_api && m_host_api->set_pref_int)
+            m_host_api->set_pref_int(m_host_api, key, value);
+    }
+    int get_pref_int(const char* key, int default_val = 0) {
+        if (!m_host_api || !m_host_api->get_pref_int) return default_val;
+        return m_host_api->get_pref_int(m_host_api, key, default_val);
+    }
+    void set_pref_float(const char* key, float value) {
+        if (m_host_api && m_host_api->set_pref_float)
+            m_host_api->set_pref_float(m_host_api, key, value);
+    }
+    float get_pref_float(const char* key, float default_val = 0.0f) {
+        if (!m_host_api || !m_host_api->get_pref_float) return default_val;
+        return m_host_api->get_pref_float(m_host_api, key, default_val);
+    }
+    void set_pref_string(const char* key, const char* value) {
+        if (m_host_api && m_host_api->set_pref_string)
+            m_host_api->set_pref_string(m_host_api, key, value);
+    }
+    const char* get_pref_string(const char* key, const char* default_val = "") {
+        if (!m_host_api || !m_host_api->get_pref_string) return default_val;
+        return m_host_api->get_pref_string(m_host_api, key, default_val);
+    }
+    void save_prefs() {
+        if (m_host_api && m_host_api->save_prefs)
+            m_host_api->save_prefs(m_host_api);
     }
 
 protected:

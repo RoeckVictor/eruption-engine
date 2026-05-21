@@ -32,4 +32,6 @@
     X(engine::ui::Checkbox) \
     X(engine::ui::Panel) \
     X(engine::ui::ScrollView) \
-    X(engine::ui::Dropdown)
+    X(engine::ui::Dropdown) \
+    X(engine::audio::AudioSource) \
+    X(engine::audio::AudioListener)

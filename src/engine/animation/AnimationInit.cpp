@@ -13,6 +13,8 @@
 #include "engine/physics/Colliders.h"
 #include "engine/simulation/SimSurface.h"
 #include "engine/ui/UIComponents.h"
+#include "engine/audio/AudioSource.h"
+#include "engine/audio/AudioListener.h"
 #include "engine/core/Logger.h"
 
 namespace engine::animation {

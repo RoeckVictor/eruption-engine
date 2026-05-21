@@ -70,6 +70,13 @@ Result<EngineConfig, ErrorInfo> EngineConfig::load_from_json(const std::string& 
         if (graphics.contains("clear_color_b")) config.clear_color_b = graphics["clear_color_b"].get<float>();
     }
 
+    // Audio section
+    if (json.contains("audio")) {
+        const auto& audio = json["audio"];
+        if (audio.contains("master_volume")) config.master_volume = audio["master_volume"].get<float>();
+        if (audio.contains("sample_rate")) config.audio_sample_rate = audio["sample_rate"].get<int>();
+    }
+
     // Assets section
     if (json.contains("assets")) {
         const auto& assets = json["assets"];

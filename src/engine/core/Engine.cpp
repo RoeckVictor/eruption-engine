@@ -3,6 +3,7 @@
 #include "engine/core/Log.h"
 #include "engine/rhi/RHI.h"
 #include "engine/profiler/Profiler.h"
+#include "engine/save/SaveSystem.h"
 
 namespace engine {
 
@@ -75,6 +76,21 @@ bool Engine::init(const char* title, int width, int height, const char* config_f
     m_clear_g = m_config.clear_color_g;
     m_clear_b = m_config.clear_color_b;
 
+    // Initialize audio engine
+    m_audio_engine = std::make_unique<audio::AudioEngine>();
+    if (m_audio_engine->init(m_config.audio_sample_rate)) {
+        m_audio_engine->set_master_volume(m_config.master_volume);
+        m_subsystems.register_subsystem(*m_audio_engine, "AudioEngine");
+    } else {
+        ENGINE_LOG_WARN("Audio engine failed to initialize -- audio will be disabled");
+        m_audio_engine.reset();
+    }
+
+    // Initialize save system
+    m_save_system = std::make_unique<save::SaveSystem>();
+    m_save_system->init(title ? title : "EruptionGame");
+    m_subsystems.register_subsystem(*m_save_system, "SaveSystem");
+
     // Register built-in subsystems in the registry for extensible lookup
     m_subsystems.register_subsystem(m_window, "Window");
     m_subsystems.register_subsystem(m_input, "Input");
@@ -117,6 +133,7 @@ void Engine::run(Application& app) {
             m_timer.update();
             m_window.poll_events();
             m_input.update(m_window);
+            m_action_map.evaluate(m_input);
         }
 
         float dt = static_cast<float>(m_timer.delta_time());
@@ -190,6 +207,14 @@ void Engine::run(Application& app) {
 
 void Engine::shutdown() {
     m_subsystems.clear();
+    if (m_save_system) {
+        m_save_system->shutdown();
+        m_save_system.reset();
+    }
+    if (m_audio_engine) {
+        m_audio_engine->shutdown();
+        m_audio_engine.reset();
+    }
     m_assets.shutdown();
     if (m_gpu_profiler) {
         m_gpu_profiler->shutdown();

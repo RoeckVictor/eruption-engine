@@ -22,6 +22,11 @@
 #include "engine/simulation/MaterialDefs.h"
 #include "engine/simulation/MaterialLibrary.h"
 #include "engine/profiler/Profiler.h"
+#include "engine/audio/AudioEngine.h"
+#include "engine/audio/AudioSource.h"
+#include "engine/audio/AudioListener.h"
+#include "engine/platform/InputAction.h"
+#include "engine/save/SaveSystem.h"
 #include "editor/scripting/ScriptManager.h"
 #include "runtime/ScriptComponent.h"
 #include "engine/prefab/PrefabManager.h"
@@ -607,6 +612,202 @@ static void host_get_viewport_offset(runtime::ScriptHostAPI* api, float* x, floa
     *y = rt->viewport_y();
 }
 
+static void host_play_sound(runtime::ScriptHostAPI* api, const char* clip_path, float volume, float pitch) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine || !engine->audio_engine() || !clip_path) return;
+    engine::audio::PlayParams p;
+    p.volume = volume;
+    p.pitch = pitch;
+    p.group = 1; // SFX
+    engine->audio_engine()->play(clip_path, p);
+}
+
+static void host_stop_sound(runtime::ScriptHostAPI* api, entt::registry* reg, entt::entity entity) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine || !engine->audio_engine() || !reg) return;
+    auto* src = reg->try_get<engine::audio::AudioSource>(entity);
+    if (src && src->_playback_handle) {
+        engine->audio_engine()->stop(src->_playback_handle);
+        src->_playback_handle = 0;
+        src->_is_playing = false;
+    }
+}
+
+static void host_set_sound_volume(runtime::ScriptHostAPI* api, entt::registry* reg, entt::entity entity, float volume) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine || !engine->audio_engine() || !reg) return;
+    auto* src = reg->try_get<engine::audio::AudioSource>(entity);
+    if (src && src->_playback_handle) {
+        engine->audio_engine()->set_volume(src->_playback_handle, volume);
+        src->volume = volume;
+    }
+}
+
+static bool host_is_sound_playing(runtime::ScriptHostAPI* api, entt::registry* reg, entt::entity entity) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine || !engine->audio_engine() || !reg) return false;
+    auto* src = reg->try_get<engine::audio::AudioSource>(entity);
+    return src && src->_playback_handle && engine->audio_engine()->is_playing(src->_playback_handle);
+}
+
+static void host_play_music(runtime::ScriptHostAPI* api, const char* clip_path, float volume, float /*fade_time*/) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine || !engine->audio_engine() || !clip_path) return;
+    engine::audio::PlayParams p;
+    p.volume = volume;
+    p.loop = true;
+    p.group = 2; // Music
+    engine->audio_engine()->play(clip_path, p);
+}
+
+static void host_stop_music(runtime::ScriptHostAPI* api, float /*fade_time*/) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine || !engine->audio_engine()) return;
+    // Stop all sounds in music group -- simplified approach
+    engine->audio_engine()->stop_all();
+}
+
+static bool host_is_gamepad_connected(runtime::ScriptHostAPI* api, int index) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    return engine ? engine->input().is_gamepad_connected(index) : false;
+}
+
+static int host_connected_gamepad_count(runtime::ScriptHostAPI* api) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    return engine ? engine->input().connected_gamepad_count() : 0;
+}
+
+static bool host_is_gamepad_button_held(runtime::ScriptHostAPI* api, int index, int button) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    return engine ? engine->input().is_gamepad_button_held(index, static_cast<engine::platform::GamepadButton>(button)) : false;
+}
+
+static bool host_is_gamepad_button_pressed(runtime::ScriptHostAPI* api, int index, int button) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    return engine ? engine->input().is_gamepad_button_pressed(index, static_cast<engine::platform::GamepadButton>(button)) : false;
+}
+
+static bool host_is_gamepad_button_released(runtime::ScriptHostAPI* api, int index, int button) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    return engine ? engine->input().is_gamepad_button_released(index, static_cast<engine::platform::GamepadButton>(button)) : false;
+}
+
+static float host_get_gamepad_axis(runtime::ScriptHostAPI* api, int index, int axis) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    return engine ? engine->input().get_gamepad_axis(index, static_cast<engine::platform::GamepadAxis>(axis)) : 0.0f;
+}
+
+// ---- Input Action host functions ----
+
+static bool host_is_action_held(runtime::ScriptHostAPI* api, const char* name) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    return engine ? engine->action_map().is_held(name) : false;
+}
+
+static bool host_is_action_pressed(runtime::ScriptHostAPI* api, const char* name) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    return engine ? engine->action_map().is_pressed(name) : false;
+}
+
+static bool host_is_action_released(runtime::ScriptHostAPI* api, const char* name) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    return engine ? engine->action_map().is_released(name) : false;
+}
+
+static float host_get_action_axis(runtime::ScriptHostAPI* api, const char* name) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    return engine ? engine->action_map().get_axis(name) : 0.0f;
+}
+
+// ---- Save/Load host functions ----
+
+static bool host_save_game(runtime::ScriptHostAPI* api, const char* slot) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine) return false;
+    auto* save_sys = engine->subsystems().get<engine::save::SaveSystem>();
+    if (!save_sys) return false;
+    auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
+    if (!rt || !rt->editor_registry()) return false;
+    return save_sys->save_game_simple(slot, *rt->editor_registry());
+}
+
+static bool host_load_game(runtime::ScriptHostAPI* api, const char* slot) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine) return false;
+    auto* save_sys = engine->subsystems().get<engine::save::SaveSystem>();
+    if (!save_sys) return false;
+    auto* rt = static_cast<RuntimeContext*>(api->runtime_ctx);
+    if (!rt || !rt->editor_registry()) return false;
+    return save_sys->load_game_simple(slot, *rt->editor_registry());
+}
+
+static bool host_has_save(runtime::ScriptHostAPI* api, const char* slot) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine) return false;
+    auto* save_sys = engine->subsystems().get<engine::save::SaveSystem>();
+    return save_sys ? save_sys->has_save(slot) : false;
+}
+
+static bool host_delete_save(runtime::ScriptHostAPI* api, const char* slot) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine) return false;
+    auto* save_sys = engine->subsystems().get<engine::save::SaveSystem>();
+    return save_sys ? save_sys->delete_save(slot) : false;
+}
+
+static void host_set_pref_int(runtime::ScriptHostAPI* api, const char* key, int value) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine) return;
+    auto* save_sys = engine->subsystems().get<engine::save::SaveSystem>();
+    if (save_sys) save_sys->set_int(key, value);
+}
+
+static int host_get_pref_int(runtime::ScriptHostAPI* api, const char* key, int default_val) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine) return default_val;
+    auto* save_sys = engine->subsystems().get<engine::save::SaveSystem>();
+    return save_sys ? save_sys->get_int(key, default_val) : default_val;
+}
+
+static void host_set_pref_float(runtime::ScriptHostAPI* api, const char* key, float value) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine) return;
+    auto* save_sys = engine->subsystems().get<engine::save::SaveSystem>();
+    if (save_sys) save_sys->set_float(key, value);
+}
+
+static float host_get_pref_float(runtime::ScriptHostAPI* api, const char* key, float default_val) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine) return default_val;
+    auto* save_sys = engine->subsystems().get<engine::save::SaveSystem>();
+    return save_sys ? save_sys->get_float(key, default_val) : default_val;
+}
+
+static void host_set_pref_string(runtime::ScriptHostAPI* api, const char* key, const char* value) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine) return;
+    auto* save_sys = engine->subsystems().get<engine::save::SaveSystem>();
+    if (save_sys) save_sys->set_string(key, value ? value : "");
+}
+
+static const char* host_get_pref_string(runtime::ScriptHostAPI* api, const char* key, const char* default_val) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine) return default_val;
+    auto* save_sys = engine->subsystems().get<engine::save::SaveSystem>();
+    if (!save_sys) return default_val;
+    // Return from a thread-local buffer since we need the string to live beyond this call
+    static thread_local std::string s_buf;
+    s_buf = save_sys->get_string(key, default_val ? default_val : "");
+    return s_buf.c_str();
+}
+
+static void host_save_prefs(runtime::ScriptHostAPI* api) {
+    auto* engine = static_cast<engine::Engine*>(api->engine_ctx);
+    if (!engine) return;
+    auto* save_sys = engine->subsystems().get<engine::save::SaveSystem>();
+    if (save_sys) save_sys->save_prefs();
+}
+
 RuntimeContext::RuntimeContext() = default;
 
 RuntimeContext::~RuntimeContext() {
@@ -686,6 +887,41 @@ void RuntimeContext::init(entt::registry* editor_registry, ScriptManager* script
     // Screen info
     m_host_api.get_screen_size = &host_get_screen_size;
     m_host_api.get_viewport_offset = &host_get_viewport_offset;
+
+    // Audio
+    m_host_api.play_sound = &host_play_sound;
+    m_host_api.stop_sound = &host_stop_sound;
+    m_host_api.set_sound_volume = &host_set_sound_volume;
+    m_host_api.is_sound_playing = &host_is_sound_playing;
+    m_host_api.play_music = &host_play_music;
+    m_host_api.stop_music = &host_stop_music;
+
+    // Gamepad
+    m_host_api.is_gamepad_connected = &host_is_gamepad_connected;
+    m_host_api.connected_gamepad_count = &host_connected_gamepad_count;
+    m_host_api.is_gamepad_button_held = &host_is_gamepad_button_held;
+    m_host_api.is_gamepad_button_pressed = &host_is_gamepad_button_pressed;
+    m_host_api.is_gamepad_button_released = &host_is_gamepad_button_released;
+    m_host_api.get_gamepad_axis = &host_get_gamepad_axis;
+
+    // Input Actions
+    m_host_api.is_action_held = &host_is_action_held;
+    m_host_api.is_action_pressed = &host_is_action_pressed;
+    m_host_api.is_action_released = &host_is_action_released;
+    m_host_api.get_action_axis = &host_get_action_axis;
+
+    // Save/Load
+    m_host_api.save_game = &host_save_game;
+    m_host_api.load_game = &host_load_game;
+    m_host_api.has_save = &host_has_save;
+    m_host_api.delete_save = &host_delete_save;
+    m_host_api.set_pref_int = &host_set_pref_int;
+    m_host_api.get_pref_int = &host_get_pref_int;
+    m_host_api.set_pref_float = &host_set_pref_float;
+    m_host_api.get_pref_float = &host_get_pref_float;
+    m_host_api.set_pref_string = &host_set_pref_string;
+    m_host_api.get_pref_string = &host_get_pref_string;
+    m_host_api.save_prefs = &host_save_prefs;
 }
 
 void RuntimeContext::play(const SceneSettings& settings) {
@@ -764,6 +1000,24 @@ void RuntimeContext::play(const SceneSettings& settings) {
     m_frame_count = 0;
     m_fixed_time_accumulator = 0.0f;
 
+    // Trigger play_on_start audio sources
+    if (m_engine && m_engine->audio_engine() && m_editor_registry) {
+        auto view = m_editor_registry->view<engine::audio::AudioSource>();
+        for (auto entity : view) {
+            auto& src = view.get<engine::audio::AudioSource>(entity);
+            if (src.enabled && src.play_on_start && !src.clip_path.empty()) {
+                engine::audio::PlayParams params;
+                params.volume = src.volume;
+                params.pitch  = src.pitch;
+                params.pan    = src.pan;
+                params.loop   = src.loop;
+                params.group  = src.channel_group;
+                src._playback_handle = m_engine->audio_engine()->play(src.clip_path, params);
+                src._is_playing = (src._playback_handle != 0);
+            }
+        }
+    }
+
     engine::Logger::instance().info("Runtime", "Entered play mode with physics system");
 }
 
@@ -809,6 +1063,11 @@ void RuntimeContext::stop() {
     // Note: We intentionally do NOT save script properties here.
     // Play-mode changes are temporary and should reset when stopping.
     // The original script_properties (from edit mode) will be restored with the scene.
+
+    // Stop all playing audio
+    if (m_engine && m_engine->audio_engine()) {
+        m_engine->audio_engine()->stop_all();
+    }
 
     shutdown_scripts();
     m_previously_enabled_script_entities.clear();
@@ -912,6 +1171,75 @@ void RuntimeContext::update(float dt) {
     if (m_animation_system && m_engine) {
         PROFILE_SCOPE("Runtime::Animation");
         m_animation_system->update(*m_engine, dt);
+    }
+
+    // Update audio: process pending play requests, sync spatial audio, check finished sounds
+    if (m_engine && m_engine->audio_engine() && m_editor_registry) {
+        PROFILE_SCOPE("Runtime::Audio");
+        auto* audio = m_engine->audio_engine();
+
+        // Find active listener position
+        float listener_x = 0.0f, listener_y = 0.0f;
+        bool has_listener = false;
+        {
+            auto view = m_editor_registry->view<engine::audio::AudioListener, engine::Transform>();
+            for (auto entity : view) {
+                auto& listener = view.get<engine::audio::AudioListener>(entity);
+                if (!listener.enabled) continue;
+                auto& t = view.get<engine::Transform>(entity);
+                listener_x = t.world_x;
+                listener_y = t.world_y;
+                has_listener = true;
+                break;
+            }
+        }
+
+        auto view = m_editor_registry->view<engine::audio::AudioSource>();
+        for (auto entity : view) {
+            auto& src = view.get<engine::audio::AudioSource>(entity);
+            if (!src.enabled) continue;
+
+            // Start pending sounds (from script API calls)
+            if (src._needs_start && !src.clip_path.empty()) {
+                engine::audio::PlayParams params;
+                params.volume = src.volume;
+                params.pitch  = src.pitch;
+                params.pan    = src.pan;
+                params.loop   = src.loop;
+                params.group  = src.channel_group;
+                src._playback_handle = audio->play(src.clip_path, params);
+                src._is_playing = (src._playback_handle != 0);
+                src._needs_start = false;
+            }
+
+            // Update spatial audio
+            if (src._is_playing && src.spatial && has_listener) {
+                auto* t = m_editor_registry->try_get<engine::Transform>(entity);
+                if (t) {
+                    float dx = t->world_x - listener_x;
+                    float dist = std::sqrt(dx * dx + (t->world_y - listener_y) * (t->world_y - listener_y));
+                    float max_d = src.max_distance > 0.0f ? src.max_distance : 1.0f;
+                    float pan = dx / max_d;
+                    pan = pan < -1.0f ? -1.0f : (pan > 1.0f ? 1.0f : pan);
+                    float attenuation = 1.0f;
+                    if (dist > src.min_distance) {
+                        float range = src.max_distance - src.min_distance;
+                        attenuation = (range > 0.0f) ? (1.0f - (dist - src.min_distance) / range) : 0.0f;
+                        if (attenuation < 0.0f) attenuation = 0.0f;
+                    }
+                    audio->set_pan(src._playback_handle, pan);
+                    audio->set_volume(src._playback_handle, src.volume * attenuation);
+                }
+            }
+
+            // Sync playing state
+            if (src._is_playing && src._playback_handle != 0) {
+                if (!audio->is_playing(src._playback_handle)) {
+                    src._is_playing = false;
+                    src._playback_handle = 0;
+                }
+            }
+        }
     }
 
     // Update screen rects with actual viewport dimensions (fixed pixel sizes, anchor-based positioning)
