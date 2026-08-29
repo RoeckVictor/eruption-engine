@@ -20,9 +20,17 @@ layout(std430, binding = 5) coherent buffer ExtractionBuffer {
     uint extract_data[];    // Packed entries: 3 uints per pixel
 };
 
+#ifdef VULKAN
+layout(push_constant) uniform PushConstants {
+    int u_grid_width;
+    int u_grid_height;
+    uint u_pixel_size;
+};
+#else
 uniform int u_grid_width;
 uniform int u_grid_height;
 uniform uint u_pixel_size;
+#endif
 
 #define PIXEL_READ_SSBO pixels_a
 #include "include/pixel_access.glsl"

@@ -1,5 +1,9 @@
 #version 450 core
 
+#ifdef VULKAN
+#define gl_VertexID gl_VertexIndex
+#endif
+
 struct Particle {
     vec2 pos;
     vec2 vel;
@@ -13,15 +17,25 @@ layout(std430, binding = 3) readonly buffer ParticleBuffer {
     Particle particles[];
 };
 
+#ifdef VULKAN
+layout(push_constant) uniform PushConstants {
+    vec2 u_camera_pos;
+    vec2 u_screen_size;
+    float u_zoom;
+    vec2 u_grid_origin;
+    int u_grid_height;
+};
+#else
 uniform vec2  u_camera_pos;
 uniform vec2  u_screen_size;
 uniform float u_zoom;
 uniform vec2  u_grid_origin;
 uniform int   u_grid_height;
+#endif
 
-flat out uint v_material;
-flat out uint v_alive;
-flat out vec4 v_color;
+layout(location = 0) flat out uint v_material;
+layout(location = 1) flat out uint v_alive;
+layout(location = 2) flat out vec4 v_color;
 
 void main() {
     Particle p = particles[gl_VertexID];

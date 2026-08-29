@@ -1,4 +1,5 @@
 #include "GLTexture.h"
+#include "engine/core/Log.h"
 #include <glad/gl.h>
 #include <cstring>
 
@@ -229,7 +230,13 @@ void GLTexture::readback(int x, int y, int w, int h, void* dst, size_t dst_size)
     if (!m_valid || !dst) return;
     if (m_dimension != TextureDimension::Tex2D) return;  // Only 2D supported for now
 
-    (void)dst_size;  // Could add size validation
+    // Validate destination buffer size
+    size_t bpp = 4; // default RGBA
+    size_t required = static_cast<size_t>(w) * h * bpp;
+    if (dst_size < required) {
+        ENGINE_ERR("GLTexture::readback: destination buffer too small (%zu < %zu)", dst_size, required);
+        return;
+    }
 
     // Create a temporary framebuffer to read from the texture
     GLuint fbo;

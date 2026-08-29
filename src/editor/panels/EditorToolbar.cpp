@@ -7,6 +7,8 @@
 #include "editor/gizmos/GizmoRenderer.h"
 #include "editor/icons/IconsFontAwesome6.h"
 
+#include "engine/rhi/RHIDevice.h"
+
 #include <imgui.h>
 #include <imgui_internal.h>
 
@@ -61,6 +63,7 @@ void EditorToolbar::render() {
 
         render_gizmo_visibility_popup();
 
+        render_backend_info();
         render_script_status();
     }
     ImGui::End();
@@ -274,6 +277,29 @@ void EditorToolbar::render_gizmo_visibility_popup() {
 
         ImGui::EndPopup();
     }
+}
+
+void EditorToolbar::render_backend_info() {
+    auto* device = engine::rhi::get_current_device();
+    if (!device) return;
+
+    const char* api_name = "Unknown";
+    switch (device->backend()) {
+        case engine::rhi::Backend::OpenGL: api_name = "OpenGL"; break;
+        case engine::rhi::Backend::Vulkan: api_name = "Vulkan"; break;
+        case engine::rhi::Backend::D3D12:  api_name = "D3D12";  break;
+        case engine::rhi::Backend::Metal:  api_name = "Metal";  break;
+    }
+
+    char label[128];
+    snprintf(label, sizeof(label), "%s | %s", api_name, device->renderer_name());
+
+    float text_width = ImGui::CalcTextSize(label).x;
+    float script_status_width = 200.0f;
+    float x = ImGui::GetWindowWidth() - script_status_width - text_width - 20.0f;
+    ImGui::SameLine();
+    ImGui::SetCursorPosX(x);
+    ImGui::TextDisabled("%s", label);
 }
 
 void EditorToolbar::render_script_status() {

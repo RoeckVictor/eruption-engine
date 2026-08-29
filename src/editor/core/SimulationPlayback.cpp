@@ -182,8 +182,15 @@ void SimulationPlayback::init(engine::physics::PhysicsWorld* physics_world,
         }
 
         // Create RGBA8 color texture for viewport display
+        // Must include Storage flag — compute shader writes to this as a storage image.
+        engine::rhi::TextureUsageFlags color_usage = engine::rhi::TextureUsageFlags::Sampled
+                                                   | engine::rhi::TextureUsageFlags::Storage
+                                                   | engine::rhi::TextureUsageFlags::TransferDst;
         if (!state->color_texture.create_2d(parsed.width, parsed.height,
-                                             engine::graphics::TextureFormat::RGBA8)) {
+                                             engine::graphics::TextureFormat::RGBA8,
+                                             engine::graphics::TextureFilter::Nearest,
+                                             engine::graphics::TextureWrap::ClampToEdge,
+                                             nullptr, color_usage)) {
             engine::Logger::instance().error("Runtime", "Failed to create color texture");
             state->simulation.shutdown();
             state->pixel_grid.shutdown();
@@ -369,7 +376,8 @@ void SimulationPlayback::update(uint64_t frame_count) {
         {
             PROFILE_SCOPE("Sim::ParticleReintegrate");
             state->particle_simulation.reintegrate(
-                state->particle_buffer, state->pixel_grid, m_render_context);
+                state->particle_buffer, state->pixel_grid, m_render_context,
+                &state->simulation.material_ssbo());
         }
 
         {
@@ -377,7 +385,7 @@ void SimulationPlayback::update(uint64_t frame_count) {
             m_color_shader.use();
             state->pixel_grid.bind_read_ssbo(0);
             state->palette_ssbo.bind_base(1);
-            state->color_texture.bind_as_image(0, engine::graphics::ImageAccess::WriteOnly);
+            state->color_texture.bind_as_image(7, engine::graphics::ImageAccess::WriteOnly);
             m_color_shader.set_int("u_grid_width", state->width);
             m_color_shader.set_int("u_grid_height", state->height);
             m_color_shader.set_uint("u_pixel_size", static_cast<uint32_t>(state->pixel_grid.pixel_size()));

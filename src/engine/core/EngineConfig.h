@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/core/Result.h"
+#include "engine/rhi/RHITypes.h"
 #include <string>
 
 namespace engine {
@@ -9,6 +10,7 @@ namespace engine {
 // All hard-coded constants should be moved here to allow runtime configuration
 // Can be loaded from JSON via load_from_json() or used with default values
 struct EngineConfig {
+    rhi::Backend graphics_backend = rhi::Backend::OpenGL;
     int max_fixed_steps = 8;
     float pixels_per_meter = 32.0f;
 

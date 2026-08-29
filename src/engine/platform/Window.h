@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/platform/KeyCode.h"
+#include <vector>
 
 struct GLFWwindow;
 
@@ -41,6 +42,13 @@ public:
 
     static void* get_gl_proc_address(const char* name);
 
+    // Vulkan support: query required instance extensions and create a surface.
+    // Uses void* to avoid pulling Vulkan headers into platform code.
+    static std::vector<const char*> get_required_vulkan_extensions();
+    void* create_vulkan_surface(void* vk_instance);
+
+    GraphicsAPI graphics_api() const { return m_api; }
+
     void on_framebuffer_resize(int width, int height);
     void on_scroll(float y_offset);
     void on_focus(bool focused);
@@ -57,6 +65,7 @@ private:
     void get_cursor_position(double& x, double& y) const;
 
     void* m_handle = nullptr;
+    GraphicsAPI m_api = GraphicsAPI::None;
     int m_width = 0;
     int m_height = 0;
     float m_scroll_accum = 0.0f;

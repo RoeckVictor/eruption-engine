@@ -14,12 +14,23 @@ layout(std430, binding = 1) readonly buffer PaletteBuffer {
 };
 
 // Output color texture (write) - RGBA8 normalized for ImGui display
-layout(rgba8, binding = 0) writeonly uniform image2D u_color_texture;
+// Binding 7 avoids conflict with SSBOs at 0,1 (Vulkan requires unique bindings
+// per descriptor set; OpenGL uses separate namespaces so any number works).
+layout(rgba8, binding = 7) writeonly uniform image2D u_color_texture;
 
+#ifdef VULKAN
+layout(push_constant) uniform PushConstants {
+    int u_grid_width;
+    int u_grid_height;
+    uint u_pixel_size;
+    uint u_palette_size;
+};
+#else
 uniform int u_grid_width;
 uniform int u_grid_height;
 uniform uint u_pixel_size;
 uniform uint u_palette_size;
+#endif
 
 #include "include/pixel_access.glsl"
 

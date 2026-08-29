@@ -41,7 +41,8 @@ public:
     bool create_2d(int width, int height, TextureFormat format,
                    TextureFilter filter = TextureFilter::Nearest,
                    TextureWrap wrap = TextureWrap::ClampToEdge,
-                   const void* initial_data = nullptr);
+                   const void* initial_data = nullptr,
+                   rhi::TextureUsageFlags usage = rhi::TextureUsageFlags::Default);
 
     bool create_1d(int width, TextureFormat format,
                    TextureFilter filter = TextureFilter::Nearest,
@@ -73,8 +74,11 @@ public:
     const rhi::RHITexture* rhi_texture() const { return m_texture.get(); }
 
 private:
+    void invalidate_imgui_texture_id();
+
     std::unique_ptr<rhi::RHITexture> m_texture;
     TextureFormat m_format = TextureFormat::RGBA8;
+    mutable void* m_imgui_texture_id = nullptr;
 };
 
 } // namespace engine::graphics

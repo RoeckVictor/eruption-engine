@@ -63,6 +63,9 @@ public:
     int num_chunks_x() const { return m_num_chunks_x; }
     int num_chunks_y() const { return m_num_chunks_y; }
 
+    /// Access the material table SSBO (shared with particle reintegration).
+    const graphics::ShaderStorageBuffer& material_ssbo() const { return m_material_ssbo; }
+
     /// Update material, interaction, and category tables at runtime.
     /// Call this after recompiling the MaterialLibrary or CategoryLibrary.
     /// @param material_table    Compiled material table (256 * 2 uint32s).

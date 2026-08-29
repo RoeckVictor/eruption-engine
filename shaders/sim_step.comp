@@ -57,16 +57,27 @@ layout(std430, binding = 6) readonly buffer CategoryTable {
 #define DIR_UP_RIGHT   7u
 #define DIR_NONE       15u
 
+#ifdef VULKAN
+layout(push_constant) uniform PushConstants {
+    int u_phase;
+    int u_grid_width;
+    int u_grid_height;
+    uint u_frame;
+    uint u_pixel_size;
+    int u_chunk_size_x;
+    int u_chunk_size_y;
+    int u_num_chunks_x;
+};
+#else
 uniform int u_phase;
 uniform int u_grid_width;
 uniform int u_grid_height;
 uniform uint u_frame;
 uniform uint u_pixel_size;
-
-// Chunk tracking uniforms
 uniform int u_chunk_size_x;
 uniform int u_chunk_size_y;
 uniform int u_num_chunks_x;
+#endif
 
 #define PIXEL_READ_SSBO pixels_read
 #define PIXEL_WRITE_SSBO pixels_write

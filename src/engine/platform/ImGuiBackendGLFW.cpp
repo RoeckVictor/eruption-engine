@@ -78,12 +78,49 @@ public:
         return true;
     }
 
+    void* register_texture(const rhi::RHITexture* texture) override {
+        if (!texture) return nullptr;
+        return texture->native_handle(); // GL texture handle works directly as ImTextureID
+    }
+
+    void unregister_texture(void* /*imgui_texture_id*/) override {
+        // OpenGL: nothing to clean up
+    }
+
 private:
     bool m_initialized = false;
 };
 
-std::unique_ptr<IImGuiBackend> create_imgui_backend() {
-    return std::make_unique<ImGuiBackendGLFW>();
+#ifdef ERUPTION_VULKAN_SUPPORT
+// Defined in ImGuiBackendVulkan.cpp
+std::unique_ptr<IImGuiBackend> create_imgui_backend_vulkan();
+#endif
+
+std::unique_ptr<IImGuiBackend> create_imgui_backend(rhi::Backend backend) {
+    switch (backend) {
+        case rhi::Backend::OpenGL:
+            return std::make_unique<ImGuiBackendGLFW>();
+        case rhi::Backend::Vulkan:
+#ifdef ERUPTION_VULKAN_SUPPORT
+            return create_imgui_backend_vulkan();
+#else
+            ENGINE_ERR("Vulkan support not compiled — cannot create Vulkan ImGui backend");
+            return nullptr;
+#endif
+        default:
+            ENGINE_ERR("Unsupported backend for ImGui");
+            return nullptr;
+    }
+}
+
+static IImGuiBackend* g_current_imgui_backend = nullptr;
+
+void set_current_imgui_backend(IImGuiBackend* backend) {
+    g_current_imgui_backend = backend;
+}
+
+IImGuiBackend* get_current_imgui_backend() {
+    return g_current_imgui_backend;
 }
 
 } // namespace engine::platform

@@ -1,5 +1,7 @@
 #include "engine/graphics/ShaderStorageBuffer.h"
 #include "engine/rhi/RHI.h"
+#include "engine/rhi/RHIDevice.h"
+#include "engine/rhi/RHIContext.h"
 #include "engine/core/Log.h"
 
 namespace engine::graphics {
@@ -64,7 +66,10 @@ void ShaderStorageBuffer::destroy() {
 
 void ShaderStorageBuffer::bind_base(int binding_point) const {
     if (m_buffer) {
-        m_buffer->bind(static_cast<uint32_t>(binding_point));
+        auto* ctx = rhi::get_current_context();
+        if (ctx) {
+            ctx->bind_storage_buffer(m_buffer.get(), static_cast<uint32_t>(binding_point));
+        }
     }
 }
 

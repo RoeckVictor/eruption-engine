@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/rhi/RHITypes.h"
+#include "engine/rhi/RHITexture.h"
 #include <memory>
 
 namespace engine::platform {
@@ -22,8 +24,20 @@ public:
     virtual void update_platform_windows() = 0;
 
     virtual bool supports_viewports() const = 0;
+
+    // Convert an RHI texture to an ImTextureID suitable for ImGui::Image().
+    // OpenGL: returns the GL texture handle directly.
+    // Vulkan: creates/returns a VkDescriptorSet via ImGui_ImplVulkan_AddTexture().
+    virtual void* register_texture(const rhi::RHITexture* texture) = 0;
+
+    // Release a previously registered texture (Vulkan only — frees descriptor set).
+    virtual void unregister_texture(void* imgui_texture_id) = 0;
 };
 
-std::unique_ptr<IImGuiBackend> create_imgui_backend();
+std::unique_ptr<IImGuiBackend> create_imgui_backend(rhi::Backend backend = rhi::Backend::OpenGL);
+
+// Global access to the active ImGui backend (set by the editor during init)
+void set_current_imgui_backend(IImGuiBackend* backend);
+IImGuiBackend* get_current_imgui_backend();
 
 }

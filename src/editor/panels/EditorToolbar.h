@@ -24,6 +24,7 @@ private:
     void render_grid_snap_controls();
     void render_gizmo_visibility_popup();
     void render_script_status();
+    void render_backend_info();
 
     EditorContext& m_context;
     RuntimeContext& m_runtime;

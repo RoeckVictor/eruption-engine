@@ -8,6 +8,7 @@
 #include "engine/core/Logger.h"
 #include "engine/core/Engine.h"
 #include "engine/platform/Input.h"
+#include "engine/platform/IImGuiBackend.h"
 #include "engine/render/Image.h"
 #include "engine/render/Text.h"
 #include "engine/asset/VFS.h"
@@ -77,15 +78,13 @@ void ScreenPanel::on_gui() {
     render_scene();
 
     // Display the framebuffer texture
-    ImTextureID texture_id = m_framebuffer
-        ? (ImTextureID)(uintptr_t)(m_framebuffer->color_attachment(0)->native_handle())
-        : 0;
-    ImGui::Image(
-        texture_id,
-        size,
-        ImVec2(0, 1),
-        ImVec2(1, 0)
-    );
+    ImTextureID texture_id = m_imgui_texture_id ? (ImTextureID)m_imgui_texture_id : 0;
+    // UV coordinates depend on texture origin convention
+    auto* device = engine::rhi::get_current_device();
+    bool flip_y = device && !device->uv_origin_top_left();
+    ImVec2 uv0 = flip_y ? ImVec2(0, 1) : ImVec2(0, 0);
+    ImVec2 uv1 = flip_y ? ImVec2(1, 0) : ImVec2(1, 1);
+    ImGui::Image(texture_id, size, uv0, uv1);
 
     // Get canvas rect
     ImVec2 canvas_pos = ImGui::GetItemRectMin();
@@ -266,10 +265,21 @@ void ScreenPanel::create_framebuffer(int width, int height) {
     if (!m_framebuffer) {
         engine::Logger::instance().error("ScreenPanel", "Failed to create framebuffer");
         m_resize_debouncer.set_failed();
+        return;
+    }
+
+    auto* imgui_backend = engine::platform::get_current_imgui_backend();
+    if (imgui_backend && m_framebuffer->color_attachment(0)) {
+        m_imgui_texture_id = imgui_backend->register_texture(m_framebuffer->color_attachment(0));
     }
 }
 
 void ScreenPanel::destroy_framebuffer() {
+    if (m_imgui_texture_id) {
+        auto* imgui_backend = engine::platform::get_current_imgui_backend();
+        if (imgui_backend) imgui_backend->unregister_texture(m_imgui_texture_id);
+        m_imgui_texture_id = nullptr;
+    }
     m_framebuffer.reset();
     m_canvas_width = 0;
     m_canvas_height = 0;

@@ -52,6 +52,35 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(glfw entt nlohmann_json box2d imgui)
 
+# --- Vulkan backend (optional) ---
+find_package(Vulkan QUIET)
+
+if(Vulkan_FOUND)
+    message(STATUS "Vulkan SDK found: ${Vulkan_INCLUDE_DIRS}")
+
+    # VMA - Vulkan Memory Allocator (header-only, vendor-agnostic)
+    FetchContent_Declare(
+        vma
+        GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+        GIT_TAG v3.2.1
+        GIT_SHALLOW TRUE
+    )
+    set(VMA_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
+    set(VMA_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+
+    # vk-bootstrap - Instance/device/swapchain creation helper
+    FetchContent_Declare(
+        vk_bootstrap
+        GIT_REPOSITORY https://github.com/charles-lunarg/vk-bootstrap.git
+        GIT_TAG v1.3.296
+        GIT_SHALLOW TRUE
+    )
+
+    FetchContent_MakeAvailable(vma vk_bootstrap)
+else()
+    message(STATUS "Vulkan SDK not found -- Vulkan backend will be disabled")
+endif()
+
 # glad - pre-generated OpenGL 4.5 core loader (in external/glad/)
 add_library(glad STATIC
     "${PROJECT_SOURCE_DIR}/external/glad/src/gl.c"

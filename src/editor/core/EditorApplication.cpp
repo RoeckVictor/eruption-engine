@@ -294,17 +294,25 @@ void EditorApplication::init_imgui(engine::Engine& engine) {
         }
     }
 
-    m_imgui_backend = engine::platform::create_imgui_backend();
+    auto backend = engine.rhi_device() ? engine.rhi_device()->backend() : engine::rhi::Backend::OpenGL;
+    m_imgui_backend = engine::platform::create_imgui_backend(backend);
     if (!m_imgui_backend || !m_imgui_backend->init(engine.window())) {
         engine::Logger::instance().error("Editor", "Failed to initialize ImGui backend");
         return;
     }
 
+    // Disable viewports if the backend doesn't support them (e.g., Vulkan)
+    if (!m_imgui_backend->supports_viewports()) {
+        io.ConfigFlags &= ~ImGuiConfigFlags_ViewportsEnable;
+    }
+
+    engine::platform::set_current_imgui_backend(m_imgui_backend.get());
     m_imgui_initialized = true;
 }
 
 void EditorApplication::shutdown_imgui() {
     if (m_imgui_initialized) {
+        engine::platform::set_current_imgui_backend(nullptr);
         if (m_imgui_backend) {
             m_imgui_backend->shutdown();
             m_imgui_backend.reset();

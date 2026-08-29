@@ -32,14 +32,26 @@ bool Engine::init(const char* title, int width, int height, const char* config_f
         return false;
     }
 
-    if (!m_window.init(title, width, height, platform::GraphicsAPI::OpenGL)) {
+    // Select graphics API for window based on configured backend
+    platform::GraphicsAPI window_api = platform::GraphicsAPI::OpenGL;
+    if (m_config.graphics_backend == rhi::Backend::Vulkan) {
+        window_api = platform::GraphicsAPI::Vulkan;
+    } else if (m_config.graphics_backend != rhi::Backend::OpenGL) {
+        ENGINE_ERR("Unsupported graphics backend, falling back to OpenGL");
+        m_config.graphics_backend = rhi::Backend::OpenGL;
+    }
+
+    if (!m_window.init(title, width, height, window_api)) {
         ENGINE_ERR("Failed to initialize window");
         platform::Window::shutdown_platform();
         return false;
     }
 
-    // Initialize RHI device (GLAD is loaded inside create_rhi_device)
-    m_rhi_device = rhi::create_rhi_device(rhi::Backend::OpenGL, platform::Window::get_gl_proc_address);
+    // Initialize RHI device
+    rhi::RHIDeviceCreateInfo device_info;
+    device_info.gl_proc_address = platform::Window::get_gl_proc_address;
+    device_info.window_handle = m_window.glfw_handle();
+    m_rhi_device = rhi::create_rhi_device(m_config.graphics_backend, device_info);
     if (!m_rhi_device) {
         ENGINE_ERR("Failed to initialize RHI device");
         m_window.shutdown();
@@ -143,6 +155,16 @@ void Engine::run(Application& app) {
             m_assets.poll_hot_reload();
         }
 
+        // Begin the GPU frame early so compute dispatches during Update/FixedUpdate
+        // can record into the command buffer. In Vulkan, all GPU commands must be
+        // recorded between begin_frame() and end_frame().
+        auto* ctx = m_rhi_device->context();
+        if (m_gpu_profiler) m_gpu_profiler->begin_frame();
+        {
+            PROFILE_SCOPE("RHI::begin_frame");
+            ctx->begin_frame();
+        }
+
         // Process deferred scene operations (push/pop/replace)
         m_scenes.process_pending(*this);
 
@@ -165,15 +187,11 @@ void Engine::run(Application& app) {
             }
         }
 
-        // Render: clear, render scene, then application hook
+        // Render: set up viewport, clear, render scene, then application hook
         {
             PROFILE_SCOPE("Render");
-            if (m_gpu_profiler) m_gpu_profiler->begin_frame();
-
-            auto* ctx = m_rhi_device->context();
             {
-                PROFILE_SCOPE("RHI::begin_frame");
-                ctx->begin_frame();
+                PROFILE_SCOPE("RHI::setup");
                 ctx->set_viewport(0, 0, m_window.width(), m_window.height());
                 ctx->clear(m_clear_r, m_clear_g, m_clear_b);
             }

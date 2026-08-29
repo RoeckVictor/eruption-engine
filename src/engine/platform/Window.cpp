@@ -1,8 +1,24 @@
 #include "engine/platform/Window.h"
 #include "engine/core/Log.h"
+#include <cstring>
 
-#define GLFW_INCLUDE_NONE
+// Include GLFW with Vulkan support for glfwCreateWindowSurface / glfwGetRequiredInstanceExtensions.
+// vulkan.h provides the VkInstance/VkSurfaceKHR typedefs that GLFW needs.
+// On systems without the Vulkan SDK, GLFW still compiles — the functions
+// simply return errors at runtime if Vulkan is unavailable.
+#if __has_include(<vulkan/vulkan.h>)
+    #define GLFW_INCLUDE_VULKAN
+#else
+    #define GLFW_INCLUDE_NONE
+#endif
 #include <GLFW/glfw3.h>
+
+// If Vulkan headers weren't available, stub out the surface creation types
+// so the rest of the file compiles. The runtime paths will return nullptr.
+#ifndef GLFW_INCLUDE_VULKAN
+    typedef void* VkInstance;
+    typedef uint64_t VkSurfaceKHR;
+#endif
 
 namespace engine::platform {
 
@@ -180,6 +196,7 @@ void Window::shutdown_platform() {
 bool Window::init(const char* title, int width, int height, GraphicsAPI api) {
     m_width = width;
     m_height = height;
+    m_api = api;
 
     // Set GLFW hints based on graphics API
     switch (api) {
@@ -235,7 +252,10 @@ void Window::set_should_close(bool close) {
 }
 
 void Window::swap_buffers() {
-    glfwSwapBuffers(native(m_handle));
+    if (m_api == GraphicsAPI::OpenGL) {
+        glfwSwapBuffers(native(m_handle));
+    }
+    // Vulkan: presentation is handled by RHIContext::end_frame()
 }
 
 void Window::poll_events() {
@@ -278,6 +298,46 @@ void Window::get_position(int& x, int& y) const {
 
 void* Window::get_gl_proc_address(const char* name) {
     return reinterpret_cast<void*>(glfwGetProcAddress(name));
+}
+
+std::vector<const char*> Window::get_required_vulkan_extensions() {
+#ifdef GLFW_INCLUDE_VULKAN
+    uint32_t count = 0;
+    const char** extensions = glfwGetRequiredInstanceExtensions(&count);
+    if (!extensions) {
+        return {};
+    }
+    return { extensions, extensions + count };
+#else
+    return {};
+#endif
+}
+
+void* Window::create_vulkan_surface(void* vk_instance) {
+#ifdef GLFW_INCLUDE_VULKAN
+    if (!m_handle || !vk_instance) {
+        return nullptr;
+    }
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    VkResult result = glfwCreateWindowSurface(
+        static_cast<VkInstance>(vk_instance),
+        native(m_handle),
+        nullptr,
+        &surface);
+    if (result != VK_SUCCESS) {
+        ENGINE_ERR("Failed to create Vulkan surface (VkResult %d)", static_cast<int>(result));
+        return nullptr;
+    }
+    // Return as void* — the Vulkan backend casts back to VkSurfaceKHR.
+    // VkSurfaceKHR is a non-dispatchable handle (uint64_t on 64-bit).
+    void* out = nullptr;
+    static_assert(sizeof(surface) <= sizeof(out), "VkSurfaceKHR must fit in void*");
+    memcpy(&out, &surface, sizeof(surface));
+    return out;
+#else
+    ENGINE_ERR("Vulkan headers not available — cannot create surface");
+    return nullptr;
+#endif
 }
 
 }

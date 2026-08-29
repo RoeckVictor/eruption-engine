@@ -4,12 +4,20 @@ layout(location = 0) in vec2 a_pos;
 layout(location = 1) in vec2 a_uv;
 layout(location = 2) in vec4 a_color;
 
+#ifdef VULKAN
+layout(push_constant) uniform PushConstants {
+    vec2 u_camera_pos;
+    vec2 u_screen_size;
+    float u_zoom;
+};
+#else
 uniform vec2 u_camera_pos;
 uniform vec2 u_screen_size;
 uniform float u_zoom;
+#endif
 
-out vec2 v_uv;
-out vec4 v_color;
+layout(location = 0) out vec2 v_uv;
+layout(location = 1) out vec4 v_color;
 
 void main() {
     // World position to NDC: camera-centered, zoom-scaled

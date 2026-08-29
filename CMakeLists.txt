@@ -70,6 +70,18 @@ target_link_libraries(eruption_engine
         imgui          # ImGuiBackendGLFW.cpp
 )
 
+# Vulkan backend (optional — requires Vulkan SDK)
+if(Vulkan_FOUND)
+    target_compile_definitions(eruption_engine PUBLIC ERUPTION_VULKAN_SUPPORT=1)
+    target_link_libraries(eruption_engine PRIVATE
+        Vulkan::Vulkan
+        vk-bootstrap::vk-bootstrap
+    )
+    target_include_directories(eruption_engine PRIVATE
+        "${vma_SOURCE_DIR}/include"
+    )
+endif()
+
 # =============================================================================
 # Shared Runtime Library
 # =============================================================================
@@ -119,6 +131,11 @@ target_include_directories(imgui PUBLIC
 )
 target_link_libraries(imgui PUBLIC glfw glad)
 
+if(Vulkan_FOUND)
+    target_sources(imgui PRIVATE "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp")
+    target_link_libraries(imgui PUBLIC Vulkan::Vulkan)
+endif()
+
 # =============================================================================
 # Editor Executable
 # =============================================================================
@@ -138,6 +155,52 @@ target_link_libraries(eruption_editor PRIVATE
 )
 
 configure_platform_target(eruption_editor)
+
+# =============================================================================
+# SPIR-V Shader Compilation (Vulkan only)
+# =============================================================================
+# Compiles GLSL shaders to SPIR-V bytecode (.spv) using glslc from the Vulkan SDK.
+# The .spv files are placed alongside the GLSL sources in the output directory.
+# OpenGL continues to use the raw GLSL files directly.
+if(Vulkan_FOUND)
+    # Find glslc compiler (need actual path, not imported target, for execute_process)
+    find_program(GLSLC_EXECUTABLE glslc HINTS "$ENV{VULKAN_SDK}/Bin")
+
+    if(GLSLC_EXECUTABLE)
+        # Compile SPIR-V shaders in-place (alongside GLSL source files).
+        # The copy_runtime_assets step then copies both GLSL and .spv to the output dir.
+        set(ERUPTION_SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
+        file(GLOB_RECURSE ERUPTION_SHADER_SOURCES CONFIGURE_DEPENDS
+            "${ERUPTION_SHADER_DIR}/*.vert"
+            "${ERUPTION_SHADER_DIR}/*.frag"
+            "${ERUPTION_SHADER_DIR}/*.comp"
+        )
+        file(GLOB ERUPTION_SHADER_INCLUDES CONFIGURE_DEPENDS
+            "${ERUPTION_SHADER_DIR}/include/*.glsl"
+        )
+
+        set(ERUPTION_SPV_OUTPUTS "")
+        foreach(SHADER ${ERUPTION_SHADER_SOURCES})
+            file(RELATIVE_PATH REL_PATH "${ERUPTION_SHADER_DIR}" "${SHADER}")
+            set(SPV_OUTPUT "${ERUPTION_SHADER_DIR}/${REL_PATH}.spv")
+
+            add_custom_command(
+                OUTPUT "${SPV_OUTPUT}"
+                COMMAND "${GLSLC_EXECUTABLE}" "${SHADER}" -o "${SPV_OUTPUT}"
+                    --target-env=vulkan1.2
+                    -I "${ERUPTION_SHADER_DIR}/include"
+                DEPENDS "${SHADER}" ${ERUPTION_SHADER_INCLUDES}
+                COMMENT "Compiling SPIR-V: ${REL_PATH}"
+                VERBATIM
+            )
+            list(APPEND ERUPTION_SPV_OUTPUTS "${SPV_OUTPUT}")
+        endforeach()
+
+        add_custom_target(compile_shaders ALL DEPENDS ${ERUPTION_SPV_OUTPUTS})
+    else()
+        message(WARNING "glslc not found -- SPIR-V shaders will not be compiled (Vulkan rendering unavailable)")
+    endif()
+endif()
 
 # =============================================================================
 # Asset Copy Helper
@@ -179,6 +242,12 @@ configure_platform_target(eruption_game)
 
 # Copy assets for game runtime
 copy_runtime_assets(copy_game_assets eruption_game)
+
+# Ensure SPIR-V shaders are compiled before assets are copied
+if(Vulkan_FOUND AND TARGET compile_shaders)
+    add_dependencies(copy_editor_assets compile_shaders)
+    add_dependencies(copy_game_assets compile_shaders)
+endif()
 
 # =============================================================================
 # Bundle CMake with Editor (Windows only)

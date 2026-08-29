@@ -76,7 +76,8 @@ void ParticleSimulation::update(ParticleBuffer& buffer,
 
 void ParticleSimulation::reintegrate(ParticleBuffer& buffer,
                                       simulation::PixelGrid& grid,
-                                      graphics::RenderContext& ctx) {
+                                      graphics::RenderContext& ctx,
+                                      const graphics::ShaderStorageBuffer* material_table) {
     int max_p = buffer.max_particles();
     if (max_p == 0) return;
     PROFILE_SCOPE("ParticleSimulation::reintegrate");
@@ -90,6 +91,11 @@ void ParticleSimulation::reintegrate(ParticleBuffer& buffer,
     // Bind both grid SSBOs as read-write (write to both for ping-pong sync)
     grid.ssbo(0).bind_base(0);
     grid.ssbo(1).bind_base(1);
+
+    // Bind material table at binding 2 (for category lookup during reintegration)
+    if (material_table) {
+        material_table->bind_base(2);
+    }
 
     // Bind particle SSBOs
     buffer.bind_particles();

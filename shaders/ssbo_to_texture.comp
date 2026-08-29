@@ -8,11 +8,21 @@ layout(std430, binding = 0) readonly buffer PixelBuffer {
 };
 
 // Render texture (write)
-layout(rgba8ui, binding = 0) writeonly uniform uimage2D u_render_texture;
+// Binding 7 avoids conflict with SSBO at binding 0 (Vulkan requires unique bindings
+// per descriptor set; OpenGL uses separate namespaces so any number works).
+layout(rgba8ui, binding = 7) writeonly uniform uimage2D u_render_texture;
 
+#ifdef VULKAN
+layout(push_constant) uniform PushConstants {
+    int u_grid_width;
+    int u_grid_height;
+    uint u_pixel_size;
+};
+#else
 uniform int u_grid_width;
 uniform int u_grid_height;
 uniform uint u_pixel_size;
+#endif
 
 #include "include/pixel_access.glsl"
 

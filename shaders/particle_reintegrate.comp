@@ -27,10 +27,19 @@ layout(std430, binding = 1) buffer PixelBufferB {
     uint pixels_b[];
 };
 
+#ifdef VULKAN
+layout(push_constant) uniform PushConstants {
+    int u_grid_width;
+    int u_grid_height;
+    uint u_max_particles;
+    uint u_pixel_size;
+};
+#else
 uniform int  u_grid_width;
 uniform int  u_grid_height;
 uniform uint u_max_particles;
-uniform uint u_pixel_size;  // bytes per pixel
+uniform uint u_pixel_size;
+#endif
 
 #define PIXEL_READ_SSBO pixels_a
 #include "include/pixel_access.glsl"

@@ -92,7 +92,12 @@ protected:
 
 using ProcAddressFunc = void* (*)(const char*);
 
-std::unique_ptr<RHIDevice> create_rhi_device(Backend backend, ProcAddressFunc proc_address = nullptr);
+struct RHIDeviceCreateInfo {
+    ProcAddressFunc gl_proc_address = nullptr;  // OpenGL: GLAD loader function
+    void* window_handle = nullptr;              // Vulkan/D3D12: native window handle for surface creation
+};
+
+std::unique_ptr<RHIDevice> create_rhi_device(Backend backend, const RHIDeviceCreateInfo& info = {});
 
 void set_current_device(RHIDevice* device);
 RHIDevice* get_current_device();

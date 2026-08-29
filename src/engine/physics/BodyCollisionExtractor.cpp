@@ -116,6 +116,10 @@ void BodyCollisionExtractor::spawn_particles(const StamperT& stamper,
 
     m_last_count = static_cast<int>(count);
 
+    if (count > 0) {
+        ENGINE_LOG("BodyCollisionExtractor: extracted %u pixels (capacity=%u)", count, capacity);
+    }
+
     if (count == 0) return;
 
     // Process each extracted pixel (3 uints per entry: pos, material, color)

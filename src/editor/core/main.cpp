@@ -23,7 +23,7 @@ int main(int argc, char* argv[]) {
     }
 
     engine::Engine engine;
-    if (!engine.init("Eruption Editor", 1600, 900)) {
+    if (!engine.init("Eruption Editor", 1600, 900, "engine_config.json")) {
         fprintf(stderr, "Failed to initialize engine\n");
         return 1;
     }

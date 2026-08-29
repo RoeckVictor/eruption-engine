@@ -46,6 +46,7 @@ private:
     FramebufferResizeDebouncer m_resize_debouncer;
 
     std::unique_ptr<engine::rhi::RHIFramebuffer> m_framebuffer;
+    void* m_imgui_texture_id = nullptr;
     int m_framebuffer_width = 0;
     int m_framebuffer_height = 0;
 

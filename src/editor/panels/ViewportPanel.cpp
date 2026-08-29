@@ -13,6 +13,7 @@
 #include "engine/core/ScreenRect.h"
 #include "engine/core/Logger.h"
 #include "engine/core/Engine.h"
+#include "engine/platform/IImGuiBackend.h"
 #include "engine/simulation/PixelGridComponent.h"
 #include "engine/simulation/MaterialLibrary.h"
 #include "engine/render/PixelGridRenderer.h"
@@ -82,9 +83,7 @@ void ViewportPanel::on_gui() {
     render_scene();
 
     // Display the framebuffer texture
-    ImTextureID texture_id = m_framebuffer
-        ? (ImTextureID)(uintptr_t)(m_framebuffer->color_attachment(0)->native_handle())
-        : 0;
+    ImTextureID texture_id = m_imgui_texture_id ? (ImTextureID)m_imgui_texture_id : 0;
 
     // UV coordinates depend on texture origin convention
     auto* device = engine::rhi::get_current_device();
@@ -183,10 +182,24 @@ void ViewportPanel::create_framebuffer(int width, int height) {
         engine::Logger::instance().error("Viewport", "Failed to create framebuffer");
         m_framebuffer.reset();
         m_resize_debouncer.set_failed();
+        return;
+    }
+
+    // Register the color attachment as an ImGui texture
+    auto* imgui_backend = engine::platform::get_current_imgui_backend();
+    if (imgui_backend && m_framebuffer->color_attachment(0)) {
+        m_imgui_texture_id = imgui_backend->register_texture(m_framebuffer->color_attachment(0));
     }
 }
 
 void ViewportPanel::destroy_framebuffer() {
+    if (m_imgui_texture_id) {
+        auto* imgui_backend = engine::platform::get_current_imgui_backend();
+        if (imgui_backend) {
+            imgui_backend->unregister_texture(m_imgui_texture_id);
+        }
+        m_imgui_texture_id = nullptr;
+    }
     m_framebuffer.reset();
     m_viewport_width = 0;
     m_viewport_height = 0;

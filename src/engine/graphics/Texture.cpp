@@ -1,5 +1,8 @@
 #include "engine/graphics/Texture.h"
 #include "engine/rhi/RHI.h"
+#include "engine/rhi/RHIDevice.h"
+#include "engine/rhi/RHIContext.h"
+#include "engine/platform/IImGuiBackend.h"
 #include "engine/core/Log.h"
 
 namespace engine::graphics {
@@ -52,20 +55,26 @@ Texture::~Texture() {
 Texture::Texture(Texture&& other) noexcept
     : m_texture(std::move(other.m_texture))
     , m_format(other.m_format)
+    , m_imgui_texture_id(other.m_imgui_texture_id)
 {
+    other.m_imgui_texture_id = nullptr;
 }
 
 Texture& Texture::operator=(Texture&& other) noexcept {
     if (this != &other) {
+        invalidate_imgui_texture_id();
         m_texture = std::move(other.m_texture);
         m_format = other.m_format;
+        m_imgui_texture_id = other.m_imgui_texture_id;
+        other.m_imgui_texture_id = nullptr;
     }
     return *this;
 }
 
 bool Texture::create_2d(int width, int height, TextureFormat format,
                         TextureFilter filter, TextureWrap wrap,
-                        const void* initial_data)
+                        const void* initial_data,
+                        rhi::TextureUsageFlags usage)
 {
     if (width <= 0 || height <= 0) {
         ENGINE_ERR("Invalid texture dimensions: %dx%d", width, height);
@@ -91,6 +100,7 @@ bool Texture::create_2d(int width, int height, TextureFormat format,
     desc.wrap_u = to_rhi_wrap(wrap);
     desc.wrap_v = to_rhi_wrap(wrap);
     desc.initial_data = initial_data;
+    desc.usage = usage;
 
     m_texture = device->create_texture(desc);
     if (!m_texture || !m_texture->valid()) {
@@ -141,6 +151,7 @@ bool Texture::create_1d(int width, TextureFormat format,
 }
 
 void Texture::destroy() {
+    invalidate_imgui_texture_id();
     m_texture.reset();
 }
 
@@ -164,13 +175,36 @@ void Texture::bind(int unit) const {
 
 void Texture::bind_as_image(int unit, ImageAccess access) const {
     if (m_texture) {
-        m_texture->bind_as_image(static_cast<uint32_t>(unit), to_rhi_access(access));
+        auto* ctx = rhi::get_current_context();
+        if (ctx) {
+            ctx->bind_image(m_texture.get(), static_cast<uint32_t>(unit), to_rhi_access(access));
+        }
+        // Note: we do NOT invalidate the cached ImGui descriptor set here.
+        // The descriptor was registered with layout SHADER_READ_ONLY_OPTIMAL,
+        // which is the layout the image will be in when ImGui actually renders
+        // (after the compute barrier transitions it back). The descriptor set
+        // remains valid — only the runtime layout changes temporarily.
     }
 }
 
 void* Texture::imgui_texture_id() const {
     if (!m_texture) return nullptr;
+    if (m_imgui_texture_id) return m_imgui_texture_id;
+
+    auto* backend = platform::get_current_imgui_backend();
+    if (backend) {
+        m_imgui_texture_id = backend->register_texture(m_texture.get());
+        return m_imgui_texture_id;
+    }
     return m_texture->native_handle();
+}
+
+void Texture::invalidate_imgui_texture_id() {
+    if (m_imgui_texture_id) {
+        auto* backend = platform::get_current_imgui_backend();
+        if (backend) backend->unregister_texture(m_imgui_texture_id);
+        m_imgui_texture_id = nullptr;
+    }
 }
 
 uint32_t Texture::handle() const {

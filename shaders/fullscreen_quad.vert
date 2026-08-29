@@ -1,6 +1,10 @@
 #version 450 core
 
-out vec2 v_uv;
+#ifdef VULKAN
+#define gl_VertexID gl_VertexIndex
+#endif
+
+layout(location = 0) out vec2 v_uv;
 
 void main() {
     v_uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);

@@ -40,7 +40,8 @@ bool MargolusSimulation::init(const std::vector<uint32_t>& material_table,
     m_material_ssbo.create(material_table.size() * sizeof(uint32_t), material_table.data(),
                            graphics::BufferUsage::StaticDraw);
 
-    // Upload interaction table if present
+    // Upload interaction table (always create SSBO — Vulkan requires all declared
+    // bindings to be written, even if the shader never reads from it)
     if (!interaction_table.empty()) {
         m_interaction_ssbo.create(interaction_table.size() * sizeof(uint32_t),
                                   interaction_table.data(),
@@ -49,6 +50,9 @@ bool MargolusSimulation::init(const std::vector<uint32_t>& material_table,
         ENGINE_LOG("MargolusSimulation: Loaded %zu interaction entries",
                    interaction_table.size() / 6);  // 6 uint32s per interaction
     } else {
+        // Create a minimal dummy SSBO so the descriptor binding is valid
+        uint32_t dummy = 0;
+        m_interaction_ssbo.create(sizeof(uint32_t), &dummy, graphics::BufferUsage::StaticDraw);
         m_has_interactions = false;
     }
 
@@ -114,9 +118,7 @@ void MargolusSimulation::shutdown() {
     m_dirty_chunks_ssbo.destroy();
     m_palette_ssbo.destroy();
     m_category_ssbo.destroy();
-    if (m_has_interactions) {
-        m_interaction_ssbo.destroy();
-    }
+    m_interaction_ssbo.destroy();
     m_sim_shader.destroy();
     m_has_interactions = false;
 }
@@ -126,11 +128,7 @@ void MargolusSimulation::simulate(PixelGrid& grid, graphics::RenderContext& ctx)
     m_sim_shader.use();
     m_material_ssbo.bind_base(2);
     m_dirty_chunks_ssbo.bind_base(3);  // Dirty chunk flags for terrain collider optimization
-
-    // Bind interaction table if present (binding 4)
-    if (m_has_interactions) {
-        m_interaction_ssbo.bind_base(4);
-    }
+    m_interaction_ssbo.bind_base(4);   // Always bound (dummy SSBO if no interactions)
 
     // Bind color palette (binding 5) - needed for Blend color behavior
     m_palette_ssbo.bind_base(5);

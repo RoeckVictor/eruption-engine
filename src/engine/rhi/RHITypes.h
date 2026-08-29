@@ -96,6 +96,28 @@ enum class IndexType {
     UInt32,
 };
 
+enum class TextureUsageFlags : uint32_t {
+    None           = 0,
+    Sampled        = 1 << 0,  // Can be sampled in shaders
+    Storage        = 1 << 1,  // Can be used as a storage image
+    ColorAttachment= 1 << 2,  // Can be used as a color attachment
+    TransferSrc    = 1 << 3,  // Can be used as a transfer source
+    TransferDst    = 1 << 4,  // Can be used as a transfer destination
+    // Convenience: default covers the most common case
+    Default        = Sampled | TransferDst,
+};
+
+inline TextureUsageFlags operator|(TextureUsageFlags a, TextureUsageFlags b) {
+    return static_cast<TextureUsageFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+inline TextureUsageFlags operator&(TextureUsageFlags a, TextureUsageFlags b) {
+    return static_cast<TextureUsageFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+}
+inline bool has_usage(TextureUsageFlags flags, TextureUsageFlags flag) {
+    uint32_t f = static_cast<uint32_t>(flag);
+    return (static_cast<uint32_t>(flags) & f) == f;
+}
+
 struct TextureDesc {
     int width = 1;
     int height = 1;
@@ -109,6 +131,7 @@ struct TextureDesc {
     TextureWrap wrap_w = TextureWrap::Clamp;
     bool generate_mipmaps = false;
     const void* initial_data = nullptr;
+    TextureUsageFlags usage = TextureUsageFlags::Default;
 };
 
 enum class ShaderStage {
@@ -125,6 +148,8 @@ struct ShaderStageDesc {
     const char* source_path = nullptr;
     const char* source_code = nullptr;
     const char* entry_point = "main";
+    const uint32_t* spirv_code = nullptr;  // Precompiled SPIR-V bytecode (Vulkan)
+    size_t spirv_size = 0;                 // Size of SPIR-V bytecode in bytes
 };
 
 struct ShaderDesc {
@@ -251,6 +276,10 @@ struct PipelineDesc {
     BlendState blend;
     DepthStencilState depth_stencil;
     RasterizerState rasterizer;
+
+    // Vulkan-specific: render pass to create pipeline against.
+    // If null, the swapchain render pass is used as default.
+    void* render_pass_handle = nullptr;
 };
 
 struct FramebufferAttachment {
@@ -289,7 +318,8 @@ inline BarrierFlags operator&(BarrierFlags a, BarrierFlags b) {
 }
 
 inline bool has_flag(BarrierFlags flags, BarrierFlags flag) {
-    return (static_cast<uint32_t>(flags) & static_cast<uint32_t>(flag)) != 0;
+    uint32_t f = static_cast<uint32_t>(flag);
+    return (static_cast<uint32_t>(flags) & f) == f;
 }
 
 inline uint32_t vertex_format_size(VertexFormat format) {

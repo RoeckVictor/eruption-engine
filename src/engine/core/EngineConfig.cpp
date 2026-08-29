@@ -68,6 +68,18 @@ Result<EngineConfig, ErrorInfo> EngineConfig::load_from_json(const std::string& 
         if (graphics.contains("clear_color_r")) config.clear_color_r = graphics["clear_color_r"].get<float>();
         if (graphics.contains("clear_color_g")) config.clear_color_g = graphics["clear_color_g"].get<float>();
         if (graphics.contains("clear_color_b")) config.clear_color_b = graphics["clear_color_b"].get<float>();
+        if (graphics.contains("backend")) {
+            std::string backend_str = graphics["backend"].get<std::string>();
+            if (backend_str == "vulkan") {
+                config.graphics_backend = rhi::Backend::Vulkan;
+            } else if (backend_str == "d3d12") {
+                config.graphics_backend = rhi::Backend::D3D12;
+            } else if (backend_str == "metal") {
+                config.graphics_backend = rhi::Backend::Metal;
+            } else {
+                config.graphics_backend = rhi::Backend::OpenGL;
+            }
+        }
     }
 
     // Audio section

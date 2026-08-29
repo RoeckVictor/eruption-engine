@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/graphics/Shader.h"
+#include "engine/graphics/ShaderStorageBuffer.h"
 
 namespace engine::graphics { class RenderContext; }
 namespace engine::simulation { class PixelGrid; }
@@ -24,8 +25,10 @@ public:
                 graphics::RenderContext& ctx, float dt);
 
     /// Run the particle re-integration compute shader (settled → grid).
+    /// @param material_table Optional material table SSBO for category lookup (binding 2).
     void reintegrate(ParticleBuffer& buffer, simulation::PixelGrid& grid,
-                     graphics::RenderContext& ctx);
+                     graphics::RenderContext& ctx,
+                     const graphics::ShaderStorageBuffer* material_table = nullptr);
 
     void set_gravity(float gx, float gy) { m_gravity_x = gx; m_gravity_y = gy; }
 

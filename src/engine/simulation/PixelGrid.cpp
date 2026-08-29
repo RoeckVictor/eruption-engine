@@ -36,7 +36,14 @@ bool PixelGrid::init(int width, int height, size_t pixel_size) {
     }
 
     // Create render texture (RGBA8UI for compatibility with existing render shader)
-    if (!m_render_texture.create_2d(width, height, graphics::TextureFormat::RGBA8UI)) {
+    // Must include Storage flag — compute shader writes to this as a storage image.
+    rhi::TextureUsageFlags usage = rhi::TextureUsageFlags::Sampled
+                                 | rhi::TextureUsageFlags::Storage
+                                 | rhi::TextureUsageFlags::TransferDst;
+    if (!m_render_texture.create_2d(width, height, graphics::TextureFormat::RGBA8UI,
+                                     graphics::TextureFilter::Nearest,
+                                     graphics::TextureWrap::ClampToEdge,
+                                     nullptr, usage)) {
         ENGINE_ERR("Failed to create pixel grid render texture");
         return false;
     }
@@ -87,8 +94,8 @@ void PixelGrid::update_render_texture() {
     // Bind the read SSBO
     m_pixel_ssbos[m_read_idx].bind_base(0);
 
-    // Bind render texture as image for writing
-    m_render_texture.bind_as_image(0, graphics::ImageAccess::WriteOnly);
+    // Bind render texture as image for writing (binding 7 matches shader layout)
+    m_render_texture.bind_as_image(7, graphics::ImageAccess::WriteOnly);
 
     // Dispatch compute shader
     int groups_x = (m_width + COPY_WORKGROUP_SIZE - 1) / COPY_WORKGROUP_SIZE;
